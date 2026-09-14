@@ -26,6 +26,7 @@ class BoramiTableNamesTest {
                         new VoiceProperties.Schema(imsc, rerd, smsm, xvarm),
                         new VoiceProperties.Flag("Y", "Y", "N", "Y")),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.MOCK, "", 100, 10),
+                new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 new VoiceProperties.Sync("m", "p", "w", 10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),
                 new VoiceProperties.Stt(VoiceProperties.SttMode.MOCK, "", 30),

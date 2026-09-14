@@ -2,6 +2,7 @@ package egovframework.voice.collector.config;
 
 import egovframework.voice.collector.config.VoiceProperties.BrokerMode;
 import egovframework.voice.collector.config.VoiceProperties.DecryptMode;
+import egovframework.voice.collector.config.VoiceProperties.PhoneMode;
 import egovframework.voice.collector.config.VoiceProperties.SourceMode;
 import egovframework.voice.collector.config.VoiceProperties.SttMode;
 import jakarta.annotation.PostConstruct;
@@ -13,7 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 4개 스위치의 <b>런타임 상태</b>. 서버를 재시작하지 않고 MOCK ↔ REAL 을 바꾼다.
+ * 처리 구간 스위치의 <b>런타임 상태</b>. 서버를 재시작하지 않고 MOCK ↔ REAL 을 바꾼다.
  *
  * <p><b>왜 설정(@ConditionalOnProperty)으로 두지 않았나</b>: 조건부 빈은 기동 시점에 한 번
  * 결정되고 끝난다. 그런데 이 과제는 외부 의존 네 가지가 서로 다른 시점에 열리고,
@@ -35,6 +36,11 @@ public class VoiceModeState {
 
     private volatile SourceMode source;
     private volatile BrokerMode broker;
+    /**
+     * 전화 파일 연계 — 접견의 브로커 스위치와 <b>별개</b>다.
+     * 전화는 XVARM 을 타지 않고 ESB 전화 전용 프로바이더를 쓴다.
+     */
+    private volatile PhoneMode phone;
     private volatile DecryptMode decrypt;
     private volatile SttMode stt;
 
@@ -42,9 +48,11 @@ public class VoiceModeState {
     void init() {
         this.source = props.source().mode();
         this.broker = props.broker().mode();
+        this.phone = props.phone().mode();
         this.decrypt = props.decrypt().mode();
         this.stt = props.stt().mode();
-        log.info("[Mode] 초기 모드 — source={} broker={} decrypt={} stt={}", source, broker, decrypt, stt);
+        log.info("[Mode] 초기 모드 — 접견트랙(source={} broker={}) · 전화트랙(source={} phone={}) · 공통(decrypt={} stt={})",
+                source, broker, source, phone, decrypt, stt);
     }
 
     public SourceMode source() {
@@ -53,6 +61,11 @@ public class VoiceModeState {
 
     public BrokerMode broker() {
         return broker;
+    }
+
+    /** 전화 파일 연계 모드. 브로커와 별개다. */
+    public PhoneMode phone() {
+        return phone;
     }
 
     public DecryptMode decrypt() {
@@ -68,6 +81,7 @@ public class VoiceModeState {
         Map<String, String> m = new LinkedHashMap<>();
         m.put("source", source.name());
         m.put("broker", broker.name());
+        m.put("phone", phone.name());
         m.put("decrypt", decrypt.name());
         m.put("stt", stt.name());
         return m;
@@ -78,6 +92,7 @@ public class VoiceModeState {
         Map<String, String> m = new LinkedHashMap<>();
         m.put("source", props.source().mode().name());
         m.put("broker", props.broker().mode().name());
+        m.put("phone", props.phone().mode().name());
         m.put("decrypt", props.decrypt().mode().name());
         m.put("stt", props.stt().mode().name());
         return m;
@@ -86,7 +101,7 @@ public class VoiceModeState {
     /**
      * 스위치 하나를 바꾼다.
      *
-     * @param name  source / broker / decrypt / stt
+     * @param name  source / broker / phone / decrypt / stt
      * @param value 해당 스위치가 허용하는 값
      * @throws IllegalArgumentException 이름이나 값이 잘못된 경우
      */
@@ -103,6 +118,10 @@ public class VoiceModeState {
                 before = broker.name();
                 broker = parse(BrokerMode.class, val, key);
             }
+            case "phone" -> {
+                before = phone.name();
+                phone = parse(PhoneMode.class, val, key);
+            }
             case "decrypt" -> {
                 before = decrypt.name();
                 decrypt = parse(DecryptMode.class, val, key);
@@ -112,7 +131,7 @@ public class VoiceModeState {
                 stt = parse(SttMode.class, val, key);
             }
             default -> throw new IllegalArgumentException(
-                    "알 수 없는 스위치: " + name + " (source/broker/decrypt/stt 중 하나여야 한다)");
+                    "알 수 없는 스위치: " + name + " (source/broker/phone/decrypt/stt 중 하나여야 한다)");
         }
         log.info("[Mode] {} 변경 — {} → {}", key, before, val);
         return before;

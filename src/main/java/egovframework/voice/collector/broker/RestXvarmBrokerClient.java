@@ -40,6 +40,38 @@ public class RestXvarmBrokerClient implements XvarmBrokerClient {
     private final RestTemplate voiceRestTemplate;
     private final egovframework.voice.collector.sync.EsbFileNamingPolicy namingPolicy;
 
+    /**
+     * 브로커에 붙어 상태를 물어본다 — <b>진단 전용</b>. 배치 경로에서는 쓰지 않는다.
+     *
+     * <p>여기서 확인하려는 것은 연결 여부보다 <b>출력 디렉터리가 우리 수신 폴더와 같은가</b>다.
+     * 두 경로가 어긋나면 브로커는 "추출 완료"를 돌려주는데 우리는 빈 폴더를 보며 수신 대기
+     * 타임아웃이 난다. 그 실패에는 원인을 알려 주는 신호가 전혀 없어서, 배치를 돌리기 전에
+     * 눈으로 대조할 수단이 필요하다.</p>
+     *
+     * @return 브로커가 돌려준 상태. 붙지 못하면 {@code error} 가 채워진다
+     */
+    public Map<String, Object> probe() {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        String base = props.broker().baseUrl();
+        out.put("baseUrl", base);
+        if (!StringUtils.hasText(base)) {
+            out.put("reachable", false);
+            out.put("error", "voice.broker.base-url 이 비어 있다 — REST 모드에서는 필수다");
+            return out;
+        }
+        try {
+            JsonNode s = get(base + "/api/v1/xvarm/status");
+            out.put("reachable", true);
+            out.put("adapter", s.path("adapter").asText(null));
+            out.put("brokerOutputDir", s.path("outputDir").asText(null));
+            out.put("totalJobs", s.path("totalJobs").asInt(0));
+        } catch (Exception e) {
+            out.put("reachable", false);
+            out.put("error", e.getMessage());
+        }
+        return out;
+    }
+
     @Override
     public ExtractResult extract(VoiceTarget target) {
         String base = requireBaseUrl();

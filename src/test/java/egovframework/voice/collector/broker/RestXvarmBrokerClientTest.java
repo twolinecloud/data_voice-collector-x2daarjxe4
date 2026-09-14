@@ -56,6 +56,7 @@ class RestXvarmBrokerClientTest {
                         new VoiceProperties.Flag("Y", "Y", "N", "Y")),
                 // 폴링 간격을 짧게 — 테스트가 몇 초씩 잡고 있을 이유가 없다
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, BASE, 10, 3),
+                new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 new VoiceProperties.Sync("m", "p", "w", 10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),
                 new VoiceProperties.Stt(VoiceProperties.SttMode.MOCK, "", 30),
@@ -176,6 +177,7 @@ class RestXvarmBrokerClientTest {
         VoiceProperties noUrl = new VoiceProperties(
                 props().source(),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, "", 10, 3),
+                new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 props().sync(), props().decrypt(), props().stt(), props().sink(), props().batch());
 
         assertThatThrownBy(() ->

@@ -79,6 +79,13 @@ voice:
     base-url: ${VOICE_BROKER_BASE_URL:http://localhost:8082}
     poll-interval-ms: ${VOICE_BROKER_POLL_MS:500}
     poll-timeout-sec: ${VOICE_BROKER_TIMEOUT_SEC:30}
+  # ── 전화 파일 연계 ──────────────────────────────────────────────────────
+  #   ⚠ 브로커(XVARM)와 <b>별개 스위치</b>다. 전화는 XVARM 을 타지 않는다 —
+  #     보라미가 아닌 별도 서버에 파일이 있고 ESB 가 전화 전용 프로바이더를 구성해 준다.
+  #   MOCK : 내부에서 더미 전화 음성을 수신 폴더에 만든다(외부 의존 없음)
+  #   ESB  : 연계 프로바이더가 떨궈 주기를 기다린다. 로컬·개발계에는 ESB 가 없어 타임아웃 난다
+  phone:
+    mode: ${VOICE_PHONE_MODE:MOCK}          # MOCK | ESB
   stt:
     mode: ${VOICE_STT_MODE:MOCK}
   decrypt:

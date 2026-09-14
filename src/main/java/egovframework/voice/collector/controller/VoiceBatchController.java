@@ -47,6 +47,8 @@ public class VoiceBatchController {
     private final VoiceProperties props;
     private final BoramiSourceClient source;
     private final XvarmBrokerClient broker;
+    private final egovframework.voice.collector.broker.RestXvarmBrokerClient restBroker;
+    private final egovframework.voice.collector.sync.PhoneFileProvider phoneFileProvider;
     private final DecryptService decryptService;
     private final SttClient sttClient;
     private final LogCollectorClient logCollector;
@@ -86,6 +88,7 @@ public class VoiceBatchController {
         Map<String, Object> modes = new LinkedHashMap<>();
         modes.put("source", source.mode());
         modes.put("broker", broker.mode());
+        modes.put("phone", phoneFileProvider.mode());
         modes.put("decrypt", decryptService.mode());
         modes.put("stt", sttClient.mode());
 
@@ -121,10 +124,161 @@ public class VoiceBatchController {
         out.put("logCollector", logc);
         out.put("batch", batch);
         out.put("dirs", dirs);
+        // 두 트랙의 단계·모드·실제 호출 대상을 서버가 직접 내려준다.
+        //   화면에 하드코딩하면 설정을 바꿔도 그림이 그대로라 "무엇이 실제로 도는지"를
+        //   화면만 보고는 알 수 없게 된다 — 실제로 그래서 전화 트랙이 브로커 스위치에
+        //   끌려가는 것을 아무도 눈치채지 못했다.
+        out.put("tracks", tracks());
         // 장애 주입이 켜진 줄 모르고 시연하면 실패 건수를 버그로 오해한다 — 항상 노출한다.
         out.put("chaos", faultInjector.snapshot());
         out.put("dataset", dataset.snapshot());
         return out;
+    }
+
+    /**
+     * 접견·전화 두 트랙의 단계 정의.
+     *
+     * <p>각 단계마다 <b>지금 어떤 모드로 도는지</b>와 <b>실제로 무엇을 호출하는지</b>를 함께 싣는다.
+     * 화면은 이걸 그대로 그리기만 하면 된다.</p>
+     */
+    private Map<String, Object> tracks() {
+        Map<String, Object> meet = new LinkedHashMap<>();
+        meet.put("label", "접견 (MEET)");
+        meet.put("kind", "MEET");
+        meet.put("desc", "보라미 DB 4단 조인으로 키를 얻어 XVARM 브로커에 추출을 지시하고, ESB FILE2FILE 로 받는다");
+        meet.put("steps", List.of(
+                step("보라미 조회", "source", source.mode(),
+                        sourceEndpoint(),
+                        "TB_IMSC_PTPR_DT → TB_RERD_TFIN_DS → TB_SMSM_CMFI_BS → XVARM.ASYSCONTENTELEMENT (4단 조인)"),
+                step("XVARM 브로커", "broker", broker.mode(),
+                        brokerEndpoint(),
+                        "POST /api/v1/xvarm/extract 로 추출 지시 후 상태 폴링. XVARM 이 보라미 임시 폴더에 파일을 만든다"),
+                step("ESB 수신", null, props.sync().namingPolicy().name(),
+                        props.sync().meetDir(),
+                        "ESB FILE2FILE(P20) 이 동기화해 준 파일을 감시한다. 크기가 안정되어야 처리한다"),
+                step("복호화", "decrypt", decryptService.mode(),
+                        "R플레이어 로직 포팅",
+                        "CMMN_FILE_ENC_YN='Y' 인 건만. 키 미수령(계획서 Q8)"),
+                step("STT", "stt", sttClient.mode(),
+                        sttEndpoint(),
+                        "sttScriptText 조립 → 비식별 커넥터로 전달")));
+
+        Map<String, Object> phone = new LinkedHashMap<>();
+        phone.put("label", "전화 (PHONE)");
+        phone.put("kind", "PHONE");
+        phone.put("desc", "단일 테이블 조회 후 ESB 전화 전용 연계 프로바이더가 떨궈 주는 파일을 받는다. XVARM·브로커를 타지 않는다");
+        phone.put("steps", List.of(
+                step("전화 DB 조회", "source", source.mode(),
+                        sourceEndpoint(),
+                        "TB_IMPH_UCDR_DS 단일 테이블. TELP_PCALL_RECRD_YN='Y' + 특이수용자"),
+                step("전화 파일 연계", "phone", phoneFileProvider.mode(),
+                        props.sync().phoneDir(),
+                        "별도 서버의 파일을 ESB 전화 전용 프로바이더가 수신 디렉터리에 떨궈 준다. 우리는 대기만 한다"),
+                step("복호화", "decrypt", decryptService.mode(),
+                        "ARIA-128 / AES-256",
+                        "KEY = TELP_RECRD_FILE_ID. 복호화 주체 미확정(계획서 Q13)"),
+                step("STT", "stt", sttClient.mode(),
+                        sttEndpoint(),
+                        "TELP_STT_FLPTH_NM 에 기존 STT 가 있으면 재수행하지 않는다(계획서 Q1)")));
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("meet", meet);
+        out.put("phone", phone);
+        return out;
+    }
+
+    private Map<String, Object> step(String label, String switchKey, String mode, String endpoint, String note) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("label", label);
+        m.put("switchKey", switchKey);   // null 이면 이 단계는 스위치로 바꾸는 것이 아니다
+        m.put("mode", mode);
+        m.put("endpoint", blankToNull(endpoint));
+        m.put("note", note);
+        return m;
+    }
+
+    private String sourceEndpoint() {
+        return switch (modeState.source()) {
+            case MOCK -> "내부 Mock 생성기 (외부 호출 없음)";
+            case DIRECT_JDBC -> "JDBC — " + blankToNull(props.source().schema().imsc() == null
+                    || props.source().schema().imsc().isBlank() ? "스키마 없음(H2 Mock)" : "스키마 " + props.source().schema().imsc());
+            case ESB_HTTP2DB -> {
+                String base = blankToNull(props.source().esbBaseUrl());
+                String ifId = blankToNull(props.source().interfaceId());
+                yield (base == null ? "ESB 주소 미설정" : base) + "/" + (ifId == null ? "{인터페이스ID 미정}" : ifId);
+            }
+        };
+    }
+
+    private String brokerEndpoint() {
+        if (modeState.broker() == VoiceProperties.BrokerMode.MOCK) {
+            return "내부 Mock 브로커 — " + props.sync().meetDir() + " 에 직접 생성";
+        }
+        String base = blankToNull(props.broker().baseUrl());
+        return (base == null ? "브로커 주소 미설정" : base) + "/api/v1/xvarm/extract";
+    }
+
+    private String sttEndpoint() {
+        if (modeState.stt() == VoiceProperties.SttMode.MOCK) {
+            return "내부 Mock STT (고정 문구 반환)";
+        }
+        String base = blankToNull(props.stt().baseUrl());
+        return base == null ? "NPU STT 주소 미설정" : base;
+    }
+
+    @Operation(summary = "브로커 연결 확인",
+            description = """
+                    XVARM 브로커에 붙어 상태를 물어봅니다. **배치를 돌리기 전 대조용**입니다.
+
+                    확인할 것은 연결 여부보다 **브로커의 출력 디렉터리가 우리 접견 수신 폴더와
+                    같은가**입니다. 두 경로가 어긋나면 브로커는 "추출 완료"를 돌려주는데 우리는
+                    빈 폴더를 보며 수신 대기 타임아웃이 납니다 — 원인을 알려 주는 신호가 없습니다.
+
+                    로컬에서 브로커를 띄울 때는 `local` 프로파일을 쓰거나
+                    `BROKER_OUTPUT_DIR` 로 우리 `voice.sync.meet-dir` 과 맞추십시오.
+                    """)
+    @GetMapping("/broker/probe")
+    public Map<String, Object> brokerProbe() {
+        Map<String, Object> out = new LinkedHashMap<>(restBroker.probe());
+        String meetDir = props.sync().meetDir();
+        out.put("collectorMeetDir", meetDir);
+        out.put("brokerMode", broker.mode());
+
+        String brokerDir = (String) out.get("brokerOutputDir");
+        Boolean reachable = (Boolean) out.get("reachable");
+        if (Boolean.TRUE.equals(reachable) && brokerDir != null) {
+            boolean same = sameDir(brokerDir, meetDir);
+            out.put("pathMatched", same);
+            out.put("verdict", same
+                    ? "출력 경로가 일치한다 — 접견 배치를 돌릴 수 있다"
+                    : "⚠ 브로커 출력 경로와 우리 접견 수신 폴더가 다르다. "
+                      + "브로커에 BROKER_OUTPUT_DIR=" + toAbs(meetDir) + " 를 주거나 local 프로파일로 띄울 것");
+        } else {
+            out.put("pathMatched", null);
+            out.put("verdict", Boolean.TRUE.equals(reachable)
+                    ? "브로커가 출력 경로를 알려주지 않았다"
+                    : "브로커에 붙지 못했다 — 8082 포트로 떠 있는지 확인할 것");
+        }
+        return out;
+    }
+
+    /** 표기가 달라도 같은 폴더면 같다고 본다(상대·절대, 슬래시 방향, 대소문자). */
+    private static boolean sameDir(String a, String b) {
+        try {
+            return java.nio.file.Path.of(a).toAbsolutePath().normalize()
+                    .equals(java.nio.file.Path.of(b).toAbsolutePath().normalize());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static String toAbs(String p) {
+        try {
+            return java.nio.file.Path.of(p).toAbsolutePath().normalize()
+                    .toString().replace(java.io.File.separatorChar, '/');
+        } catch (Exception e) {
+            return p;
+        }
     }
 
     @Operation(summary = "멱등 표식 초기화",

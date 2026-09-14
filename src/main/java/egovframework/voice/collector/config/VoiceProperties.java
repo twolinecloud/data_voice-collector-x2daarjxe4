@@ -18,6 +18,7 @@ import java.util.List;
 public record VoiceProperties(
         @DefaultValue Source source,
         @DefaultValue Broker broker,
+        @DefaultValue Phone phone,
         @DefaultValue Sync sync,
         @DefaultValue Decrypt decrypt,
         @DefaultValue Stt stt,
@@ -83,6 +84,21 @@ public record VoiceProperties(
             /** 추출 완료를 기다리는 폴링 간격. 브로커는 202 로 받고 상태를 따로 알려준다. */
             @DefaultValue("2000") long pollIntervalMs,
             @DefaultValue("120") int pollTimeoutSec
+    ) {}
+
+    /**
+     * 전화 파일 연계 경로. <b>브로커(XVARM)와 무관한 별도 트랙이다.</b>
+     *
+     * <p>접견은 우리가 XVARM 브로커에 추출을 지시하지만, 전화는 보라미가 아닌
+     * <b>별도 서버</b>에 파일이 있고 ESB 가 전화 전용 연계 프로바이더를 구성해 준다
+     * (2026-09-11 회의 {@code [00:11:39]~[00:12:07]}). 우리는 요청만 하고 떨어지기를 기다린다.</p>
+     *
+     * <p>예전에는 이 모드를 브로커 스위치에 얹어 두었는데, 그러면 "XVARM 브로커" 를 REST 로
+     * 올리는 순간 XVARM 을 타지도 않는 전화 경로까지 같이 바뀌어 버린다. 두 시나리오는
+     * 연동 주체가 다르므로 스위치도 따로 둔다.</p>
+     */
+    public record Phone(
+            @DefaultValue("MOCK") PhoneMode mode
     ) {}
 
     /** ESB 가 떨궈 준 파일을 집어오는 구간. */
@@ -155,6 +171,9 @@ public record VoiceProperties(
     public enum SourceMode { MOCK, DIRECT_JDBC, ESB_HTTP2DB }
 
     public enum BrokerMode { MOCK, REST }
+
+    /** 전화 파일 연계 — MOCK(내부 더미 생성) / ESB(연계 프로바이더가 떨궈 주기를 대기). */
+    public enum PhoneMode { MOCK, ESB }
 
     public enum DecryptMode { SKIP, REAL }
 

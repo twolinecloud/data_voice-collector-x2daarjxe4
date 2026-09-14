@@ -54,6 +54,7 @@ class DeidConnectorClientTest {
                         new VoiceProperties.Schema("", "", "", ""),
                         new VoiceProperties.Flag("Y", "Y", "N", "Y")),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.MOCK, "", 100, 10),
+                new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 new VoiceProperties.Sync("m", "p", "w", 10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),
                 new VoiceProperties.Stt(VoiceProperties.SttMode.MOCK, "", 30),
@@ -172,7 +173,7 @@ class DeidConnectorClientTest {
     @DisplayName("sink 가 꺼져 있으면 호출하지 않는다")
     void skipsWhenDisabled() {
         VoiceProperties disabled = new VoiceProperties(
-                props(100).source(), props(100).broker(), props(100).sync(), props(100).decrypt(),
+                props(100).source(), props(100).broker(), props(100).phone(), props(100).sync(), props(100).decrypt(),
                 props(100).stt(),
                 new VoiceProperties.Sink(false, BASE, 100, 30),
                 props(100).batch());

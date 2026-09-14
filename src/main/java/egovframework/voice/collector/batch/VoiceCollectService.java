@@ -70,8 +70,17 @@ public class VoiceCollectService {
                 ? List.of(VoiceKind.MEET, VoiceKind.PHONE) : kinds;
 
         String execId = openBatch(window, triggerBy);
-        log.info("[Batch] 시작 — execId={} {} kinds={} (source={}, broker={}, decrypt={}, stt={})",
-                execId, window, targets, source.mode(), broker.mode(), decryptService.mode(), sttClient.mode());
+        log.info("[Batch] 시작 — execId={} {} kinds={}", execId, window, targets);
+        // 트랙별로 따로 찍는다. 두 시나리오는 연동 주체가 달라서 한 줄에 섞으면
+        // 어느 모드가 어느 경로에 걸린 것인지 읽히지 않는다.
+        if (targets.contains(VoiceKind.MEET)) {
+            log.info("[Batch]   접견 트랙 — 조회={} → 브로커={} → 복호화={} → STT={}",
+                    source.mode(), broker.mode(), decryptService.mode(), sttClient.mode());
+        }
+        if (targets.contains(VoiceKind.PHONE)) {
+            log.info("[Batch]   전화 트랙 — 조회={} → 파일연계={} → 복호화={} → STT={}  (XVARM 경유 없음)",
+                    source.mode(), phoneFileProvider.mode(), decryptService.mode(), sttClient.mode());
+        }
 
         String collectStep = logCollector.createStep(execId, (short) 1, "COLLECT");
 
@@ -137,9 +146,12 @@ public class VoiceCollectService {
         int limit = props.batch().maxFilesPerRun();
         List<String> codes = props.batch().speclMngSeCd();
         if (kinds.contains(VoiceKind.MEET)) {
+            log.info("[Track:MEET] ① 보라미 조회 — 4단 조인(특이수용자→녹취파일→공통파일→XVARM) via {}",
+                    source.mode());
             all.addAll(source.findMeetTargets(window, codes, limit));
         }
         if (kinds.contains(VoiceKind.PHONE)) {
+            log.info("[Track:PHONE] ① 보라미 조회 — 단일 테이블(TB_IMPH_UCDR_DS) via {}", source.mode());
             all.addAll(source.findPhoneTargets(window, codes, limit));
         }
         if (all.size() > limit) {
@@ -170,9 +182,10 @@ public class VoiceCollectService {
             SttResult stt;
             long fileSize = 0L;
 
-            if (target.hasSourceStt()) {
+            SttResult reused = target.hasSourceStt() ? tryReadSourceStt(target) : null;
+            if (reused != null) {
                 // 보라미가 이미 STT 를 가지고 있는 경우(계획서 Q1). 사실이면 오디오를 만질 필요가 없다.
-                stt = readSourceStt(target);
+                stt = reused;
             } else {
                 VoiceFile file = acquire(target);
                 toClean.add(file.path());
@@ -213,15 +226,19 @@ public class VoiceCollectService {
      */
     private VoiceFile acquire(VoiceTarget target) {
         if (target.kind() == VoiceKind.MEET) {
+            log.info("[Track:MEET] ② XVARM 추출 요청 — {} via 브로커 {}", target.shortId(), broker.mode());
             XvarmBrokerClient.ExtractResult extracted = broker.extract(target);
-            log.debug("[Batch] XVARM 추출 완료 — {} → {}", target.shortId(), extracted.filePath());
+            log.info("[Track:MEET] ③ ESB 수신 대기 — {} (브로커 산출 {})",
+                    target.shortId(), extracted.filePath());
             // 브로커가 알려준 실제 파일명을 그대로 쓴다.
             //   추측한 이름으로 찾으면 브로커가 다른 이름으로 만들었을 때 영영 못 찾고 타임아웃이 난다.
             //   Mock 브로커는 우리와 같은 명명 정책을 써서 우연히 일치했을 뿐이고,
             //   실제 XVARM 이 파일명을 어떻게 정하는지는 아직 모른다(계획서 Q3).
             return watcher.await(target, fileNameOf(extracted.filePath()));
         }
+        log.info("[Track:PHONE] ② 전화 파일 연계 요청 — {} via {}", target.shortId(), phoneFileProvider.mode());
         phoneFileProvider.request(target);
+        log.info("[Track:PHONE] ③ 수신 대기 — {}", target.shortId());
         return watcher.await(target);
     }
 
@@ -242,15 +259,44 @@ public class VoiceCollectService {
         }
     }
 
-    /** 보라미가 만들어 둔 STT 텍스트를 읽어 온다. */
-    private SttResult readSourceStt(VoiceTarget target) throws IOException {
-        java.nio.file.Path p = java.nio.file.Path.of(target.sourceSttPath());
-        if (!Files.exists(p)) {
-            throw new IOException("보라미 STT 파일을 찾을 수 없다: " + p.getFileName());
+    /**
+     * 보라미가 만들어 둔 STT 텍스트를 읽어 온다. <b>못 읽으면 null 을 돌려주고 일반 경로로 넘긴다.</b>
+     *
+     * <p>예전에는 여기서 예외를 던져 그 건을 통째로 실패시켰다. 그런데 {@code TELP_STT_FLPTH_NM}
+     * 은 <b>보라미 서버 기준 경로</b>다(실DB 표본값 {@code /data001/stt/...}). 그 파일이 우리 쪽에
+     * 동기화되어 있다는 보장이 없고, 어떻게 넘어오는지도 아직 정해지지 않았다(계획서 Q1).</p>
+     *
+     * <p>읽히지 않는다고 수집 자체를 버리는 것은 과하다 — 우리에겐 오디오를 받아 직접 STT 하는
+     * 정상 경로가 있다. 지름길이 막혔으면 먼 길로 가면 된다. 다만 <b>조용히 넘어가지는 않는다</b>:
+     * 이 경고가 반복되면 Q1 의 전제가 틀렸다는 신호이므로 로그로 남긴다.</p>
+     *
+     * @return 재사용할 STT. 경로가 없거나 읽지 못하면 {@code null}
+     */
+    private SttResult tryReadSourceStt(VoiceTarget target) {
+        java.nio.file.Path p;
+        try {
+            p = java.nio.file.Path.of(target.sourceSttPath());
+        } catch (Exception e) {
+            log.warn("[Track:PHONE] 보라미 STT 경로를 해석할 수 없다 — 직접 STT 로 돌린다 ({} · {})",
+                    target.sourceSttPath(), target.shortId());
+            return null;
         }
-        String text = Files.readString(p);
-        log.info("[Batch] 보라미 STT 재사용 — {} ({}자)", target.shortId(), text.length());
-        return new SttResult(text, "BORAMI", 0, true);
+        if (!Files.exists(p)) {
+            log.warn("[Track:PHONE] 보라미 STT 파일이 우리 쪽에 없다 — 직접 STT 로 돌린다 "
+                            + "({} · {}). TELP_STT_FLPTH_NM 은 보라미 서버 기준 경로다(계획서 Q1)",
+                    p, target.shortId());
+            return null;
+        }
+        try {
+            String text = Files.readString(p);
+            log.info("[Track:PHONE] 보라미 STT 재사용 — {} ({}자, 복호화·STT 생략)",
+                    target.shortId(), text.length());
+            return new SttResult(text, "BORAMI", 0, true);
+        } catch (IOException e) {
+            log.warn("[Track:PHONE] 보라미 STT 파일을 읽지 못했다 — 직접 STT 로 돌린다 ({} · {})",
+                    e.getMessage(), target.shortId());
+            return null;
+        }
     }
 
     /**

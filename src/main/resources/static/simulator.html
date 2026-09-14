@@ -34,6 +34,33 @@
   .pii-clean { color:#198754; font-weight:600; }
   .pii-dirty { color:#dc3545; font-weight:600; }
   .hint { font-size:.75rem; color:#6c757d; }
+
+  /* ── 2트랙 파이프라인 ─────────────────────────────────────────────── */
+  .track { border:1px solid #dee2e6; border-radius:.5rem; overflow:hidden; height:100%; }
+  .track-head { padding:.5rem .75rem; font-weight:600; font-size:.9rem; color:#fff; }
+  .track-meet  .track-head { background:#0d6efd; }
+  .track-phone .track-head { background:#6f42c1; }
+  .track-desc { font-size:.72rem; color:#6c757d; padding:.45rem .75rem; background:#fbfbfc;
+                border-bottom:1px solid #eee; line-height:1.45; }
+  .track-body { padding:.6rem .75rem; }
+  .step { display:flex; gap:.55rem; align-items:flex-start; padding:.4rem 0; }
+  .step + .step { border-top:1px dashed #e9ecef; }
+  .step-no { flex:0 0 1.35rem; height:1.35rem; border-radius:50%; background:#e9ecef; color:#495057;
+             font-size:.7rem; font-weight:700; display:flex; align-items:center; justify-content:center;
+             margin-top:.15rem; }
+  .track-meet  .step.is-real .step-no { background:#0d6efd; color:#fff; }
+  .track-phone .step.is-real .step-no { background:#6f42c1; color:#fff; }
+  .step.is-mock .step-no { background:#f0ad4e; color:#fff; }
+  .step-main { flex:1 1 auto; min-width:0; }
+  .step-label { font-size:.82rem; font-weight:600; }
+  .step-ep { font-size:.7rem; color:#6c757d; font-family:var(--mono);
+             overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .step-sel { flex:0 0 9.5rem; }
+  .step-sel select { font-family:var(--mono); font-size:.75rem; font-weight:600; }
+  .step-fixed { flex:0 0 9.5rem; font-family:var(--mono); font-size:.75rem; color:#6c757d;
+                text-align:right; padding-top:.2rem; }
+  .probe-ok  { color:#198754; font-weight:600; }
+  .probe-bad { color:#dc3545; font-weight:600; }
 </style>
 </head>
 <body>
@@ -53,13 +80,14 @@
   <!-- ① 모드 전환 -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
-      <strong>① 처리 구간 모드</strong>
+      <strong>① 처리 구간 모드 — 2트랙</strong>
       <span class="hint">드롭다운을 바꾸면 <b>서버 재시작 없이</b> 즉시 전환됩니다</span>
     </div>
     <div class="card-body">
-      <div class="row g-2 mb-3" id="modes"></div>
+      <div class="row g-3 mb-3" id="tracks"></div>
       <div class="row g-2" id="downstream"></div>
       <div class="hint mt-3" id="dirs"></div>
+      <div class="mt-2" id="probe-line"></div>
     </div>
   </div>
 
@@ -68,13 +96,19 @@
     <div class="card-header bg-white"><strong>② 제어</strong></div>
     <div class="card-body" id="controls">
 
+      <div class="mb-2 hint">트랙별 실행 — 한 시나리오만 따로 돌려 어디서 막히는지 좁힙니다</div>
       <div class="d-flex flex-wrap gap-2 mb-3">
-        <button class="btn btn-primary"  id="btn-periodic">수동 배치 실행 (10분 주기)</button>
-        <button class="btn btn-primary"  id="btn-daily">수동 배치 실행 (일배치)</button>
+        <button class="btn btn-primary"    id="btn-meet">접견만 실행 <span class="opacity-75">(kinds=MEET)</span></button>
+        <button class="btn btn-secondary"  id="btn-phone" style="background:#6f42c1;border-color:#6f42c1">전화만 실행 <span class="opacity-75">(kinds=PHONE)</span></button>
+        <button class="btn btn-outline-primary" id="btn-periodic">전체 실행 (10분 주기)</button>
+        <button class="btn btn-outline-primary" id="btn-daily">전체 실행 (일배치)</button>
+      </div>
+      <div class="d-flex flex-wrap gap-2 mb-3">
         <button class="btn btn-warning"  id="btn-reset">Mock 데이터 초기화 / 생성</button>
         <button class="btn btn-outline-secondary" id="btn-targets">처리 대상 미리보기</button>
         <button class="btn btn-outline-secondary" id="btn-files">수신 파일 확인</button>
         <button class="btn btn-outline-secondary" id="btn-pii">PII 잔여 확인</button>
+        <button class="btn btn-outline-secondary" id="btn-probe">브로커 연결 확인</button>
       </div>
 
       <div class="row g-3">
@@ -198,12 +232,15 @@
 <script>
 const $ = (id) => document.getElementById(id);
 
-const SWITCHES = [
-  { key:'source',  label:'보라미 조회',   opts:['MOCK','DIRECT_JDBC','ESB_HTTP2DB'] },
-  { key:'broker',  label:'XVARM 브로커',  opts:['MOCK','REST'] },
-  { key:'decrypt', label:'복호화',        opts:['SKIP','REAL'] },
-  { key:'stt',     label:'STT',           opts:['MOCK','NPU'] },
-];
+// 스위치별 선택지. 어떤 단계에 어떤 스위치가 붙는지는 서버(/status 의 tracks)가 정한다 —
+// 화면에 하드코딩하면 설정을 바꿔도 그림이 그대로라 실제와 어긋난다.
+const SWITCH_OPTS = {
+  source : ['MOCK','DIRECT_JDBC','ESB_HTTP2DB'],
+  broker : ['MOCK','REST'],
+  phone  : ['MOCK','ESB'],
+  decrypt: ['SKIP','REAL'],
+  stt    : ['MOCK','NPU'],
+};
 const MOCKISH = ['MOCK','SKIP'];
 
 // ── 로그 ────────────────────────────────────────────────────────────────
@@ -248,35 +285,57 @@ async function call(method, url, label, quiet) {
   }
 }
 
-// ── ① 모드 ──────────────────────────────────────────────────────────────
-function renderModes(cur) {
-  $('modes').innerHTML = SWITCHES.map(s => {
-    const v = cur[s.key];
-    const mock = MOCKISH.includes(v);
-    const opts = s.opts.map(o => `<option ${o===v?'selected':''}>${o}</option>`).join('');
-    return `<div class="col-6 col-md-3">
-        <div class="card sw-card ${mock?'is-mock':'is-real'} h-100">
-          <div class="card-body py-2 px-3">
-            <div class="label">${s.label}</div>
-            <select class="form-select form-select-sm mt-1" data-switch="${s.key}">${opts}</select>
-            <div class="label mt-1">${s.key}</div>
-          </div>
-        </div>
-      </div>`;
-  }).join('');
+// ── ① 2트랙 파이프라인 ──────────────────────────────────────────────────
+function renderTracks(tracks) {
+  if (!tracks) return;
+  $('tracks').innerHTML = ['meet','phone'].map(k => trackCard(k, tracks[k])).join('');
 
+  // 단계에 붙은 스위치 바인딩
   document.querySelectorAll('select[data-switch]').forEach(sel => {
     sel.onchange = async () => {
       const key = sel.dataset.switch, val = sel.value;
       const d = await call('PUT', `/api/v1/mock/modes/${key}?value=${encodeURIComponent(val)}`,
                            `모드 변경 ${key} → ${val}`);
-      if (d) {
-        log(`  └ ${key}: ${d.before} → ${d.after}`, 'ok');
-        renderModes(d.current);
-      }
-      await loadStatus(true);
+      if (d) log(`  └ ${key}: ${d.before} → ${d.after}`, 'ok');
+      await loadStatus(true);   // 엔드포인트 라벨까지 서버 기준으로 다시 받는다
     };
   });
+}
+
+function trackCard(kind, tr) {
+  if (!tr) return '';
+  const steps = (tr.steps||[]).map((s,i) => stepRow(s, i+1)).join('');
+  return `<div class="col-12 col-lg-6">
+      <div class="track track-${kind}">
+        <div class="track-head">${esc(tr.label)}</div>
+        <div class="track-desc">${esc(tr.desc||'')}</div>
+        <div class="track-body">${steps}</div>
+      </div>
+    </div>`;
+}
+
+function stepRow(s, no) {
+  const mock = MOCKISH.includes(s.mode);
+  // switchKey 가 null 이면 드롭다운이 아니라 고정 단계다(예: ESB 수신)
+  const ctrl = s.switchKey
+    ? `<div class="step-sel">
+         <select class="form-select form-select-sm" data-switch="${s.switchKey}">
+           ${(SWITCH_OPTS[s.switchKey]||[s.mode]).map(o =>
+              `<option ${o===s.mode?'selected':''}>${o}</option>`).join('')}
+         </select>
+       </div>`
+    : `<div class="step-fixed">${esc(s.mode||'')}</div>`;
+
+  // 툴팁에 근거·주의사항을 넣는다. 화면이 좁아 한 줄로는 다 못 보여준다.
+  const tip = esc([s.note, s.endpoint ? '호출: ' + s.endpoint : ''].filter(Boolean).join(String.fromCharCode(10)));
+  return `<div class="step ${mock?'is-mock':'is-real'}" title="${tip}">
+      <div class="step-no">${no}</div>
+      <div class="step-main">
+        <div class="step-label">${esc(s.label)}</div>
+        <div class="step-ep" title="${esc(s.endpoint||'')}">${esc(s.endpoint||'—')}</div>
+      </div>
+      ${ctrl}
+    </div>`;
 }
 
 function flagCard(label, on, detail) {
@@ -295,7 +354,7 @@ async function loadStatus(quiet) {
   const s = await call('GET', '/api/v1/voice/status', '현재 구성 조회', quiet);
   if (!s) return;
 
-  renderModes(s.modes);
+  renderTracks(s.tracks);
 
   $('downstream').innerHTML =
       flagCard('비식별 커넥터 (하류)', s.sink.enabled, s.sink.connectorBaseUrl || '주소 미설정')
@@ -335,8 +394,9 @@ async function loadStatus(quiet) {
 function stat(n, k, cls) {
   return `<div class="col"><div class="stat"><div class="n ${cls||''}">${n}</div><div class="k">${k}</div></div></div>`;
 }
-function renderResult(r) {
-  $('last-exec').textContent = `${r.execId} · ${r.window} · ${(r.elapsedMs/1000).toFixed(1)}초`;
+function renderResult(r, kind) {
+  $('last-exec').textContent = `${r.execId} · ${r.window} · ${(r.elapsedMs/1000).toFixed(1)}초`
+                             + (kind ? ` · ${kind} 전용` : '');
   $('stats').innerHTML =
       stat(r.targetCnt.toLocaleString(),  '대상')
     + stat(r.successCnt.toLocaleString(), '성공',   r.successCnt>0?'text-success':'')
@@ -347,6 +407,18 @@ function renderResult(r) {
 
   log(`  └ 대상 ${r.targetCnt} · 성공 ${r.successCnt} · 실패 ${r.failCnt} · 건너뜀 ${r.skippedCnt} · 전송 ${r.sentCnt}  (execId=${r.execId})`,
       r.failCnt>0 ? 'wr' : 'ok');
+
+  // 트랙별로 나눠 보여준다 — 전체 실행 시 어느 시나리오가 막혔는지 한 줄로 드러나게.
+  const byKind = { MEET:{s:0,f:0,k:0}, PHONE:{s:0,f:0,k:0} };
+  (r.outcomes||[]).forEach(o => {
+    const b = byKind[o.target?.kind]; if (!b) return;
+    if (o.status === 'SUCCESS') b.s++; else if (o.status === 'SKIPPED') b.k++; else b.f++;
+  });
+  [['MEET','접견'],['PHONE','전화']].forEach(([k,ko]) => {
+    const b = byKind[k];
+    if (b.s + b.f + b.k === 0) return;
+    log(`  └ [${ko}] 성공 ${b.s} · 실패 ${b.f} · 건너뜀 ${b.k}`, b.f>0 ? 'er' : 'ok');
+  });
 
   renderPii(r.residue);
 
@@ -372,13 +444,30 @@ function renderPii(residue) {
   logRaw(`<span class="pii">🔒 ${esc(residue.message)}</span>`);
 }
 
-async function runBatch(path, label) {
-  const total = Number($('ds-meet').value||0) + Number($('ds-phone').value||0);
+async function runBatch(path, label, kind) {
+  const total = kind === 'MEET'  ? Number($('ds-meet').value||0)
+              : kind === 'PHONE' ? Number($('ds-phone').value||0)
+              : Number($('ds-meet').value||0) + Number($('ds-phone').value||0);
   if (total > 200) {
     log(`⏳ 대상 ${total.toLocaleString()}건 — 완료까지 수 분 걸립니다. 창을 닫지 마세요.`, 'wr');
   }
-  const r = await call('POST', path, label);
-  if (r) renderResult(r);
+
+  // 어떤 트랙을 어떤 모드로 돌리는지 실행 직전에 남긴다.
+  // 서버 콘솔의 [Track:MEET]/[Track:PHONE] 로그와 짝이 맞는다.
+  const s = await call('GET', '/api/v1/voice/status', '', true);
+  if (s && s.tracks) {
+    const ks = kind ? [kind.toLowerCase()] : ['meet','phone'];
+    ks.forEach(k => {
+      const tr = s.tracks[k];
+      if (!tr) return;
+      logRaw(`<span class="hd">▷ ${esc(tr.label)} 트랙</span> ` +
+             (tr.steps||[]).map(st => `${esc(st.label)}=<b>${esc(st.mode)}</b>`).join(' → '));
+    });
+  }
+
+  const url = kind ? `${path}?kinds=${kind}` : path;
+  const r = await call('POST', url, label);
+  if (r) renderResult(r, kind);
   await loadStatus(true);
 }
 
@@ -410,8 +499,25 @@ async function showTargets() {
 }
 
 // ── 바인딩 ──────────────────────────────────────────────────────────────
-$('btn-periodic').onclick = () => runBatch('/api/v1/voice/batches/periodic', '주기배치 실행 (10분 창)');
-$('btn-daily').onclick    = () => runBatch('/api/v1/voice/batches/daily', '일배치 실행 (전날 하루치)');
+$('btn-meet').onclick     = () => runBatch('/api/v1/voice/batches/periodic', '접견 트랙만 실행 (10분 창)',  'MEET');
+$('btn-phone').onclick    = () => runBatch('/api/v1/voice/batches/periodic', '전화 트랙만 실행 (10분 창)',  'PHONE');
+$('btn-periodic').onclick = () => runBatch('/api/v1/voice/batches/periodic', '전체 실행 (10분 창)');
+$('btn-daily').onclick    = () => runBatch('/api/v1/voice/batches/daily',    '전체 실행 (전날 하루치)');
+
+// 브로커 출력 경로와 우리 수신 폴더가 어긋나면 "추출 완료"인데 파일이 안 보인다.
+// 배치를 돌리기 전에 눈으로 대조할 수 있게 한다.
+$('btn-probe').onclick = async () => {
+  const d = await call('GET', '/api/v1/voice/broker/probe', '브로커 연결 확인');
+  if (!d) return;
+  const ok = d.reachable && d.pathMatched;
+  $('probe-line').innerHTML =
+      `<span class="hint">브로커(${esc(d.brokerMode)}) <code>${esc(d.baseUrl||'주소 미설정')}</code></span><br>`
+    + `<span class="hint">브로커 출력 <code>${esc(d.brokerOutputDir||'—')}</code></span><br>`
+    + `<span class="hint">수집기 수신 <code>${esc(d.collectorMeetDir||'—')}</code></span><br>`
+    + `<span class="${ok?'probe-ok':'probe-bad'}">${esc(d.verdict||'')}</span>`;
+  log(`  └ ${d.verdict}`, ok ? 'ok' : 'er');
+  if (d.error) log(`  └ ${d.error}`, 'er');
+};
 
 $('btn-reset').onclick = async () => {
   const d = await call('POST', '/api/v1/mock/reset', 'Mock 데이터 초기화 / 생성');
@@ -468,7 +574,8 @@ $('btn-files').onclick = async () => {
 $('btn-refresh').onclick = () => loadStatus(false);
 $('btn-clear').onclick   = () => { $('log').innerHTML = ''; };
 
-log('시뮬레이터 준비 완료. [Mock 데이터 초기화] → [처리 대상 미리보기] → [배치 실행] 순서를 권합니다.', 'hd');
+log('시뮬레이터 준비 완료. [Mock 데이터 초기화] → [처리 대상 미리보기] → [접견만/전화만 실행] 순서를 권합니다.', 'hd');
+log('접견과 전화는 연동 경로가 완전히 다릅니다 — 전화는 XVARM·브로커를 타지 않습니다.', 'hd');
 loadStatus(false);
 </script>
 </body>
