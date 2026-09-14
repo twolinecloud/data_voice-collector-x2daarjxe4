@@ -42,7 +42,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class VoiceCollectService {
 
-    private static final DateTimeFormatter LOCAL_ID = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    /** 로컬 임시 EXEC_ID — 컬렉터 규칙(yyyyMMdd + 작업코드3 + 회차3)의 자리를 맞춘다. */
+    private static final DateTimeFormatter LOCAL_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
+    private static final DateTimeFormatter LOCAL_TIME = DateTimeFormatter.ofPattern("HHmmss");
 
     private final VoiceProperties props;
     private final BoramiSourceClient source;
@@ -65,12 +67,25 @@ public class VoiceCollectService {
      * @param triggerBy 실행 주체(SCHEDULER / 사용자)
      */
     public VoiceBatchResult run(BatchWindow window, List<VoiceKind> kinds, String triggerBy) {
+        return run(window, kinds, triggerBy, false);
+    }
+
+    /**
+     * 배치를 1회 실행한다.
+     *
+     * @param testRun 시뮬레이터에서 돌린 시험인가. {@code true} 면 EXEC_ID 가 {@code ...TST...} 로
+     *                채번되어 나중에 [테스트 데이터 초기화] 로 통째로 지울 수 있다.
+     *                스케줄러가 도는 실제 배치는 항상 {@code false} 다 — 시험 기록과 섞이면
+     *                정합성 대사(T1.SUCCESS_CNT == Σ T3·T4·T5)가 의미를 잃는다.
+     */
+    public VoiceBatchResult run(BatchWindow window, List<VoiceKind> kinds, String triggerBy, boolean testRun) {
         long startedAt = System.currentTimeMillis();
         List<VoiceKind> targets = (kinds == null || kinds.isEmpty())
                 ? List.of(VoiceKind.MEET, VoiceKind.PHONE) : kinds;
 
-        String execId = openBatch(window, triggerBy);
-        log.info("[Batch] 시작 — execId={} {} kinds={}", execId, window, targets);
+        String execId = openBatch(window, triggerBy, testRun);
+        log.info("[Batch] 시작 — execId={} {} kinds={}{}", execId, window, targets,
+                testRun ? "  [시험 실행 — TST 로 채번, 초기화로 삭제 가능]" : "");
         // 트랙별로 따로 찍는다. 두 시나리오는 연동 주체가 달라서 한 줄에 섞으면
         // 어느 모드가 어느 경로에 걸린 것인지 읽히지 않는다.
         if (targets.contains(VoiceKind.MEET)) {
@@ -130,13 +145,21 @@ public class VoiceCollectService {
      * <p>임시 ID 에도 작업코드 자리를 지켜 {@code yyyyMMddHHmmss + VOC} 형태로 만든다 —
      * 로그를 눈으로 볼 때 정식 ID 와 구분되면서도 같은 자리에서 읽히게 하려는 것이다.</p>
      */
-    private String openBatch(BatchWindow window, String triggerBy) {
-        String execId = logCollector.createBatch(props.batch().jobId(),
+    private String openBatch(BatchWindow window, String triggerBy, boolean testRun) {
+        String jobId = testRun ? props.batch().testJobId() : props.batch().jobId();
+        String execId = logCollector.createBatch(jobId,
                 props.batch().dataTypeCd(), window.label(), triggerBy);
         if (execId != null) {
             return execId;
         }
-        String local = LOCAL_ID.format(LocalDateTime.now()) + "VOC-LOCAL";
+        // 컬렉터가 없을 때도 같은 자리에 작업코드가 오게 만든다.
+        //   컬렉터 채번 규칙: yyyyMMdd(8) + 작업코드(3) + 회차(3)
+        //   → 9~11번째 자리가 작업코드다. 테스트 데이터 삭제 SQL 이 그 자리를 본다
+        //     (SUBSTRING(exec_id FROM 9 FOR 3) = 'TST'). 로컬 ID 도 자리를 맞춰야
+        //     눈으로 읽을 때 정식 ID 와 같은 위치에서 구분된다.
+        String local = LOCAL_DATE.format(LocalDateTime.now())
+                + (testRun ? "TST" : "VOC")
+                + LOCAL_TIME.format(LocalDateTime.now());
         log.info("[Batch] 로그 컬렉터 미연동 — 로컬 임시 execId 사용: {}", local);
         return local;
     }

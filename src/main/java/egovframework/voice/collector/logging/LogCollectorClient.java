@@ -191,6 +191,22 @@ public class LogCollectorClient {
         return exchange(HttpMethod.GET, url("/api/v1/logs/batches/" + execId), null);
     }
 
+    /**
+     * 컬렉터의 <b>테스트 데이터 연쇄 삭제</b>를 호출한다 — {@code DELETE /api/v1/logs/test-data}.
+     *
+     * <p>컬렉터가 {@code JOB_ID='TEST_BATCH'} 인 배치와 그 하위(T2~T8)를 FK 안전 순서로 지운다.
+     * 그 조건에 걸리는 EXEC_ID 는 작업코드 자리가 {@code TST} 인 것뿐이라,
+     * 운영 배치({@code STR}/{@code VOC}/{@code EXT})는 어떤 경우에도 지워지지 않는다.</p>
+     *
+     * @return 테이블별 삭제 건수. 컬렉터 미연동이거나 실패하면 {@code null}
+     */
+    public JsonNode deleteTestData() {
+        if (!isEnabled()) {
+            return null;
+        }
+        return exchange(HttpMethod.DELETE, url("/api/v1/logs/test-data"), null);
+    }
+
     // ── 내부 ───────────────────────────────────────────────────────────────
 
     private String url(String path) {

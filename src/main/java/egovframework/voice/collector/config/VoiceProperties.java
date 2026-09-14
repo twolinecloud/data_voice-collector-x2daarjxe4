@@ -161,7 +161,23 @@ public record VoiceProperties(
             /** 한 번에 처리할 파일 상한(안전장치). */
             @DefaultValue("500") int maxFilesPerRun,
             /** 로그 컬렉터에 배치를 열 때 쓸 JOB_ID. 작업코드 VOC 로 채번되도록 협의 필요(Q4). */
-            @DefaultValue("VOICE_BATCH") String jobId,
+            /**
+             * 로그 컬렉터에 보낼 JOB_ID. 컬렉터가 이 값으로 EXEC_ID 접두 3자를 정한다
+             * ({@code JobId} enum). {@code VOICE_ANALYSIS} → {@code VOC} — 계획서가 음성에 예약한 코드다.
+             *
+             * <p>⚠ 예전 값 {@code VOICE_BATCH} 는 컬렉터 enum 에 없어서 폴백 규칙("영문만 남겨 앞 3자")이
+             * 돌았고, EXEC_ID 가 {@code ...VOI...} 로 채번됐다. 눈에 잘 안 띄는데, 작업코드로 배치를
+             * 구분하는 모든 조회·정합성 대사가 어긋난다.</p>
+             */
+            @DefaultValue("VOICE_ANALYSIS") String jobId,
+            /**
+             * 시뮬레이터에서 돌리는 배치의 JOB_ID. {@code TEST_BATCH} → EXEC_ID 접두 {@code TST}.
+             *
+             * <p>컬렉터의 테스트 데이터 삭제({@code DELETE /api/v1/logs/test-data})가 이 JOB_ID 를
+             * 기준으로 T1~T8 을 연쇄 삭제한다. 운영 배치(STR/VOC/EXT)는 그 조건에 걸리지 않으므로
+             * 시연·시험 기록만 안전하게 지울 수 있다.</p>
+             */
+            @DefaultValue("TEST_BATCH") String testJobId,
             /** 커넥터 헤더의 dataTypeCd. AI-R(비정형) 경로로 태우는 근거가 된다. */
             @DefaultValue("VOICE") String dataTypeCd,
             /** STT 후 복호화 원본을 남길지. 기본은 삭제 — PII 보유를 최소화한다. */

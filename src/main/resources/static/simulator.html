@@ -73,6 +73,10 @@
     </div>
     <div class="d-flex gap-2">
       <a class="btn btn-sm btn-outline-secondary" href="/swagger-ui.html" target="_blank">Swagger</a>
+      <button class="btn btn-sm btn-outline-danger" id="btn-test-clear"
+              title="시뮬레이터에서 돌린 배치(EXEC_ID 작업코드 = TST)의 로그 이력과 로컬 산출물을 모두 지웁니다. 운영 배치(VOC/STR/EXT)는 건드리지 않습니다.">
+        테스트 데이터 초기화
+      </button>
       <button class="btn btn-sm btn-outline-primary" id="btn-refresh">상태 새로고침</button>
     </div>
   </div>
@@ -87,6 +91,7 @@
       <div class="row g-3 mb-3" id="tracks"></div>
       <div class="row g-2" id="downstream"></div>
       <div class="hint mt-3" id="dirs"></div>
+      <div class="mt-2" id="warnings"></div>
       <div class="mt-2" id="probe-line"></div>
     </div>
   </div>
@@ -388,6 +393,15 @@ async function loadStatus(quiet) {
   if (!quiet && s.sink.enabled === false) {
     log('ℹ 커넥터 전송이 꺼져 있습니다 — 전송 건수는 0으로 나옵니다', 'wr');
   }
+
+  // "이 조합으로는 배치가 반드시 실패한다" 를 돌리기 전에 보여준다.
+  const ws = s.warnings || [];
+  $('warnings').innerHTML = ws.length
+    ? `<div class="alert alert-danger py-2 px-3 mb-0" style="font-size:.8rem">
+         <b>배치 전 확인</b><ul class="mb-0 ps-3">${ws.map(w => `<li>${esc(w)}</li>`).join('')}</ul>
+       </div>`
+    : '';
+  if (!quiet) ws.forEach(w => log(`⚠ ${w}`, 'er'));
 }
 
 // ── ③ 결과 ──────────────────────────────────────────────────────────────
@@ -465,7 +479,9 @@ async function runBatch(path, label, kind) {
     });
   }
 
-  const url = kind ? `${path}?kinds=${kind}` : path;
+  // 시뮬레이터에서 돌리는 배치는 전부 시험이다 → EXEC_ID 가 ...TST... 로 채번되어
+  // 나중에 [테스트 데이터 초기화] 로 통째로 지울 수 있다. 스케줄러 배치는 VOC 그대로다.
+  const url = `${path}?test=true` + (kind ? `&kinds=${kind}` : '');
   const r = await call('POST', url, label);
   if (r) renderResult(r, kind);
   await loadStatus(true);
@@ -569,6 +585,24 @@ $('btn-files').onclick = async () => {
   if (!d) return;
   const m = (d.meet||[]).length, p = (d.phone||[]).length;
   log(`  └ 접견 ${m}개 · 전화 ${p}개`, m+p>0 ? 'ok' : 'wr');
+};
+
+$('btn-test-clear').onclick = async () => {
+  if (!confirm('시뮬레이터에서 돌린 시험 기록(EXEC_ID 작업코드 = TST)을 모두 지웁니다. 운영 배치(VOC·STR·EXT)는 지워지지 않습니다. 계속할까요?')) return;
+  const d = await call('DELETE', '/api/v1/mock/test-data', '테스트 데이터 초기화 (TST)');
+  if (!d) return;
+  const lc = d.logCollector;
+  if (lc && typeof lc === 'object') {
+    log(`  └ 로그 이력 삭제 — ${Object.entries(lc).map(([k,v]) => `${k} ${v}`).join(' · ')}`, 'ok');
+  } else {
+    log(`  └ 로그 이력 — ${lc}`, 'wr');
+  }
+  const l = d.local || {};
+  log(`  └ 로컬 — 표식 ${l.idempotencyMarkers} · 접견파일 ${l.meetFiles} · 전화파일 ${l.phoneFiles} · 작업파일 ${l.workFiles}`, 'ok');
+  log(`  └ ${d.message}`, 'ok');
+  $('stats').innerHTML = ''; $('last-exec').textContent = '—';
+  renderPii(null); $('targets-card').classList.add('d-none');
+  await loadStatus(true);
 };
 
 $('btn-refresh').onclick = () => loadStatus(false);

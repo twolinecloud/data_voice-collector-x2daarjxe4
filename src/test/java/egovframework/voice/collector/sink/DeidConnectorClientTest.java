@@ -60,7 +60,7 @@ class DeidConnectorClientTest {
                 new VoiceProperties.Stt(VoiceProperties.SttMode.MOCK, "", 30),
                 new VoiceProperties.Sink(true, BASE, chunkSize, 30),
                 new VoiceProperties.Batch("0 0 2 * * *", "0 */10 * * * *", 20, false,
-                        List.of("0", "1", "2", "3", "5"), 500, "VOICE_BATCH", "VOICE", false));
+                        List.of("0", "1", "2", "3", "5"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "VOICE", false));
     }
 
     private DeidConnectorClient.Entry entry(int i) {

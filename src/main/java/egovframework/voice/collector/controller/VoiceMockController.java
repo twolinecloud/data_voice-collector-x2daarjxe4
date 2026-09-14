@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -61,6 +62,7 @@ public class VoiceMockController {
     private final MockDatasetState dataset;
     private final FaultInjector faultInjector;
     private final PiiResidueAuditor residueAuditor;
+    private final egovframework.voice.collector.logging.LogCollectorClient logCollector;
 
     @Operation(summary = "Mock 데이터 초기화",
             description = """
@@ -93,6 +95,52 @@ public class VoiceMockController {
         out.put("cleared", cleared);
         out.put("targetCount", targets.size());
         out.put("message", "초기화 완료 — 대상 %d건이 다시 처리 가능한 상태입니다".formatted(targets.size()));
+        return out;
+    }
+
+    @Operation(summary = "테스트 데이터 초기화 (TST 연쇄 삭제)",
+            description = """
+                    **시뮬레이터에서 돌린 시험 기록을 통째로 지웁니다.**
+
+                    시뮬레이터에서 실행한 배치는 `JOB_ID=TEST_BATCH` 로 열려 EXEC_ID 의
+                    작업코드 자리가 **`TST`** 가 됩니다 (예: `20260914TST001`).
+                    운영 배치는 `VOC`(음성)·`STR`(정형)·`EXT`(외부)라 **섞이지 않습니다.**
+
+                    두 가지를 지웁니다.
+
+                    1. **로그 컬렉터 이력** — `DELETE /api/v1/logs/test-data` 를 호출합니다.
+                       컬렉터가 `JOB_ID='TEST_BATCH'` 인 T1 과 하위 T2~T8 을 FK 안전 순서로
+                       연쇄 삭제합니다. 삭제 SQL 에 작업코드 조건이 박혀 있어 운영 배치는
+                       어떤 경우에도 걸리지 않습니다.
+                    2. **로컬 산출물** — 멱등 표식·수신 파일·작업 파일 (Mock 초기화와 동일)
+
+                    커넥터가 하류(PPP)로 이미 보낸 건은 여기서 지울 수 없습니다 — 우리 소관이 아닙니다.
+                    """)
+    @DeleteMapping("/test-data")
+    public Map<String, Object> deleteTestData() {
+        Map<String, Object> out = new LinkedHashMap<>();
+
+        // ① 로그 컬렉터 이력 (TST)
+        com.fasterxml.jackson.databind.JsonNode logs = logCollector.deleteTestData();
+        if (logs == null) {
+            out.put("logCollector", logCollector.isEnabled()
+                    ? "삭제 호출 실패 — 컬렉터 응답 없음"
+                    : "미연동 — 지울 원격 이력이 없다");
+        } else {
+            out.put("logCollector", logs);
+        }
+
+        // ② 로컬 산출물
+        Map<String, Object> local = new LinkedHashMap<>();
+        local.put("idempotencyMarkers", idempotency.clearAll());
+        local.put("meetFiles", deleteFilesIn(props.sync().meetDir()));
+        local.put("phoneFiles", deleteFilesIn(props.sync().phoneDir()));
+        local.put("workFiles", deleteFilesIn(Path.of(props.sync().workDir(), "mock_source_stt").toString()));
+        out.put("local", local);
+
+        out.put("testJobId", props.batch().testJobId());
+        out.put("message", "테스트(TST) 데이터 초기화 완료 — 운영 배치(VOC/STR/EXT)는 건드리지 않았습니다");
+        log.info("[Mock] 테스트 데이터 초기화 — 컬렉터={} 로컬={}", out.get("logCollector"), local);
         return out;
     }
 

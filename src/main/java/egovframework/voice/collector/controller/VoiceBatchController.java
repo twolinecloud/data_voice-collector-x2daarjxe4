@@ -59,16 +59,18 @@ public class VoiceBatchController {
     @Operation(summary = "일배치 실행",
             description = "전날 00시 ~ 오늘 00시 구간을 처리한다. 스케줄과 무관하게 즉시 실행한다.")
     @PostMapping("/batches/daily")
-    public VoiceBatchResult daily(@RequestParam(required = false) List<VoiceKind> kinds) {
-        return service.run(BatchWindow.daily(LocalDateTime.now()), kinds, "MANUAL");
+    public VoiceBatchResult daily(@RequestParam(required = false) List<VoiceKind> kinds,
+                                  @RequestParam(defaultValue = "false") boolean test) {
+        return service.run(BatchWindow.daily(LocalDateTime.now()), kinds, "MANUAL", test);
     }
 
     @Operation(summary = "주기배치 실행",
             description = "지금으로부터 periodic-lag-min 분 전까지를 처리한다(기본 20분).")
     @PostMapping("/batches/periodic")
-    public VoiceBatchResult periodic(@RequestParam(required = false) List<VoiceKind> kinds) {
+    public VoiceBatchResult periodic(@RequestParam(required = false) List<VoiceKind> kinds,
+                                     @RequestParam(defaultValue = "false") boolean test) {
         return service.run(BatchWindow.periodic(LocalDateTime.now(), props.batch().periodicLagMin()),
-                kinds, "MANUAL");
+                kinds, "MANUAL", test);
     }
 
     @Operation(summary = "구간 지정 실행",
@@ -77,8 +79,9 @@ public class VoiceBatchController {
     public VoiceBatchResult manual(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
-            @RequestParam(required = false) List<VoiceKind> kinds) {
-        return service.run(BatchWindow.manual(from, to), kinds, "MANUAL");
+            @RequestParam(required = false) List<VoiceKind> kinds,
+            @RequestParam(defaultValue = "false") boolean test) {
+        return service.run(BatchWindow.manual(from, to), kinds, "MANUAL", test);
     }
 
     @Operation(summary = "현재 구성 조회",
@@ -129,6 +132,8 @@ public class VoiceBatchController {
         //   화면만 보고는 알 수 없게 된다 — 실제로 그래서 전화 트랙이 브로커 스위치에
         //   끌려가는 것을 아무도 눈치채지 못했다.
         out.put("tracks", tracks());
+        // "이 조합으로는 반드시 실패한다" 를 배치 전에 알린다.
+        out.put("warnings", warnings());
         // 장애 주입이 켜진 줄 모르고 시연하면 실패 건수를 버그로 오해한다 — 항상 노출한다.
         out.put("chaos", faultInjector.snapshot());
         out.put("dataset", dataset.snapshot());
@@ -215,7 +220,31 @@ public class VoiceBatchController {
             return "내부 Mock 브로커 — " + props.sync().meetDir() + " 에 직접 생성";
         }
         String base = blankToNull(props.broker().baseUrl());
-        return (base == null ? "브로커 주소 미설정" : base) + "/api/v1/xvarm/extract";
+        if (base == null) {
+            // 주소를 경로와 이어붙이면 "브로커 주소 미설정/api/v1/..." 처럼 읽혀 설정된 것처럼 보인다.
+            // 배치를 돌려야 비로소 실패하므로, 여기서 문제로 드러나게 한다.
+            return "⚠ voice.broker.base-url 미설정 — REST 모드에서는 필수 (local 프로파일 또는 VOICE_BROKER_BASE_URL)";
+        }
+        return base + "/api/v1/xvarm/extract";
+    }
+
+    /** 이 조합으로는 배치가 반드시 실패한다는 것을 미리 알리는 경고들. */
+    private List<String> warnings() {
+        List<String> w = new java.util.ArrayList<>();
+        if (modeState.broker() == VoiceProperties.BrokerMode.REST
+                && blankToNull(props.broker().baseUrl()) == null) {
+            w.add("접견 트랙: 브로커가 REST 인데 voice.broker.base-url 이 비어 있다 — "
+                    + "접견 배치는 전건 실패한다. 수집기를 local 프로파일로 띄우거나 "
+                    + "VOICE_BROKER_BASE_URL=http://localhost:8082 를 주십시오.");
+        }
+        if (modeState.source() == VoiceProperties.SourceMode.ESB_HTTP2DB) {
+            w.add("보라미 조회가 ESB_HTTP2DB 인데 연계가 아직 구현되지 않았다(계획서 Q2·Q15) — "
+                    + "조회 즉시 실패한다. MOCK 또는 DIRECT_JDBC 로 두십시오.");
+        }
+        if (props.sink().enabled() && blankToNull(props.sink().connectorBaseUrl()) == null) {
+            w.add("비식별 커넥터 전송이 켜져 있는데 주소가 없다 — 전송 건수는 0으로 나온다.");
+        }
+        return w;
     }
 
     private String sttEndpoint() {
