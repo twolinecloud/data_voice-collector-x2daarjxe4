@@ -19,8 +19,13 @@ spring:
     # 값을 안 주면 공통 설정의 H2 인메모리가 그대로 쓰인다(조회하지 않으면 무해).
     url: ${DB_URL:jdbc:h2:mem:borami;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}
     driver-class-name: ${DB_DRIVER:org.h2.Driver}
-    username: ${DB_USER:sa}
-    password: ${DB_PASSWORD:}
+    # 계정은 파드에 이미 주입되어 있는 값을 그대로 쓴다.
+    #   차트(deployment.yaml)가 Backing 의 secret-borami-db-gijoxearrw 에서
+    #   POSTGRES_USERNAME·POSTGRES_PASSWORD 를 넣어 준다. 같은 계정을 서비스 Secret 에
+    #   또 적으면 사본이 둘이 되어 한쪽만 바뀌었을 때 조용히 어긋난다.
+    #   DB_USER 를 명시하면 그게 이기고, 로컬처럼 둘 다 없으면 H2 기본계정(sa)으로 떨어진다.
+    username: ${DB_USER:${POSTGRES_USERNAME:sa}}
+    password: ${DB_PASSWORD:${POSTGRES_PASSWORD:}}
     hikari:
       maximum-pool-size: ${DB_POOL_MAX:10}
       minimum-idle: ${DB_POOL_MIN:2}
