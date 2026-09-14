@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>음성 수집 시뮬레이터 — voice-collector</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  :root { --mono: ui-monospace, SFMono-Regular, Consolas, "D2Coding", monospace; }
+  body { background:#f5f6f8; }
+  .sw-card { border-left:4px solid #adb5bd; }
+  .sw-card.is-mock { border-left-color:#f0ad4e; }
+  .sw-card.is-real { border-left-color:#198754; }
+  .sw-card .label { font-size:.75rem; color:#6c757d; }
+  .sw-card select { font-family:var(--mono); font-weight:600; }
+  .stat { text-align:center; padding:.6rem .25rem; }
+  .stat .n { font-size:1.6rem; font-weight:700; line-height:1.1; font-family:var(--mono); }
+  .stat .k { font-size:.75rem; color:#6c757d; }
+  #log {
+    background:#1e1f22; color:#d6d6d6; font-family:var(--mono); font-size:.8rem;
+    height:320px; overflow-y:auto; padding:.75rem .9rem; border-radius:.375rem;
+    white-space:pre-wrap; word-break:break-all;
+  }
+  #log .t  { color:#7f848e; }
+  #log .ok { color:#7ec699; }
+  #log .er { color:#e06c75; }
+  #log .wr { color:#e5c07b; }
+  #log .hd { color:#61afef; font-weight:600; }
+  #log .pii{ color:#c678dd; font-weight:600; }
+  .tgt-table { font-size:.82rem; }
+  .tgt-table td, .tgt-table th { padding:.35rem .5rem; }
+  .busy { pointer-events:none; opacity:.55; }
+  .chaos-on { background:#fff4e5; }
+  .pii-clean { color:#198754; font-weight:600; }
+  .pii-dirty { color:#dc3545; font-weight:600; }
+  .hint { font-size:.75rem; color:#6c757d; }
+</style>
+</head>
+<body>
+<div class="container-xl py-4">
+
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <div>
+      <h4 class="mb-0">음성 수집 시뮬레이터</h4>
+      <div class="text-secondary small">보라미 음성(접견·통화) → STT → 비식별 커넥터 전달 파이프라인</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-secondary" href="/swagger-ui.html" target="_blank">Swagger</a>
+      <button class="btn btn-sm btn-outline-primary" id="btn-refresh">상태 새로고침</button>
+    </div>
+  </div>
+
+  <!-- ① 모드 전환 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>① 처리 구간 모드</strong>
+      <span class="hint">드롭다운을 바꾸면 <b>서버 재시작 없이</b> 즉시 전환됩니다</span>
+    </div>
+    <div class="card-body">
+      <div class="row g-2 mb-3" id="modes"></div>
+      <div class="row g-2" id="downstream"></div>
+      <div class="hint mt-3" id="dirs"></div>
+    </div>
+  </div>
+
+  <!-- ② 제어 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>② 제어</strong></div>
+    <div class="card-body" id="controls">
+
+      <div class="d-flex flex-wrap gap-2 mb-3">
+        <button class="btn btn-primary"  id="btn-periodic">수동 배치 실행 (10분 주기)</button>
+        <button class="btn btn-primary"  id="btn-daily">수동 배치 실행 (일배치)</button>
+        <button class="btn btn-warning"  id="btn-reset">Mock 데이터 초기화 / 생성</button>
+        <button class="btn btn-outline-secondary" id="btn-targets">처리 대상 미리보기</button>
+        <button class="btn btn-outline-secondary" id="btn-files">수신 파일 확인</button>
+        <button class="btn btn-outline-secondary" id="btn-pii">PII 잔여 확인</button>
+      </div>
+
+      <div class="row g-3">
+        <!-- 대용량 -->
+        <div class="col-12 col-lg-6">
+          <div class="border rounded p-3 h-100">
+            <div class="fw-semibold mb-2">대용량 Mock 데이터 (OOM 방어 검증)</div>
+            <div class="row g-2 align-items-end">
+              <div class="col-4">
+                <label class="hint">접견 건수</label>
+                <input type="number" class="form-control form-control-sm" id="ds-meet" value="5" min="0" max="50000">
+              </div>
+              <div class="col-4">
+                <label class="hint">전화 건수</label>
+                <input type="number" class="form-control form-control-sm" id="ds-phone" value="5" min="0" max="50000">
+              </div>
+              <div class="col-4">
+                <button class="btn btn-sm btn-dark w-100" id="btn-dataset">규모 적용</button>
+              </div>
+            </div>
+            <div class="d-flex flex-wrap gap-1 mt-2">
+              <button class="btn btn-sm btn-outline-secondary preset" data-m="5"    data-p="5">기본 10건</button>
+              <button class="btn btn-sm btn-outline-secondary preset" data-m="500"  data-p="500">1,000건</button>
+              <button class="btn btn-sm btn-outline-secondary preset" data-m="2500" data-p="2500">5,000건</button>
+              <button class="btn btn-sm btn-outline-secondary preset" data-m="5000" data-p="5000">10,000건</button>
+            </div>
+            <div class="hint mt-2" id="ds-note">
+              건당 파일 안정성 검사(100ms)가 곱해집니다 — 1,000건 ≈ 2분, 10,000건 ≈ 20분.
+            </div>
+          </div>
+        </div>
+
+        <!-- 장애 주입 -->
+        <div class="col-12 col-lg-6">
+          <div class="border rounded p-3 h-100" id="chaos-box">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span class="fw-semibold">장애 주입 (Chaos)</span>
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="chaos-on">
+                <label class="form-check-label hint" for="chaos-on">활성</label>
+              </div>
+            </div>
+            <div class="row g-2 align-items-end">
+              <div class="col-4">
+                <label class="hint">실패 %</label>
+                <input type="number" class="form-control form-control-sm" id="chaos-fail" value="10" min="0" max="100">
+              </div>
+              <div class="col-4">
+                <label class="hint">지연 %</label>
+                <input type="number" class="form-control form-control-sm" id="chaos-delay" value="10" min="0" max="100">
+              </div>
+              <div class="col-4">
+                <label class="hint">지연 ms</label>
+                <input type="number" class="form-control form-control-sm" id="chaos-ms" value="2000" min="0" max="60000">
+              </div>
+            </div>
+            <button class="btn btn-sm btn-dark mt-2" id="btn-chaos">설정 적용</button>
+            <div class="hint mt-2">
+              STT·커넥터 전송 구간에 실패·지연을 섞습니다. 한 건이 터져도 배치가
+              <b>failCnt만 올리며 끝까지 도는지</b> 확인하는 용도입니다.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hint mt-3">
+        같은 배치를 <b>두 번</b> 실행하면 두 번째는 <code>건너뜀</code>으로 잡힙니다 —
+        주기배치의 시간창이 겹쳐도 같은 음성을 다시 처리하지 않는다는 뜻입니다.
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ 결과 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>③ 최근 배치 결과</strong>
+      <span class="small text-secondary font-monospace" id="last-exec">—</span>
+    </div>
+    <div class="card-body py-2">
+      <div class="row row-cols-2 row-cols-md-6 g-0" id="stats"></div>
+      <div class="border-top pt-2 mt-2 small" id="pii-line">
+        <span class="text-secondary">PII 원본 삭제 검증:</span> <span class="text-secondary">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 대상 미리보기 -->
+  <div class="card shadow-sm mb-3 d-none" id="targets-card">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>처리 대상</strong>
+      <button class="btn-close btn-sm" id="btn-close-targets" aria-label="닫기"></button>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive" style="max-height:320px">
+        <table class="table table-sm table-hover mb-0 tgt-table">
+          <thead class="table-light sticky-top">
+            <tr><th>종류</th><th>키</th><th>파일명</th>
+                <th class="text-center">암호화</th><th class="text-center">기존 STT</th>
+                <th class="text-center">처리됨</th></tr>
+          </thead>
+          <tbody id="targets-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ④ 로그 -->
+  <div class="card shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>④ 실행 로그</strong>
+      <button class="btn btn-sm btn-outline-secondary" id="btn-clear">로그 지우기</button>
+    </div>
+    <div class="card-body"><div id="log"></div></div>
+  </div>
+
+  <div class="text-center text-secondary small mt-3">
+    voice-collector · 운영 배포 시 <code>/api/v1/mock/**</code> 는 차단합니다
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const SWITCHES = [
+  { key:'source',  label:'보라미 조회',   opts:['MOCK','DIRECT_JDBC','ESB_HTTP2DB'] },
+  { key:'broker',  label:'XVARM 브로커',  opts:['MOCK','REST'] },
+  { key:'decrypt', label:'복호화',        opts:['SKIP','REAL'] },
+  { key:'stt',     label:'STT',           opts:['MOCK','NPU'] },
+];
+const MOCKISH = ['MOCK','SKIP'];
+
+// ── 로그 ────────────────────────────────────────────────────────────────
+function log(msg, cls='') {
+  const t = new Date().toLocaleTimeString('ko-KR', { hour12:false });
+  const line = document.createElement('div');
+  line.innerHTML = `<span class="t">[${t}]</span> <span class="${cls}">${esc(msg)}</span>`;
+  $('log').appendChild(line);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+function logRaw(html) {
+  const t = new Date().toLocaleTimeString('ko-KR', { hour12:false });
+  const line = document.createElement('div');
+  line.innerHTML = `<span class="t">[${t}]</span> ${html}`;
+  $('log').appendChild(line);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ── 호출 ────────────────────────────────────────────────────────────────
+async function call(method, url, label, quiet) {
+  const t0 = performance.now();
+  $('controls').classList.add('busy');
+  if (!quiet) log(`▶ ${label} — ${method} ${url}`, 'hd');
+  try {
+    const res = await fetch(url, { method, headers:{ 'Accept':'application/json' } });
+    const took = Math.round(performance.now() - t0);
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      log(`✖ HTTP ${res.status} (${took}ms) — ${body?.message || body?.error || ''}`, 'er');
+      return null;
+    }
+    if (!quiet) log(`✔ HTTP ${res.status} (${took}ms)`, 'ok');
+    return body;
+  } catch (e) {
+    log(`✖ 요청 실패 — ${e.message}`, 'er');
+    return null;
+  } finally {
+    $('controls').classList.remove('busy');
+  }
+}
+
+// ── ① 모드 ──────────────────────────────────────────────────────────────
+function renderModes(cur) {
+  $('modes').innerHTML = SWITCHES.map(s => {
+    const v = cur[s.key];
+    const mock = MOCKISH.includes(v);
+    const opts = s.opts.map(o => `<option ${o===v?'selected':''}>${o}</option>`).join('');
+    return `<div class="col-6 col-md-3">
+        <div class="card sw-card ${mock?'is-mock':'is-real'} h-100">
+          <div class="card-body py-2 px-3">
+            <div class="label">${s.label}</div>
+            <select class="form-select form-select-sm mt-1" data-switch="${s.key}">${opts}</select>
+            <div class="label mt-1">${s.key}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  document.querySelectorAll('select[data-switch]').forEach(sel => {
+    sel.onchange = async () => {
+      const key = sel.dataset.switch, val = sel.value;
+      const d = await call('PUT', `/api/v1/mock/modes/${key}?value=${encodeURIComponent(val)}`,
+                           `모드 변경 ${key} → ${val}`);
+      if (d) {
+        log(`  └ ${key}: ${d.before} → ${d.after}`, 'ok');
+        renderModes(d.current);
+      }
+      await loadStatus(true);
+    };
+  });
+}
+
+function flagCard(label, on, detail) {
+  return `<div class="col-12 col-md-6">
+      <div class="card sw-card ${on?'is-real':'is-mock'} h-100">
+        <div class="card-body py-2 px-3">
+          <div class="label">${label}</div>
+          <div class="fw-semibold font-monospace">${on?'연결':'미연결'}</div>
+          <div class="label">${esc(detail||'')}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function loadStatus(quiet) {
+  const s = await call('GET', '/api/v1/voice/status', '현재 구성 조회', quiet);
+  if (!s) return;
+
+  renderModes(s.modes);
+
+  $('downstream').innerHTML =
+      flagCard('비식별 커넥터 (하류)', s.sink.enabled, s.sink.connectorBaseUrl || '주소 미설정')
+    + flagCard('로그 컬렉터 (T1·T2·T4)', s.logCollector.enabled, s.logCollector.baseUrl || '주소 미설정');
+
+  $('dirs').innerHTML =
+      `수신 접견 <code>${esc(s.dirs.meetDir)}</code> · 수신 전화 <code>${esc(s.dirs.phoneDir)}</code> · `
+    + `작업 <code>${esc(s.dirs.workDir)}</code> · 파일명 <code>${esc(s.dirs.namingPolicy)}</code><br>`
+    + `스케줄 ${s.batch.scheduleEnabled?'켜짐':'꺼짐'} · 대상코드 <code>${(s.batch.speclMngSeCd||[]).join(',')}</code>`
+    + ` · 1회 상한 ${s.batch.maxFilesPerRun}건`;
+
+  // 대용량 설정 동기화
+  if (s.dataset) {
+    $('ds-meet').value = s.dataset.meetCount;
+    $('ds-phone').value = s.dataset.phoneCount;
+    $('ds-note').innerHTML = s.dataset.bulk
+      ? `현재 <b>${s.dataset.total.toLocaleString()}건</b> · 대량 모드(Mock WAV ${s.dataset.wavSeconds}초로 축소)`
+      : `현재 <b>${s.dataset.total.toLocaleString()}건</b> · 건당 안정성 검사가 곱해집니다 (1,000건 ≈ 2분)`;
+  }
+  // 장애 주입 동기화
+  if (s.chaos) {
+    $('chaos-on').checked   = s.chaos.enabled;
+    $('chaos-fail').value   = s.chaos.failPercent;
+    $('chaos-delay').value  = s.chaos.delayPercent;
+    $('chaos-ms').value     = s.chaos.delayMs;
+    $('chaos-box').classList.toggle('chaos-on', s.chaos.enabled);
+    if (s.chaos.enabled && !quiet) {
+      log(`⚠ 장애 주입이 켜져 있습니다 — 실패 ${s.chaos.failPercent}% · 지연 ${s.chaos.delayPercent}%(${s.chaos.delayMs}ms)`, 'wr');
+    }
+  }
+  if (!quiet && s.sink.enabled === false) {
+    log('ℹ 커넥터 전송이 꺼져 있습니다 — 전송 건수는 0으로 나옵니다', 'wr');
+  }
+}
+
+// ── ③ 결과 ──────────────────────────────────────────────────────────────
+function stat(n, k, cls) {
+  return `<div class="col"><div class="stat"><div class="n ${cls||''}">${n}</div><div class="k">${k}</div></div></div>`;
+}
+function renderResult(r) {
+  $('last-exec').textContent = `${r.execId} · ${r.window} · ${(r.elapsedMs/1000).toFixed(1)}초`;
+  $('stats').innerHTML =
+      stat(r.targetCnt.toLocaleString(),  '대상')
+    + stat(r.successCnt.toLocaleString(), '성공',   r.successCnt>0?'text-success':'')
+    + stat(r.failCnt.toLocaleString(),    '실패',   r.failCnt>0?'text-danger':'')
+    + stat(r.skippedCnt.toLocaleString(), '건너뜀', r.skippedCnt>0?'text-warning':'')
+    + stat(r.sentCnt.toLocaleString(),    '전송')
+    + stat(r.execStsCd ?? '-', '상태');
+
+  log(`  └ 대상 ${r.targetCnt} · 성공 ${r.successCnt} · 실패 ${r.failCnt} · 건너뜀 ${r.skippedCnt} · 전송 ${r.sentCnt}  (execId=${r.execId})`,
+      r.failCnt>0 ? 'wr' : 'ok');
+
+  renderPii(r.residue);
+
+  const failed = (r.outcomes||[]).filter(o => o.status === 'FAIL');
+  if (failed.length) {
+    log(`  └ 실패 ${failed.length}건 (배치는 중단되지 않고 완주):`, 'er');
+    failed.slice(0,5).forEach(o =>
+      log(`      · ${o.target?.kind}/${o.target?.idempotencyKey} — ${o.errMsg}`, 'er'));
+    if (failed.length > 5) log(`      · … 외 ${failed.length-5}건`, 'er');
+  }
+}
+
+function renderPii(residue) {
+  if (!residue) {
+    $('pii-line').innerHTML = '<span class="text-secondary">PII 원본 삭제 검증:</span> <span class="text-secondary">—</span>';
+    return;
+  }
+  const cls = residue.clean ? 'pii-clean' : 'pii-dirty';
+  $('pii-line').innerHTML =
+      `<span class="text-secondary">PII 원본 삭제 검증:</span> <span class="${cls}">${esc(residue.message)}</span>`
+    + `<span class="hint ms-2">(접견 ${residue.meetFiles} · 전화 ${residue.phoneFiles} · 작업 ${residue.workFiles})</span>`;
+  // 로그에도 명시적으로 남긴다 — 정책이 지켜졌음을 눈으로 확인할 수 있어야 한다
+  logRaw(`<span class="pii">🔒 ${esc(residue.message)}</span>`);
+}
+
+async function runBatch(path, label) {
+  const total = Number($('ds-meet').value||0) + Number($('ds-phone').value||0);
+  if (total > 200) {
+    log(`⏳ 대상 ${total.toLocaleString()}건 — 완료까지 수 분 걸립니다. 창을 닫지 마세요.`, 'wr');
+  }
+  const r = await call('POST', path, label);
+  if (r) renderResult(r);
+  await loadStatus(true);
+}
+
+// ── 대상 미리보기 ───────────────────────────────────────────────────────
+function badge(b, yes, no) {
+  return b ? `<span class="badge text-bg-secondary">${yes}</span>`
+           : `<span class="badge text-bg-light text-secondary">${no}</span>`;
+}
+async function showTargets() {
+  const d = await call('GET', '/api/v1/mock/targets', '처리 대상 미리보기');
+  if (!d) return;
+  log(`  └ 전체 ${d.total} · 미처리 ${d.pending} · 이미처리 ${d.alreadyProcessed} (source=${d.sourceMode})`, 'ok');
+  const rows = (d.targets||[]).slice(0, 200);
+  $('targets-body').innerHTML = rows.map(t => `
+      <tr>
+        <td>${esc(t.kindLabel)}</td>
+        <td class="font-monospace small">${esc(t.key)}</td>
+        <td class="small">${esc(t.fileName ?? '')}</td>
+        <td class="text-center">${badge(t.encrypted,'암호화','평문')}</td>
+        <td class="text-center">${badge(t.hasSourceStt,'있음','없음')}</td>
+        <td class="text-center">${t.processed
+            ? '<span class="badge text-bg-warning">처리됨</span>'
+            : '<span class="badge text-bg-success">대기</span>'}</td>
+      </tr>`).join('');
+  if ((d.targets||[]).length > 200) {
+    log(`  └ 표에는 200건만 표시합니다 (전체 ${d.total}건)`, 'wr');
+  }
+  $('targets-card').classList.remove('d-none');
+}
+
+// ── 바인딩 ──────────────────────────────────────────────────────────────
+$('btn-periodic').onclick = () => runBatch('/api/v1/voice/batches/periodic', '주기배치 실행 (10분 창)');
+$('btn-daily').onclick    = () => runBatch('/api/v1/voice/batches/daily', '일배치 실행 (전날 하루치)');
+
+$('btn-reset').onclick = async () => {
+  const d = await call('POST', '/api/v1/mock/reset', 'Mock 데이터 초기화 / 생성');
+  if (!d) return;
+  const c = d.cleared || {};
+  log(`  └ 표식 ${c.idempotencyMarkers} · 접견파일 ${c.meetFiles} · 전화파일 ${c.phoneFiles} · 작업파일 ${c.workFiles} 삭제`, 'ok');
+  log(`  └ ${d.message}`, 'ok');
+  $('stats').innerHTML = '';
+  $('last-exec').textContent = '—';
+  renderPii(null);
+  $('targets-card').classList.add('d-none');
+};
+
+$('btn-dataset').onclick = async () => {
+  const m = Number($('ds-meet').value||0), p = Number($('ds-phone').value||0);
+  const d = await call('PUT', `/api/v1/mock/dataset?meet=${m}&phone=${p}`, `Mock 규모 ${m+p}건 적용`);
+  if (!d) return;
+  log(`  └ ${d.message}${d.bulk ? ` · 대량 모드(WAV ${d.wavSeconds}초)` : ''}`, 'ok');
+  await loadStatus(true);
+};
+
+document.querySelectorAll('.preset').forEach(b => {
+  b.onclick = () => { $('ds-meet').value = b.dataset.m; $('ds-phone').value = b.dataset.p; $('btn-dataset').click(); };
+});
+
+$('btn-chaos').onclick = async () => {
+  const on = $('chaos-on').checked;
+  const q = `enabled=${on}&failPercent=${$('chaos-fail').value}`
+          + `&delayPercent=${$('chaos-delay').value}&delayMs=${$('chaos-ms').value}`;
+  const d = await call('PUT', `/api/v1/mock/chaos?${q}`, `장애 주입 ${on?'활성':'해제'}`);
+  if (!d) return;
+  log(`  └ 실패 ${d.failPercent}% · 지연 ${d.delayPercent}%(${d.delayMs}ms) · 누적 주입 실패 ${d.injectedFailures} / 지연 ${d.injectedDelays}`,
+      d.enabled ? 'wr' : 'ok');
+  $('chaos-box').classList.toggle('chaos-on', d.enabled);
+};
+$('chaos-on').onchange = () => $('btn-chaos').click();
+
+$('btn-pii').onclick = async () => {
+  const d = await call('GET', '/api/v1/mock/pii-residue', 'PII 잔여 확인');
+  if (!d) return;
+  renderPii(d);
+};
+
+$('btn-targets').onclick = showTargets;
+$('btn-close-targets').onclick = () => $('targets-card').classList.add('d-none');
+
+$('btn-files').onclick = async () => {
+  const d = await call('GET', '/api/v1/mock/files', '수신 파일 확인');
+  if (!d) return;
+  const m = (d.meet||[]).length, p = (d.phone||[]).length;
+  log(`  └ 접견 ${m}개 · 전화 ${p}개`, m+p>0 ? 'ok' : 'wr');
+};
+
+$('btn-refresh').onclick = () => loadStatus(false);
+$('btn-clear').onclick   = () => { $('log').innerHTML = ''; };
+
+log('시뮬레이터 준비 완료. [Mock 데이터 초기화] → [처리 대상 미리보기] → [배치 실행] 순서를 권합니다.', 'hd');
+loadStatus(false);
+</script>
+</body>
+</html>

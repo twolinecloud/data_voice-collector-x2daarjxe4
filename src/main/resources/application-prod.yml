@@ -1,0 +1,44 @@
+# ── 운영 ───────────────────────────────────────────────────────────────────
+#   ⚠ Mock 스키마 자동 적재를 반드시 끈다. 실제 보라미(또는 I/F 뷰)에 붙는 환경에서
+#     schema-borami-mock.sql 이 돌면 DROP TABLE 이 실행된다.
+spring:
+  sql:
+    init:
+      mode: never
+
+  datasource:
+    url: ${DB_URL}
+    driver-class-name: ${DB_DRIVER:oracle.jdbc.OracleDriver}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+
+voice:
+  source:
+    mode: ${VOICE_SOURCE_MODE:ESB_HTTP2DB}
+  broker:
+    mode: ${VOICE_BROKER_MODE:REST}
+  stt:
+    mode: ${VOICE_STT_MODE:NPU}
+  decrypt:
+    mode: ${VOICE_DECRYPT_MODE:REAL}
+
+  sync:
+    meet-dir: ${VOICE_MEET_DIR:/k8s/voice_raw/meet}
+    phone-dir: ${VOICE_PHONE_DIR:/k8s/voice_raw/phone}
+    work-dir: ${VOICE_WORK_DIR:/k8s/voice_work}
+
+  sink:
+    enabled: true
+    connector-base-url: ${VOICE_CONNECTOR_BASE_URL}
+
+  batch:
+    schedule-enabled: ${VOICE_SCHEDULE_ENABLED:true}
+    retain-source-file: false     # 복호화된 원본 음성은 STT 후 지운다
+
+log-collector:
+  enabled: true
+  base-url: ${LOG_COLLECTOR_BASE_URL}
+
+logging:
+  level:
+    egovframework.voice.collector: INFO

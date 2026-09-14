@@ -1,7 +1,115 @@
-swagger-ui:
-  protocol: "http"
-  host: "localhost:8000"
+# ══════════════════════════════════════════════════════════════════════════
+#  로컬 개발·시연 프로파일
+# ══════════════════════════════════════════════════════════════════════════
+#  실행: mvn spring-boot:run -Dspring-boot.run.profiles=local
+#
+#  ── 로컬 포트 배치 ────────────────────────────────────────────────────────
+#    8080  agent-connector   (비식별 커넥터)
+#    8081  voice-collector   (이 서비스)          ← 시뮬레이터 http://localhost:8081/simulator.html
+#    8090  log-collector     (context-path /logc)
+#
+#    커넥터가 8080 을 쓰고 로그 컬렉터가 8090 을 쓰도록 이미 정해져 있어(각 프로젝트의
+#    application-local.yml) 이 서비스는 8081 을 쓴다. 셋을 동시에 띄워도 겹치지 않는다.
+# ══════════════════════════════════════════════════════════════════════════
+
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  sql:
+    init:
+      # H2 Mock 보라미 스키마·샘플을 매 기동 시 적재한다.
+      # voice.source.mode=DIRECT_JDBC 로 바꾸면 이 데이터를 실제로 조회한다.
+      mode: always
+
+# ── 로그 컬렉터 (T1·T2·T4) ────────────────────────────────────────────────
+#   K8s 의 DB 만 포트포워딩하고 컬렉터 앱은 로컬에서 직접 띄우는 구성.
+#   base-url 에는 반드시 context-path(/logc)까지 포함한다 — 빼면 전부 404 가 난다.
+#
+#   ⚠ 컬렉터가 안 떠 있어도 이 서비스는 정상 동작한다. LogCollectorClient 는 호출 실패를
+#     경고만 남기고 넘어간다(이력 적재가 수집을 막지 않는다). 다만 EXEC_ID 를 못 받아
+#     로컬 임시 ID(…VOC-LOCAL)로 돌아간다.
+log-collector:
+  enabled: ${LOG_COLLECTOR_ENABLED:true}
+  base-url: ${LOG_COLLECTOR_BASE_URL:http://localhost:8090/logc}
+  auth-token: ${LOG_COLLECTOR_TOKEN:}
+
+# ── 실제 K8s DB 를 보려면 (포트포워딩 전제) ──────────────────────────────
+#   두 DB 는 네임스페이스가 다르다. -n 을 빠뜨리면 서비스를 찾지 못한다.
+#
+#     kubectl port-forward -n service-core  svc/admin-db-fy9tjq4tsk  15432:5432
+#     kubectl port-forward -n data-pipeline svc/borami-db-gijoxearrw 15433:5432
+#
+#   | 대상       | 포트  | database       | user   | 용도                         |
+#   |-----------|------|----------------|--------|------------------------------|
+#   | admin-db  | 15432| correction_ai  | kcais  | 로그 컬렉터(kcais 스키마)      |
+#   | borami-db | 15433| borami         | borami | 보라미 조회(DIRECT_JDBC)      |
+#
+#   borami-db 를 직접 조회하려면 <b>realdb 프로파일을 겹쳐서</b> 띄운다:
+#     mvn spring-boot:run -Dspring-boot.run.profiles=local,realdb
+#   (realdb 가 sql.init 을 끄고 스키마·플래그 값을 실DB 에 맞춘다.
+#    local 단독으로 datasource 만 바꾸면 Mock 스키마의 DROP TABLE 이 실DB 에서 실행된다)
+
+voice:
+  # ── 4개 스위치: 로컬은 전 구간 MOCK ──────────────────────────────────────
+  #   기동 후 시뮬레이터 화면이나 PUT /api/v1/mock/modes/{name} 으로 재시작 없이 바꿀 수 있다.
+  source:
+    mode: ${VOICE_SOURCE_MODE:MOCK}      # MOCK | DIRECT_JDBC(H2 Mock 보라미) | ESB_HTTP2DB
+    # H2 Mock 은 스키마가 평평하다 — 비워 둔다. 실DB 는 realdb 프로파일이 채운다.
+    schema:
+      imsc: ${VOICE_SCHEMA_IMSC:}
+      rerd: ${VOICE_SCHEMA_RERD:}
+      smsm: ${VOICE_SCHEMA_SMSM:}
+      xvarm: ${VOICE_SCHEMA_XVARM:}
+  # ── XVARM 브로커 ────────────────────────────────────────────────────────
+  #   MOCK : 내부 Mock 컴포넌트가 수신 폴더에 더미 파일을 만든다(외부 의존 없음)
+  #   REST : 8082 의 borami-xvarm-broker 를 실제로 호출한다
+  #
+  #   REST 로 시험하려면 브로커를 띄우고, 브로커의 출력 폴더를 아래 meet-dir 로 맞춘다.
+  #   로컬에는 ESB 가 없으므로 브로커가 수신 폴더에 직접 쓰게 해 그 구간을 생략한다:
+  #
+  #     cd D:\Twoline_Project\borami-xvarm-broker
+  #     set BROKER_OUTPUT_DIR=D:/Twoline_Project/data_voice-collector/work/voice_raw/meet
+  #     mvn spring-boot:run
+  #
+  #   그 뒤 시뮬레이터에서 브로커 드롭다운을 REST 로 바꾸거나:
+  #     curl -X PUT "http://localhost:8081/api/v1/mock/modes/broker?value=REST"
+  broker:
+    mode: ${VOICE_BROKER_MODE:MOCK}
+    base-url: ${VOICE_BROKER_BASE_URL:http://localhost:8082}
+    poll-interval-ms: ${VOICE_BROKER_POLL_MS:500}
+    poll-timeout-sec: ${VOICE_BROKER_TIMEOUT_SEC:30}
+  stt:
+    mode: ${VOICE_STT_MODE:MOCK}
+  decrypt:
+    mode: ${VOICE_DECRYPT_MODE:SKIP}
+
+  sync:
+    meet-dir: ${VOICE_MEET_DIR:./work/voice_raw/meet}
+    phone-dir: ${VOICE_PHONE_DIR:./work/voice_raw/phone}
+    work-dir: ${VOICE_WORK_DIR:./work/voice_work}
+    # Mock 파일은 즉시 완성되므로 안정성 검사를 짧게 둔다.
+    # 이 값이 건당 그대로 곱해져 대용량 시험 시간을 좌우한다(1,000건 × 100ms ≈ 2분).
+    stable-check-ms: ${VOICE_STABLE_CHECK_MS:100}
+    wait-timeout-sec: ${VOICE_WAIT_TIMEOUT_SEC:20}
+    naming-policy: ORIGINAL
+
+  # ── 비식별 커넥터 (하류) ────────────────────────────────────────────────
+  #   기본은 꺼 둔다. 커넥터 없이도 시뮬레이터가 돌아야 하고, 켜 둔 채로 커넥터가 없으면
+  #   전송 실패 로그가 쌓여 시연 화면이 지저분해진다.
+  #   커넥터를 8080 으로 띄운 뒤 VOICE_SINK_ENABLED=true 로 켠다.
+  sink:
+    enabled: ${VOICE_SINK_ENABLED:false}
+    connector-base-url: ${VOICE_CONNECTOR_BASE_URL:http://localhost:8080}
+    chunk-size: ${VOICE_CHUNK_SIZE:100}
+
+  batch:
+    # 로컬에서는 스케줄을 끈다. 원치 않는 시점에 배치가 돌아 대상을 소진하면
+    # 시연을 다시 준비해야 한다. 실행은 시뮬레이터 버튼이나 API 로 한다.
+    schedule-enabled: ${VOICE_SCHEDULE_ENABLED:false}
+    max-files-per-run: ${VOICE_MAX_FILES:20000}
+    retain-source-file: false            # PII 즉시 삭제 정책 검증을 로컬에서도 그대로
 
 logging:
-  config: classpath:log4j2-spring.yml
-
+  level:
+    egovframework.voice.collector: ${LOG_LEVEL:DEBUG}

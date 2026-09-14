@@ -1,66 +1,141 @@
 spring:
   application:
-    name: voice-collector-x2daarjxe4
-    version: v1
-    desc: voice-collector-x2daarjxe4 RESTful API Service
+    name: voice-collector
+    version: v1.0
+    desc: 비정형 음성(접견·통화) 수집 및 STT 연계 서비스
   jackson:
-    date-format: yyyy-MM-dd'T'HH:mm:ss
+    date-format: "yyyy-MM-dd'T'HH:mm:ss"
+    default-property-inclusion: non_null
+
+  # DB 시간 표준 = KST. 로그 컬렉터·커넥터와 같은 시계를 봐야 한 배치의 T1·T4 가 어긋나지 않는다.
+  # (Main.main 에서 JVM 기본 타임존도 고정한다)
   datasource:
-    dbcp2:
-      initial-size: 20
-    url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_DB_PORT:5432}/${POSTGRES_DB_NAME:postgres}?allowMultiQueries=true
-    driver-class-name: org.postgresql.Driver
-    username: ${POSTGRES_USERNAME:postgres}
-    password: ${POSTGRES_PASSWORD:0000}
+    # 기본은 H2 인메모리 Mock 보라미다. 개발계에서 4단 조인 SQL 자체를 검증하려고 둔다.
+    #   · voice.source.mode=MOCK      → DB 를 쓰지 않는다(이 DataSource 는 놀고 있다)
+    #   · voice.source.mode=DIRECT_JDBC → 아래 H2 의 Mock 보라미를 조회한다
+    #   · 실제 보라미(Oracle) 는 prod 프로파일에서 덮어쓴다
+    url: ${DB_URL:jdbc:h2:mem:borami;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}
+    driver-class-name: ${DB_DRIVER:org.h2.Driver}
+    username: ${DB_USER:sa}
+    password: ${DB_PASSWORD:}
     hikari:
-      maximum-pool-size: 3
-      maxLifeTime: 3300000
-      connection-timeout: 30000
-      idle-timeout: 600000
-      connection-test-query: SELECT 1
-      dialect: org.hibernate.dialect.PostgreSQLDialect
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: ${DB_POOL_MIN:2}
+      connection-timeout: ${DB_POOL_TIMEOUT_MS:30000}
+
   sql:
     init:
-      mode: always
-      schema-locations: classpath:schema-postgresql.sql
+      # Mock 보라미 스키마·샘플. 실제 보라미에 붙을 때는 반드시 never 로 둔다.
+      mode: ${SQL_INIT_MODE:always}
+      schema-locations: classpath:schema-borami-mock.sql
+      data-locations: classpath:data-borami-mock.sql
+      continue-on-error: false
+
 server:
-  port: 8080
-  forward-headers-strategy: framework
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
 service-path: ${SERVICE_PATH:}
-springdoc:
-  cache:
-    disabled: true
-  version: 1
-  api-docs:
-    path: /v3/api-docs
-    enabled: true
-    resolve-schema-properties: true
-  default-consumes-media-type: application/json
-  default-produces-media-type: application/json
-  swagger-ui:
-    operations-sorter: alpha
-    tags-sorter: alpha
-    path: /swagger-ui.html
-    url: ${SERVICE_PATH:}/v3/api-docs
-    config-url: ${SERVICE_PATH:}/v3/api-docs/swagger-config
-    disable-swagger-default-url: true
-    display-query-params-without-oauth2: true
-    show-common-extensions: true
-  show-actuator: true
-  show-login-endpoint: true
-logging:
-  config: classpath:log4j2-spring.yml
-  level:
-    org.springframework.web.servlet.PageNotFound: 'OFF'
+
 management:
   endpoints:
     web:
       exposure:
-        include: '*'
-mybatis:
-  type-aliases-package: egovframework.voice.collector.request
-  mapper-locations: mappers/*Mapper.xml
-  configuration:
-    map-underscore-to-camel-case: false
-    cache-enabled: false
-    use-generated-keys: true
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+# ── 로그 컬렉터 ────────────────────────────────────────────────────────────
+#   R&R: 로그 테이블(T1~T11)의 단일 writer 는 로그 컬렉터다. 이 서비스는 T1·T2·T4 를 API 로 적재한다.
+#   base-url 은 context-path(/logc)까지 포함해서 준다.
+#   기본 false — 컬렉터 없이도 기동·시연이 되게 하는 방어적 기본값이다(커넥터와 동일한 정책).
+log-collector:
+  enabled: ${LOG_COLLECTOR_ENABLED:false}
+  base-url: ${LOG_COLLECTOR_BASE_URL:}
+  auth-token: ${LOG_COLLECTOR_TOKEN:}
+  connect-timeout-sec: 5
+  read-timeout-sec: 30
+
+# ── 음성 수집 ──────────────────────────────────────────────────────────────
+#   외부 의존 4종이 서로 다른 시점에 준비된다. 각각 독립 스위치로 두어 준비된 것부터 전환한다.
+#   REAL 모드는 실패 시 Mock 으로 빠지지 않는다(Fail-fast) — Mock 결과가 실제인 양 섞이면
+#   시연·검증이 통째로 무의미해지기 때문이다.
+voice:
+  source:
+    mode: ${VOICE_SOURCE_MODE:MOCK}          # MOCK | DIRECT_JDBC | ESB_HTTP2DB
+    esb-base-url: ${VOICE_ESB_BASE_URL:}
+    interface-id: ${VOICE_ESB_IF_ID:}        # 표준 A 명명규칙 IF_송신(3)_수신(3)_일련(3) — 미확정(Q2)
+
+    # 보라미 테이블이 놓인 스키마. 비우면 수식 없이(H2 Mock), 채우면 '스키마.테이블' 로 조립한다.
+    #   실제 borami-db 확인값(2026-09-12): imsc=im · rerd=re · smsm=sm(테이블 없음) · xvarm=(없음)
+    #   회의 축어록 [00:17:26] "TVG의 RE면 RE점, IM이면 IM점" 이 이 구조다.
+    schema:
+      imsc: ${VOICE_SCHEMA_IMSC:}            # 특이수용자상세 + 사용자통화내역
+      rerd: ${VOICE_SCHEMA_RERD:}            # 녹취파일내역
+      smsm: ${VOICE_SCHEMA_SMSM:}            # 공통파일기본
+      xvarm: ${VOICE_SCHEMA_XVARM:}          # XVARM 콘텐츠 메타
+
+    # 플래그 컬럼의 값 도메인. 스펙 문서에 값 정의가 없어 설정으로 뺀다.
+    #   ⚠ 실DB 에서 TELP_PTCR_PRSR_YN 은 'Y' 가 아니라 '0' 이었다(2026-09-12).
+    #     하드코딩하면 에러 없이 0건만 나와 알아채기 어렵다.
+    flag:
+      recorded-yes: ${VOICE_FLAG_RECORDED_YES:Y}    # TELP_PCALL_RECRD_YN 의 '녹음됨'
+      ptcr-yes: ${VOICE_FLAG_PTCR_YES:Y}            # TELP_PTCR_PRSR_YN 의 '특이수용자'
+      not-deleted: ${VOICE_FLAG_NOT_DELETED:N}      # DEL_YN 계열의 '삭제 안 됨'
+      encrypted: ${VOICE_FLAG_ENCRYPTED:Y}          # CMMN_FILE_ENC_YN 의 '암호화됨'
+
+  broker:
+    mode: ${VOICE_BROKER_MODE:MOCK}          # MOCK | REST
+    base-url: ${VOICE_BROKER_BASE_URL:}
+    poll-interval-ms: 2000
+    poll-timeout-sec: 120
+
+  sync:
+    meet-dir: ${VOICE_MEET_DIR:./work/voice_raw/meet}
+    phone-dir: ${VOICE_PHONE_DIR:./work/voice_raw/phone}
+    work-dir: ${VOICE_WORK_DIR:./work/voice_work}
+    stable-check-ms: 1500
+    wait-timeout-sec: ${VOICE_WAIT_TIMEOUT_SEC:300}
+    naming-policy: ${VOICE_NAMING_POLICY:ORIGINAL}   # ORIGINAL | ESB_DAT (Q7)
+
+  decrypt:
+    mode: ${VOICE_DECRYPT_MODE:SKIP}         # SKIP | REAL — 전화 복호화 주체 미확정(Q13)
+    rvs-key-path: ${VOICE_RVS_KEY_PATH:}     # 접견 복호화 키(rvs_key.txt) — 미수령(Q8)
+
+  stt:
+    mode: ${VOICE_STT_MODE:MOCK}             # MOCK | NPU
+    base-url: ${VOICE_STT_BASE_URL:}
+    timeout-sec: ${VOICE_STT_TIMEOUT_SEC:300}
+
+  sink:
+    enabled: ${VOICE_SINK_ENABLED:true}
+    connector-base-url: ${VOICE_CONNECTOR_BASE_URL:}
+    chunk-size: 100
+    timeout-sec: 60
+
+  batch:
+    schedule-enabled: ${VOICE_SCHEDULE_ENABLED:false}
+    daily-cron: ${VOICE_DAILY_CRON:0 0 2 * * *}
+    periodic-cron: ${VOICE_PERIODIC_CRON:0 */10 * * * *}
+    periodic-lag-min: 20
+    specl-mng-se-cd: ${VOICE_SPECL_CODES:0,1,2,3,5}
+    max-files-per-run: ${VOICE_MAX_FILES:500}
+    job-id: ${VOICE_JOB_ID:VOICE_BATCH}      # 작업코드 VOC 로 채번되는 값 확인 필요(Q4)
+    data-type-cd: VOICE
+    retain-source-file: ${VOICE_RETAIN_SOURCE:false}
+
+  inmate-pid:
+    salt: ${VOICE_PID_SALT:kcais-voice-collector}
+    prefix: VP
+
+logging:
+  level:
+    egovframework.voice.collector: ${LOG_LEVEL:INFO}

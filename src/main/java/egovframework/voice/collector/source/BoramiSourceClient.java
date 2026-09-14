@@ -1,0 +1,41 @@
+package egovframework.voice.collector.source;
+
+import egovframework.voice.collector.model.BatchWindow;
+import egovframework.voice.collector.model.VoiceTarget;
+
+import java.util.List;
+
+/**
+ * 보라미에서 수집 대상을 골라 온다.
+ *
+ * <p><b>구현이 셋인 이유</b>: 연계 방식이 아직 확정되지 않았다.
+ * 2026-08-07 협의로 <b>원장 DB 직접 접근은 금지</b>되고 인터페이스 테이블/뷰 경유가 확정됐지만,
+ * 그 I/F 테이블의 실체는 아직 정해지지 않았다(계획서 Q15). 그래서 조회 주체를 인터페이스로
+ * 끊어 두고 MOCK → DIRECT_JDBC → ESB_HTTP2DB 순으로 갈아 끼운다.</p>
+ */
+public interface BoramiSourceClient {
+
+    /**
+     * 접견 녹음 대상을 찾는다.
+     *
+     * <p>4단 조인이다 — 특이수용자({@code TB_IMSC_PTPR_DT}) → 녹취파일내역({@code TB_RERD_TFIN_DS})
+     * → 공통파일기본({@code TB_SMSM_CMFI_BS}) → {@code XVARM.ASYSCONTENTELEMENT}.</p>
+     *
+     * @param window     시간창
+     * @param speclCodes 특별관리구분코드 목록 — 조직(0)·마약(1)·관심(2)·엄격(3)·일일중점(5)
+     * @param limit      상한
+     */
+    List<VoiceTarget> findMeetTargets(BatchWindow window, List<String> speclCodes, int limit);
+
+    /**
+     * 전화 녹음 대상을 찾는다. 단일 테이블({@code TB_IMPH_UCDR_DS}) 조회다.
+     *
+     * <p>{@code TELP_PTCR_PRSR_YN}(전화특이수용자여부) 플래그가 이 테이블에 이미 있어,
+     * 특이수용자 조인 없이 거를 수 있는 지름길이 존재한다. 두 방식의 결과 건수가 같은지는
+     * 실연동 때 대사해야 한다(계획서 4.2).</p>
+     */
+    List<VoiceTarget> findPhoneTargets(BatchWindow window, List<String> speclCodes, int limit);
+
+    /** 이 구현이 어떤 모드인지(진단·응답 표기용). */
+    String mode();
+}

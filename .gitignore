@@ -17,4 +17,14 @@ eclipse-launch-profiles
 .DS_Store
 Thumbs.db
 
+#Log Files
+logs
 
+# Python 바이트코드 — static/loadtest 의 송신단 클라이언트를 실행·검사하면 생긴다
+__pycache__/
+*.pyc
+
+
+
+# Mock 실행 시 생기는 음성 작업 디렉터리 (수신 파일·복호화 산출물·멱등 표식)
+/work

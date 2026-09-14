@@ -1,0 +1,230 @@
+package egovframework.voice.collector.batch;
+
+import egovframework.voice.collector.config.FaultInjector;
+import egovframework.voice.collector.config.MockDatasetState;
+import egovframework.voice.collector.model.BatchWindow;
+import egovframework.voice.collector.model.ProcStatus;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+
+/**
+ * 장애 내성(Fault Tolerance)과 PII 삭제 보장 검증.
+ *
+ * <p><b>확인하려는 것 두 가지</b></p>
+ * <ol>
+ *   <li><b>배치가 뻗지 않는다</b> — 파일 1건이 터져도 예외가 밖으로 나가지 않고
+ *       {@code failCnt} 만 올리며 끝까지 돈다. 1,300건 배치에서 한 건 때문에 전체가 멈추면
+ *       나머지를 전부 다시 처리해야 한다.</li>
+ *   <li><b>실패해도 원본이 남지 않는다</b> — 정책은 성공·실패를 가리지 않고 즉시 삭제다
+ *       (계획서 5.3-(4)). STT 가 실패하는 경로에서도 복호화된 음성이 디스크에 남으면 안 된다.
+ *       {@code processOne} 의 {@code finally} 가 그걸 보장한다.</li>
+ * </ol>
+ */
+@SpringBootTest
+@ActiveProfiles("local")
+class ResilienceE2ETest {
+
+    @TempDir
+    static Path tmp;
+
+    @DynamicPropertySource
+    static void dirs(DynamicPropertyRegistry registry) {
+        registry.add("voice.sync.meet-dir", () -> tmp.resolve("raw/meet").toString());
+        registry.add("voice.sync.phone-dir", () -> tmp.resolve("raw/phone").toString());
+        registry.add("voice.sync.work-dir", () -> tmp.resolve("work").toString());
+        registry.add("voice.sync.wait-timeout-sec", () -> "15");
+        registry.add("voice.sync.stable-check-ms", () -> "30");
+        registry.add("log-collector.enabled", () -> "false");
+        registry.add("voice.sink.enabled", () -> "false");
+    }
+
+    @Autowired
+    private VoiceCollectService service;
+
+    @Autowired
+    private IdempotencyGuard idempotency;
+
+    @Autowired
+    private FaultInjector faultInjector;
+
+    @Autowired
+    private MockDatasetState dataset;
+
+    @Autowired
+    private PiiResidueAuditor residueAuditor;
+
+    /** Mock 기본 대상 — 접견 5 + 전화 5. */
+    private static final int TOTAL = 10;
+
+    /**
+     * 그중 1건(전화 3번)은 <b>보라미가 이미 가진 STT</b> 를 쓴다(계획서 Q1 시나리오).
+     * 오디오를 만지지 않으니 STT 엔진을 타지 않고, 따라서 STT 구간 장애 주입의 영향도 받지 않는다.
+     */
+    private static final int SOURCE_STT = 1;
+
+    /** STT 엔진을 실제로 타는 건수 = 장애 주입이 닿는 범위. */
+    private static final int STT_DEPENDENT = TOTAL - SOURCE_STT;   // 9
+
+    private BatchWindow wide() {
+        LocalDateTime now = LocalDateTime.now();
+        return BatchWindow.manual(now.minusDays(2), now.plusDays(1));
+    }
+
+    @BeforeEach
+    void reset() {
+        idempotency.clearAll();
+        dataset.reset();
+        faultInjector.configure(false, 10, 10, 2_000L);
+        faultInjector.resetCounters();
+    }
+
+    @AfterEach
+    void turnOffChaos() {
+        // 전역 상태다. 끄지 않으면 다른 테스트가 영향을 받는다.
+        faultInjector.configure(false, 10, 10, 2_000L);
+    }
+
+    @Test
+    @DisplayName("STT 가 100% 실패해도 배치는 예외 없이 완주한다")
+    void batchCompletesEvenWhenEveryFileFails() {
+        faultInjector.configure(true, 100, 0, 0L);
+
+        VoiceBatchResult[] holder = new VoiceBatchResult[1];
+        assertThatCode(() -> holder[0] = service.run(wide(), null, "TEST"))
+                .as("건별 실패가 배치 밖으로 새어 나오면 안 된다")
+                .doesNotThrowAnyException();
+
+        VoiceBatchResult r = holder[0];
+        assertThat(r.targetCnt()).isEqualTo(TOTAL);
+        assertThat(r.failCnt()).as("STT 를 타는 건은 전부 실패").isEqualTo(STT_DEPENDENT);
+        assertThat(r.successCnt())
+                .as("보라미 기존 STT 를 쓰는 건은 STT 엔진을 타지 않아 장애와 무관하다")
+                .isEqualTo(SOURCE_STT);
+        assertThat(r.execStsCd()).isEqualTo("PARTIAL");
+        assertThat(faultInjector.injectedFailures()).isPositive();
+    }
+
+    @Test
+    @DisplayName("STT 가 전부 실패한 배치에서도 원본 음성이 남지 않는다 — 성공·실패 무관 즉시 삭제")
+    void noPiiResidueEvenWhenAllFail() {
+        faultInjector.configure(true, 100, 0, 0L);
+
+        VoiceBatchResult r = service.run(wide(), null, "TEST");
+
+        assertThat(r.failCnt()).isEqualTo(STT_DEPENDENT);
+        assertThat(r.residue()).isNotNull();
+        assertThat(r.residue().total())
+                .as("실패 경로에서도 복호화 원본이 지워져야 한다")
+                .isZero();
+        assertThat(r.residue().clean()).isTrue();
+        assertThat(r.residue().message()).isEqualTo("작업 폴더 내 잔여 파일: 0건 (삭제 완료)");
+    }
+
+    @Test
+    @DisplayName("성공한 배치에서도 원본 음성이 남지 않는다")
+    void noPiiResidueOnSuccess() {
+        VoiceBatchResult r = service.run(wide(), null, "TEST");
+
+        assertThat(r.successCnt()).isEqualTo(10);
+        assertThat(r.residue().total()).isZero();
+        assertThat(r.residue().clean()).isTrue();
+    }
+
+    @Test
+    @DisplayName("일부만 실패해도 나머지는 정상 처리된다 — 한 건이 전체를 막지 않는다")
+    void partialFailureStillProcessesRest() {
+        // 50% 로 두면 확률상 성공·실패가 섞인다. 어느 쪽이든 합계는 대상 수와 같아야 한다.
+        faultInjector.configure(true, 50, 0, 0L);
+
+        VoiceBatchResult r = service.run(wide(), null, "TEST");
+
+        assertThat(r.successCnt() + r.failCnt()).isEqualTo(r.targetCnt());
+        assertThat(r.outcomes()).hasSize(10);
+        assertThat(r.residue().total()).as("섞여 있어도 잔여는 0").isZero();
+    }
+
+    @Test
+    @DisplayName("지연이 주입돼도 배치는 완료된다")
+    void survivesInjectedDelay() {
+        faultInjector.configure(true, 0, 100, 100L);
+        dataset.set(2, 2);
+
+        long t0 = System.currentTimeMillis();
+        VoiceBatchResult r = service.run(wide(), null, "TEST");
+        long elapsed = System.currentTimeMillis() - t0;
+
+        assertThat(r.successCnt()).isEqualTo(4);
+        assertThat(elapsed).as("건당 100ms 이상 지연이 실제로 걸렸다").isGreaterThanOrEqualTo(400L);
+        assertThat(faultInjector.injectedDelays()).isPositive();
+    }
+
+    @Test
+    @DisplayName("실패한 건은 멱등 표식이 남지 않는다 — 다음 배치에서 다시 시도해야 한다")
+    void failedItemsAreRetriable() {
+        faultInjector.configure(true, 100, 0, 0L);
+        VoiceBatchResult first = service.run(wide(), null, "TEST");
+        assertThat(first.failCnt()).isEqualTo(STT_DEPENDENT);
+
+        // 장애를 끄고 다시 돌린다. 실패했던 건은 표식이 없으니 재시도되어야 하고,
+        // 성공했던 1건(기존 STT)만 건너뛰어야 한다.
+        faultInjector.configure(false, 0, 0, 0L);
+        VoiceBatchResult second = service.run(wide(), null, "TEST");
+
+        assertThat(second.successCnt())
+                .as("실패했던 건은 표식이 없어 다시 처리된다")
+                .isEqualTo(STT_DEPENDENT);
+        assertThat(second.skippedCnt())
+                .as("앞서 성공한 건만 건너뛴다")
+                .isEqualTo(SOURCE_STT);
+        assertThat(second.failCnt()).isZero();
+    }
+
+    @Test
+    @DisplayName("대용량으로 늘려도 건별 처리가 유지된다 — 스트리밍·청크 구조 확인")
+    void handlesLargerDataset() {
+        dataset.set(50, 50);
+
+        VoiceBatchResult r = service.run(wide(), null, "TEST");
+
+        assertThat(r.targetCnt()).isEqualTo(100);
+        assertThat(r.successCnt()).isEqualTo(100);
+        assertThat(r.residue().total()).isZero();
+        // 대량 모드로 전환되어 Mock WAV 가 짧아진다(디스크 절약)
+        assertThat(dataset.isBulk()).isFalse();   // 100건은 임계(200) 미만
+    }
+
+    @Test
+    @DisplayName("200건을 넘으면 대량 모드로 전환되어 Mock 파일이 작아진다")
+    void switchesToBulkMode() {
+        dataset.set(150, 150);
+
+        assertThat(dataset.total()).isEqualTo(300);
+        assertThat(dataset.isBulk()).isTrue();
+        assertThat(dataset.wavSeconds()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("PII 감사는 배치 없이도 조회할 수 있다 — 시뮬레이터에서 언제든 확인")
+    void residueCanBeAuditedAnytime() {
+        service.run(wide(), null, "TEST");
+
+        PiiResidueAuditor.Residue r = residueAuditor.audit();
+
+        assertThat(r.clean()).isTrue();
+        assertThat(r.message()).contains("0건");
+    }
+}

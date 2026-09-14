@@ -1,0 +1,115 @@
+# ══════════════════════════════════════════════════════════════════════════
+#  개발계(K8s data-pipeline) 배포 프로파일
+# ══════════════════════════════════════════════════════════════════════════
+#  모든 접속 정보는 ConfigMap · Secret 의 환경변수로 주입받는다.
+#  이 파일에는 <b>기본값만</b> 둔다 — 주소·계정을 코드에 박으면 환경이 바뀔 때마다 재배포해야 한다.
+#
+#  ── 하류는 실물, 상류는 준비되는 대로 ──────────────────────────────────
+#    커넥터·로그 컬렉터는 이미 K8s 에 떠 있으므로 처음부터 실물에 붙인다.
+#    보라미·XVARM·STT 는 아직이라 MOCK 으로 두고, 환경변수만 바꿔 하나씩 전환한다.
+#    (런타임 전환도 가능하지만 파드 재시작 시 이 값으로 돌아온다)
+# ══════════════════════════════════════════════════════════════════════════
+
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  datasource:
+    # 보라미 조회를 DIRECT_JDBC 로 쓸 때만 의미가 있다.
+    # 값을 안 주면 공통 설정의 H2 인메모리가 그대로 쓰인다(조회하지 않으면 무해).
+    url: ${DB_URL:jdbc:h2:mem:borami;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}
+    driver-class-name: ${DB_DRIVER:org.h2.Driver}
+    username: ${DB_USER:sa}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: ${DB_POOL_MIN:2}
+
+  sql:
+    init:
+      # ⚠ 실제 보라미(또는 I/F 뷰)에 붙는 순간 반드시 never 로 준다.
+      #   schema-borami-mock.sql 에는 DROP TABLE 이 들어 있다.
+      mode: ${SQL_INIT_MODE:always}
+
+# ── 로그 컬렉터 (T1·T2·T4) ────────────────────────────────────────────────
+#   같은 네임스페이스(data-pipeline)라 K8s 서비스명으로 닿는다.
+#   base-url 에는 context-path(/logc)까지 포함한다.
+log-collector:
+  enabled: ${LOG_COLLECTOR_ENABLED:true}
+  base-url: ${LOG_COLLECTOR_BASE_URL:http://log-collector-a2z96kgyrm:8080/logc}
+  auth-token: ${LOG_COLLECTOR_TOKEN:}
+  connect-timeout-sec: ${LOG_COLLECTOR_CONNECT_TIMEOUT:5}
+  read-timeout-sec: ${LOG_COLLECTOR_READ_TIMEOUT:30}
+
+voice:
+  # ── 4개 스위치 — 준비되는 순서대로 환경변수로 전환 ──────────────────────
+  source:
+    mode: ${VOICE_SOURCE_MODE:MOCK}          # → DIRECT_JDBC → ESB_HTTP2DB (Q2·Q15 확정 후)
+    esb-base-url: ${VOICE_ESB_BASE_URL:}
+    interface-id: ${VOICE_ESB_IF_ID:}
+    # 실제 보라미 스키마 배치(2026-09-12 확인). I/F 뷰로 바뀌면 이 값만 고친다(Q15).
+    schema:
+      imsc: ${VOICE_SCHEMA_IMSC:im}
+      rerd: ${VOICE_SCHEMA_RERD:re}
+      smsm: ${VOICE_SCHEMA_SMSM:sm}
+      xvarm: ${VOICE_SCHEMA_XVARM:}          # 테이블 미확인 — 확정 전까지 비워 둔다
+    flag:
+      recorded-yes: ${VOICE_FLAG_RECORDED_YES:Y}
+      ptcr-yes: ${VOICE_FLAG_PTCR_YES:Y}     # 실DB 관측값은 '0' — 의미 확정 후 조정
+      not-deleted: ${VOICE_FLAG_NOT_DELETED:N}
+      encrypted: ${VOICE_FLAG_ENCRYPTED:Y}
+  broker:
+    # 개발계에는 브로커가 K8s 파드로 떠 있다(borami-xvarm-broker, DUMMY 어댑터).
+    # 주소는 미리 꽂아 두고 스위치만 REST 로 올리면 붙는다.
+    #   MOCK → 수집 서비스 안에서 더미 파일을 만든다(브로커 없이 기동 가능)
+    #   REST → 위 파드의 POST /api/v1/xvarm/extract 를 실제로 호출한다
+    # 기본을 MOCK 으로 두는 것은 커넥터와 같은 Fail-fast 정책이다 —
+    # 실물 전환은 항상 명시적으로 한다.
+    mode: ${VOICE_BROKER_MODE:MOCK}          # MOCK | REST
+    base-url: ${VOICE_BROKER_BASE_URL:http://borami-xvarm-broker-1joiuorqhl:8080}
+    poll-interval-ms: ${VOICE_BROKER_POLL_MS:2000}
+    poll-timeout-sec: ${VOICE_BROKER_TIMEOUT_SEC:120}
+  stt:
+    mode: ${VOICE_STT_MODE:MOCK}             # → NPU (사양 확정 후, Q9)
+    base-url: ${VOICE_STT_BASE_URL:}
+    timeout-sec: ${VOICE_STT_TIMEOUT_SEC:300}
+  decrypt:
+    mode: ${VOICE_DECRYPT_MODE:SKIP}         # → REAL (복호화 주체 확정 후, Q13)
+    rvs-key-path: ${VOICE_RVS_KEY_PATH:}     # 접견 복호화 키(Q8) — Secret 으로 마운트
+
+  # ── PVC 마운트 지점 ────────────────────────────────────────────────────
+  #   /k8s/voice_raw 15Gi · /k8s/voice_work 5Gi (계획서 3.4)
+  sync:
+    meet-dir: ${VOICE_MEET_DIR:/k8s/voice_raw/meet}
+    phone-dir: ${VOICE_PHONE_DIR:/k8s/voice_raw/phone}
+    work-dir: ${VOICE_WORK_DIR:/k8s/voice_work}
+    stable-check-ms: ${VOICE_STABLE_CHECK_MS:1500}
+    wait-timeout-sec: ${VOICE_WAIT_TIMEOUT_SEC:300}
+    naming-policy: ${VOICE_NAMING_POLICY:ORIGINAL}   # ORIGINAL | ESB_DAT (Q7)
+
+  # ── 비식별 커넥터 (하류) ────────────────────────────────────────────────
+  sink:
+    enabled: ${VOICE_SINK_ENABLED:true}
+    connector-base-url: ${VOICE_CONNECTOR_BASE_URL:http://agent-connector-dp8qbi7xqh:8080}
+    chunk-size: ${VOICE_CHUNK_SIZE:100}
+    timeout-sec: ${VOICE_SINK_TIMEOUT_SEC:60}
+
+  batch:
+    # 스케줄은 기본으로 꺼 둔다. 개발계에서 예고 없이 배치가 돌면 대상이 소진되어
+    # 다른 사람의 시험을 방해한다. 켤 때는 VOICE_SCHEDULE_ENABLED=true.
+    schedule-enabled: ${VOICE_SCHEDULE_ENABLED:false}
+    daily-cron: ${VOICE_DAILY_CRON:0 0 2 * * *}
+    periodic-cron: ${VOICE_PERIODIC_CRON:0 */10 * * * *}
+    periodic-lag-min: ${VOICE_PERIODIC_LAG_MIN:20}
+    specl-mng-se-cd: ${VOICE_SPECL_CODES:0,1,2,3,5}
+    max-files-per-run: ${VOICE_MAX_FILES:2000}
+    job-id: ${VOICE_JOB_ID:VOICE_BATCH}      # 작업코드 VOC 로 채번되는 값 확인 필요(Q4)
+    retain-source-file: ${VOICE_RETAIN_SOURCE:false}
+
+  inmate-pid:
+    # 같은 수용자가 항상 같은 PID 를 갖도록 환경마다 고정한다. Secret 으로 주입할 것.
+    salt: ${VOICE_PID_SALT:kcais-voice-collector}
+
+logging:
+  level:
+    egovframework.voice.collector: ${LOG_LEVEL:INFO}
