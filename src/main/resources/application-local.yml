@@ -4,16 +4,17 @@
 #  실행: mvn spring-boot:run -Dspring-boot.run.profiles=local
 #
 #  ── 로컬 포트 배치 ────────────────────────────────────────────────────────
-#    8080  agent-connector   (비식별 커넥터)
-#    8081  voice-collector   (이 서비스)          ← 시뮬레이터 http://localhost:8081/voice_collector_simulator.html
-#    8090  log-collector     (context-path /logc)
+#    8080  agent-connector       (사내 타 서비스 — 이 서비스와 연동 없음)
+#    8082  borami-xvarm-broker   (XVARM 브로커, 접견 트랙)
+#    8085  voice-collector       (이 서비스)      ← 시뮬레이터 http://localhost:8085/voice_collector_simulator.html
+#    8090  log-collector         (context-path /logc)
 #
-#    커넥터가 8080 을 쓰고 로그 컬렉터가 8090 을 쓰도록 이미 정해져 있어(각 프로젝트의
-#    application-local.yml) 이 서비스는 8081 을 쓴다. 셋을 동시에 띄워도 겹치지 않는다.
+#    8080·8090 은 각 프로젝트의 application-local.yml 에 이미 정해져 있고 8082 는 브로커가
+#    쓴다. 이 서비스는 8085 를 써서 넷을 동시에 띄워도 겹치지 않는다.
 # ══════════════════════════════════════════════════════════════════════════
 
 server:
-  port: ${SERVER_PORT:8081}
+  port: ${SERVER_PORT:8085}
 
 spring:
   sql:
@@ -73,7 +74,7 @@ voice:
   #     mvn spring-boot:run
   #
   #   그 뒤 시뮬레이터에서 브로커 드롭다운을 REST 로 바꾸거나:
-  #     curl -X PUT "http://localhost:8081/api/v1/mock/modes/broker?value=REST"
+  #     curl -X PUT "http://localhost:8085/api/v1/mock/modes/broker?value=REST"
   broker:
     mode: ${VOICE_BROKER_MODE:MOCK}
     base-url: ${VOICE_BROKER_BASE_URL:http://localhost:8082}

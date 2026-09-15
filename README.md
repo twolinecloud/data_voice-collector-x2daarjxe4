@@ -49,9 +49,9 @@
 그래서 시연 중에도 "이건 아직 Mock, 이건 실물"을 바꿔 가며 보여줄 수 있다.
 
 ```bash
-curl -X PUT "http://localhost:8081/api/v1/mock/modes/stt?value=NPU"
-curl      "http://localhost:8081/api/v1/mock/modes"      # 현재값 + 기동 설정값 + 허용값
-curl -X POST "http://localhost:8081/api/v1/mock/modes/reset"
+curl -X PUT "http://localhost:8085/api/v1/mock/modes/stt?value=NPU"
+curl      "http://localhost:8085/api/v1/mock/modes"      # 현재값 + 기동 설정값 + 허용값
+curl -X POST "http://localhost:8085/api/v1/mock/modes/reset"
 ```
 
 시뮬레이터 화면의 드롭다운이 이 API 를 호출한다.
@@ -71,23 +71,24 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 
 ### 로컬 포트 배치
 
-세 서비스를 동시에 띄워도 겹치지 않게 정해져 있다.
+사내 서비스를 동시에 띄워도 겹치지 않게 정해져 있다.
 
 | 포트 | 서비스 | 비고 |
 |---:|---|---|
-| 8080 | `agent-connector` | 비식별 커넥터 |
-| **8081** | **`voice-collector`** | 이 서비스 |
+| 8080 | `agent-connector` | 사내 타 서비스 (이 서비스와 연동 없음) |
+| 8082 | `borami-xvarm-broker` | XVARM 브로커 — 접견 트랙이 호출 |
+| **8085** | **`voice-collector`** | 이 서비스 |
 | 8090 | `log-collector` | context-path **`/logc`** |
 
-> 커넥터와 로그 컬렉터의 포트는 각 프로젝트의 `application-local.yml` 에 이미 정해져 있어,
-> 이 서비스가 8081 을 쓴다.
+> 8080·8090 은 각 프로젝트의 `application-local.yml` 에 이미 정해져 있고 8082 는 브로커가 쓴다.
+> 그래서 이 서비스는 8085 를 쓴다.
 
 ### 화면 두 개
 
 | 주소 | 용도 |
 |---|---|
-| **`http://localhost:8081/voice_collector_simulator.html`** | **시뮬레이터** — 시연용 조작 화면 |
-| `http://localhost:8081/swagger-ui.html` | Swagger — API 개별 호출·스펙 확인 |
+| **`http://localhost:8085/voice_collector_simulator.html`** | **시뮬레이터** — 시연용 조작 화면 |
+| `http://localhost:8085/swagger-ui.html` | Swagger — API 개별 호출·스펙 확인 |
 
 ### 로그 컬렉터 연동 (로컬)
 
@@ -121,10 +122,10 @@ log-collector:
 
 ```bash
 # CLI 로 하려면
-curl -X POST "http://localhost:8080/api/v1/mock/reset"          # 초기화
-curl      "http://localhost:8080/api/v1/mock/targets"           # 대상 미리보기
-curl -X POST "http://localhost:8080/api/v1/voice/batches/daily" # 배치 실행
-curl      "http://localhost:8080/api/v1/voice/status"           # 현재 구성
+curl -X POST "http://localhost:8085/api/v1/mock/reset"          # 초기화
+curl      "http://localhost:8085/api/v1/mock/targets"           # 대상 미리보기
+curl -X POST "http://localhost:8085/api/v1/voice/batches/daily" # 배치 실행
+curl      "http://localhost:8085/api/v1/voice/status"           # 현재 구성
 ```
 
 > `/api/v1/mock/**` 는 **시연 전용**이다. 운영 배포 시 인그레스·게이트웨이에서 차단한다.
@@ -187,7 +188,7 @@ kubectl port-forward -n service-core svc/admin-db-fy9tjq4tsk 15432:5432
 스트리밍·청크 처리가 메모리를 지키는지 알 수 없어, 건수를 런타임에 올릴 수 있게 했다.
 
 ```bash
-curl -X PUT "http://localhost:8081/api/v1/mock/dataset?meet=500&phone=500"
+curl -X PUT "http://localhost:8085/api/v1/mock/dataset?meet=500&phone=500"
 ```
 
 - 건수를 올려도 **힙이 비례해 늘지 않아야** 한다 — 파일은 스트리밍으로 다루고
@@ -200,7 +201,7 @@ curl -X PUT "http://localhost:8081/api/v1/mock/dataset?meet=500&phone=500"
 ### 장애 주입 (Chaos)
 
 ```bash
-curl -X PUT "http://localhost:8081/api/v1/mock/chaos?enabled=true&failPercent=10&delayPercent=10&delayMs=2000"
+curl -X PUT "http://localhost:8085/api/v1/mock/chaos?enabled=true&failPercent=10&delayPercent=10&delayMs=2000"
 ```
 
 STT·커넥터 전송 구간에 의도적으로 실패와 지연을 섞는다. **확인하려는 것은
