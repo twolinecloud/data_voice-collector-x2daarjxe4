@@ -100,7 +100,7 @@ voice:
     presets:
       - label: "개발계 K8s"
         url: "http://borami-xvarm-broker-1joiuorqhl:8080"
-      - label: "로컬 PC (IntelliJ)"
+      - label: "로컬 PC"
         url: "http://localhost:8082"
     poll-interval-ms: 2000
     poll-timeout-sec: 120

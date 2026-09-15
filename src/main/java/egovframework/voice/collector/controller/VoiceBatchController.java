@@ -194,6 +194,10 @@ public class VoiceBatchController {
      * <p>모드만 REST 로 올리고 주소를 못 바꾸면 배치가 전건 실패한다. 실제로 그 상태로
      * 두 번 막혔다. 브로커가 사는 곳은 환경마다 다르므로(개발계 K8s 서비스명 / 로컬 localhost)
      * 스위치 옆에서 바로 고를 수 있어야 한다.</p>
+     *
+     * <p>화면은 프리셋을 라디오로 그리고, 현재 주소({@code url})와 같은 항목을 선택 상태로,
+     * 기동 설정값({@code urlConfigured})과 같은 항목에 (Default) 를 붙인다 — 어느 것이
+     * 재기동·모드 초기화 시 돌아가는 값인지 화면만 보고 알 수 있어야 한다.</p>
      */
     private Map<String, Object> brokerStep() {
         Map<String, Object> m = step("XVARM 브로커", "broker", broker.mode(),
@@ -204,6 +208,7 @@ public class VoiceBatchController {
         if (modeState.broker() == VoiceProperties.BrokerMode.REST) {
             m.put("urlKey", "broker");
             m.put("url", modeState.brokerBaseUrl());
+            m.put("urlConfigured", modeState.configuredBrokerBaseUrl());
             m.put("urlPresets", props.broker().presets().stream()
                     .map(x -> {
                         Map<String, Object> pm = new LinkedHashMap<>();

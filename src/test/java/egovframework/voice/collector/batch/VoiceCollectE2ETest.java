@@ -38,6 +38,10 @@ class VoiceCollectE2ETest {
 
     @DynamicPropertySource
     static void dirs(DynamicPropertyRegistry registry) {
+        // local 프로파일 기본은 DIRECT_JDBC + REST(8082 브로커) 다 — 시뮬레이터용 기본값이다.
+        // 이 테스트는 외부 의존 없이 도는 전 구간 Mock 이 전제이므로 두 스위치를 MOCK 으로 고정한다.
+        registry.add("voice.source.mode", () -> "MOCK");
+        registry.add("voice.broker.mode", () -> "MOCK");
         // 테스트가 ./work 를 오염시키지 않게 임시 디렉터리로 돌린다.
         registry.add("voice.sync.meet-dir", () -> tmp.resolve("raw/meet").toString());
         registry.add("voice.sync.phone-dir", () -> tmp.resolve("raw/phone").toString());

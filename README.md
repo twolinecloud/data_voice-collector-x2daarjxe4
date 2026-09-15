@@ -30,16 +30,18 @@
 
 ---
 
-## 2. 4개 스위치 — 준비된 것부터 실물로
+## 2. 5개 스위치 — 준비된 것부터 실물로
 
-외부 의존 네 가지가 서로 다른 시점에 준비된다. 하나가 막혀도 나머지는 진행되도록 각각 독립 스위치다.
+외부 의존이 서로 다른 시점에 준비된다. 하나가 막혀도 나머지는 진행되도록 각각 독립 스위치다.
+접견(브로커)과 전화(파일 연계)는 연동 주체가 달라 스위치도 따로 둔다.
 
-| 스위치 | 값 | 기본 | 실물 전환 조건 |
+| 스위치 | 값 | 기본 (`local`) | 실물 전환 조건 |
 |---|---|---|---|
-| `voice.source.mode` | `MOCK` / `DIRECT_JDBC` / `ESB_HTTP2DB` | MOCK | 인터페이스ID(Q2)·I/F 테이블(Q15) |
-| `voice.broker.mode` | `MOCK` / `REST` | MOCK | XVARM 사양(Q3), 브로커 배포 |
-| `voice.decrypt.mode` | `SKIP` / `REAL` | SKIP | 복호화 주체 확정(Q13), 키 수령(Q8) |
-| `voice.stt.mode` | `MOCK` / `NPU` | MOCK | NPU API 사양(Q9) |
+| `voice.source.mode` | `MOCK` / `DIRECT_JDBC` / `ESB_HTTP2DB` | MOCK (**DIRECT_JDBC**) | 인터페이스ID(Q2)·I/F 테이블(Q15) |
+| `voice.broker.mode` | `MOCK` / `REST` — 접견 전용 | MOCK (**REST**) | XVARM 사양(Q3), 브로커 배포 |
+| `voice.phone.mode` | `MOCK` / `ESB` — 전화 전용 | MOCK (MOCK) | ESB 전화 연계 프로바이더 구성 |
+| `voice.decrypt.mode` | `SKIP` / `REAL` | SKIP (SKIP) | 복호화 주체 확정(Q13), 키 수령(Q8) |
+| `voice.stt.mode` | `MOCK` / `NPU` | MOCK (MOCK) | NPU API 사양(Q9) |
 
 > **REAL 모드는 실패해도 Mock 으로 빠지지 않는다**(Fail-fast). Mock 결과가 실제인 양 섞이면
 > 시연·검증이 통째로 무의미해지기 때문이다.
@@ -68,7 +70,18 @@ curl -X POST "http://localhost:8085/api/v1/mock/modes/reset"
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
-전 구간 MOCK 이라 **외부 의존이 하나도 없어도 배치가 끝까지 돈다.**
+`local` 의 기본은 **보라미 조회 `DIRECT_JDBC`(H2 Mock 보라미) + 브로커 `REST`(8082)** 다.
+그래서 접견 트랙을 돌리려면 **브로커가 8082 에 `local` 프로파일로 떠 있어야 한다** — 없으면
+접견 배치가 바로 실패한다(Fail-fast, 의도된 동작). 전화·복호화·STT 는 MOCK 이라 외부 의존이 없다.
+
+```bash
+# 브로커 (다른 레포) — local 프로파일이 출력 폴더를 이 레포의 work/voice_raw/meet 로 맞춘다
+cd ../data_borami-xvarm-broker-1joiuorqhl
+mvn spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+브로커 없이 돌리려면 시뮬레이터의 [XVARM 브로커] 드롭다운을 `MOCK` 으로 내리면 된다
+(또는 `VOICE_BROKER_MODE=MOCK`). H2 Mock 보라미로 조회되는 대상은 **접견 2건 · 전화 3건**이다.
 
 ### 로컬 포트 배치
 
@@ -108,9 +121,12 @@ log-collector:
 시뮬레이터 화면 구성:
 
 - **① 처리 구간 모드** — 접견·전화 2트랙의 스위치를 **드롭다운으로 즉시 전환**(서버 재시작 불필요).
-  MOCK/SKIP 은 주황, 실물은 초록. 로그 컬렉터 연결 여부도 함께 본다
+  MOCK/SKIP 은 주황, 실물은 초록. 로그 컬렉터 연결 여부도 함께 본다.
+  브로커가 `REST` 면 단계 아래에 **주소 라디오**(`개발계 K8s` / `로컬 PC`)가 뜨고 고르는 즉시 반영된다 —
+  기동 설정값과 같은 항목에 `(Default)` 가 붙는다(`voice.broker.presets` 에서 내려준다)
 - **② 제어**
-  - 배치: `10분 주기` · `일배치` · `Mock 초기화/생성` · `대상 미리보기` · `수신 파일` · `PII 잔여`
+  - 배치: `접견만` · `전화만` · `10분 주기` · `일배치` — 실행 중에는 버튼이 잠기고 누른 버튼에 스피너가 돈다
+  - 보조: `Mock 초기화/생성` · `대상 미리보기` · `수신 파일` · `PII 잔여` · `브로커 연결 확인`
   - **대용량 Mock**: 접견·전화 건수 입력 + 프리셋(10 / 1,000 / 5,000 / 10,000건)
   - **장애 주입**: 활성 토글 + 실패 % · 지연 % · 지연 ms
 - **③ 최근 배치 결과** — 대상 / 성공 / 실패 / 건너뜀 / 상태 +

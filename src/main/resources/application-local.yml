@@ -20,7 +20,7 @@ spring:
   sql:
     init:
       # H2 Mock 보라미 스키마·샘플을 매 기동 시 적재한다.
-      # voice.source.mode=DIRECT_JDBC 로 바꾸면 이 데이터를 실제로 조회한다.
+      # 로컬 기본 voice.source.mode=DIRECT_JDBC 가 이 데이터를 실제로 조회한다(접견 2 · 전화 3건).
       mode: always
 
 # ── 로그 컬렉터 (T1·T2·T4) ────────────────────────────────────────────────
@@ -52,10 +52,15 @@ log-collector:
 #    local 단독으로 datasource 만 바꾸면 Mock 스키마의 DROP TABLE 이 실DB 에서 실행된다)
 
 voice:
-  # ── 4개 스위치: 로컬은 전 구간 MOCK ──────────────────────────────────────
+  # ── 5개 스위치 ────────────────────────────────────────────────────────────
+  #   로컬 기본값: 보라미 조회 DIRECT_JDBC(H2 Mock 보라미) · 브로커 REST(8082 의 로컬 브로커)
+  #   · 전화 MOCK · 복호화 SKIP · STT MOCK.
   #   기동 후 시뮬레이터 화면이나 PUT /api/v1/mock/modes/{name} 으로 재시작 없이 바꿀 수 있다.
+  #
+  #   ⚠ 브로커가 REST 라서 8082 에 브로커가 떠 있지 않으면 접견 배치가 바로 실패한다(의도된 동작 —
+  #     Fail-fast). 브로커 없이 돌리려면 화면에서 브로커를 MOCK 으로 내리거나 VOICE_BROKER_MODE=MOCK.
   source:
-    mode: ${VOICE_SOURCE_MODE:MOCK}      # MOCK | DIRECT_JDBC(H2 Mock 보라미) | ESB_HTTP2DB
+    mode: ${VOICE_SOURCE_MODE:DIRECT_JDBC}   # MOCK | DIRECT_JDBC(H2 Mock 보라미) | ESB_HTTP2DB
     # H2 Mock 은 스키마가 평평하다 — 비워 둔다. 실DB 는 realdb 프로파일이 채운다.
     schema:
       imsc: ${VOICE_SCHEMA_IMSC:}
@@ -66,24 +71,25 @@ voice:
   #   MOCK : 내부 Mock 컴포넌트가 수신 폴더에 더미 파일을 만든다(외부 의존 없음)
   #   REST : 8082 의 borami-xvarm-broker 를 실제로 호출한다
   #
-  #   REST 로 시험하려면 브로커를 띄우고, 브로커의 출력 폴더를 아래 meet-dir 로 맞춘다.
-  #   로컬에는 ESB 가 없으므로 브로커가 수신 폴더에 직접 쓰게 해 그 구간을 생략한다:
+  #   기본이 REST 다. 브로커를 local 프로파일로 띄우면 출력 폴더가 아래 meet-dir 을 가리킨다
+  #   (로컬에는 ESB 가 없으므로 브로커가 수신 폴더에 직접 써서 그 구간을 생략한다):
   #
-  #     cd D:\Twoline_Project\borami-xvarm-broker
-  #     set BROKER_OUTPUT_DIR=D:/Twoline_Project/data_voice-collector/work/voice_raw/meet
-  #     mvn spring-boot:run
+  #     cd C:\Projects\data_borami-xvarm-broker-1joiuorqhl
+  #     mvn spring-boot:run -Dspring-boot.run.profiles=local        # 또는 IntelliJ Active profiles: local
   #
-  #   그 뒤 시뮬레이터에서 브로커 드롭다운을 REST 로 바꾸거나:
-  #     curl -X PUT "http://localhost:8085/api/v1/mock/modes/broker?value=REST"
+  #   레포 위치가 다르면 브로커 쪽에 BROKER_OUTPUT_DIR=<이 레포>/work/voice_raw/meet 를 준다.
+  #   배치 전에 시뮬레이터 [브로커 연결 확인] 으로 두 경로가 같은지 대조할 것.
+  #   브로커 없이 돌리려면:
+  #     curl -X PUT "http://localhost:8085/api/v1/mock/modes/broker?value=MOCK"
   broker:
-    mode: ${VOICE_BROKER_MODE:MOCK}
+    mode: ${VOICE_BROKER_MODE:REST}
     base-url: ${VOICE_BROKER_BASE_URL:http://localhost:8082}
     # 시뮬레이터의 원클릭 주소 프리셋. 환경마다 브로커가 사는 곳이 달라
     # 매번 손으로 치지 않게 둔다. 주소가 바뀌면 여기만 고치면 화면에 그대로 반영된다.
     presets:
       - label: "개발계 K8s"
         url: "http://borami-xvarm-broker-1joiuorqhl:8080"
-      - label: "로컬 PC (IntelliJ)"
+      - label: "로컬 PC"
         url: "http://localhost:8082"
     poll-interval-ms: ${VOICE_BROKER_POLL_MS:500}
     poll-timeout-sec: ${VOICE_BROKER_TIMEOUT_SEC:30}
