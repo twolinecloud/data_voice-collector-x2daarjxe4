@@ -49,7 +49,6 @@ class ResilienceE2ETest {
         registry.add("voice.sync.wait-timeout-sec", () -> "15");
         registry.add("voice.sync.stable-check-ms", () -> "30");
         registry.add("log-collector.enabled", () -> "false");
-        registry.add("voice.sink.enabled", () -> "false");
     }
 
     @Autowired

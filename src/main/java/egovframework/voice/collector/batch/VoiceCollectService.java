@@ -10,7 +10,6 @@ import egovframework.voice.collector.model.SttResult;
 import egovframework.voice.collector.model.VoiceFile;
 import egovframework.voice.collector.model.VoiceKind;
 import egovframework.voice.collector.model.VoiceTarget;
-import egovframework.voice.collector.sink.DeidConnectorClient;
 import egovframework.voice.collector.source.BoramiSourceClient;
 import egovframework.voice.collector.stt.SttClient;
 import egovframework.voice.collector.sync.FileArrivalWatcher;
@@ -28,10 +27,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 음성 수집 배치의 본체 — <b>대상 선별 → 파일 확보 → 복호화 → STT → 커넥터 전달</b>.
+ * 음성 수집 배치의 본체 — <b>대상 선별 → 파일 확보 → 복호화 → STT → 처리 이력 적재</b>.
  *
- * <p><b>여기서 하지 않는 일</b>: 비식별, PPP 전송, 로그 테이블 INSERT, 재식별 매핑 적재.
- * 전부 다른 서비스의 책임이고 이미 구현되어 있다(계획서 2.2 R&amp;R).</p>
+ * <p><b>이 서비스의 범위는 STT 처리와 내부 저장·감시까지다.</b> STT 텍스트를 외부 서비스로
+ * 전송하지 않는다(비식별 커넥터 연동은 아키텍처 변경으로 제외됐다). 로그 테이블 INSERT 는
+ * 로그 컬렉터 API 로만 하고, 재식별 매핑 적재는 다른 서비스의 책임이다.</p>
  *
  * <p><b>건별 격리</b>: 한 건이 실패해도 배치를 멈추지 않는다. 1,300건을 도는 배치에서
  * 한 파일이 깨졌다고 전체가 중단되면 나머지 1,299건을 다시 처리해야 한다.
@@ -53,7 +53,6 @@ public class VoiceCollectService {
     private final FileArrivalWatcher watcher;
     private final DecryptService decryptService;
     private final SttClient sttClient;
-    private final DeidConnectorClient connector;
     private final LogCollectorClient logCollector;
     private final IdempotencyGuard idempotency;
     private final InmatePidGenerator pidGenerator;
@@ -101,10 +100,9 @@ public class VoiceCollectService {
 
         List<VoiceTarget> found = findTargets(window, targets);
         List<FileProcOutcome> outcomes = new ArrayList<>(found.size());
-        List<DeidConnectorClient.Entry> entries = new ArrayList<>();
 
         for (VoiceTarget t : found) {
-            outcomes.add(processOne(t, entries));
+            outcomes.add(processOne(t));
         }
 
         int success = (int) outcomes.stream().filter(FileProcOutcome::isSuccess).count();
@@ -117,19 +115,12 @@ public class VoiceCollectService {
         // T4 — 파일 1건 = 1행. 정합성 대사(T1.SUCCESS_CNT == Σ T3·T4·T5)의 근거다.
         logCollector.createFileProcs(execId, toFileProcReqs(outcomes));
 
-        // ── 전송 ───────────────────────────────────────────────────────────
-        String sendStep = logCollector.createStep(execId, (short) 2, "SEND");
-        int sent = connector.send(execId, entries);
-        logCollector.finishStep(sendStep, sent == entries.size() ? "SUCCESS" : "PARTIAL",
-                elapsedSec(startedAt), (long) entries.size(), (long) sent,
-                (long) (entries.size() - sent), null);
-
         // PII 즉시 삭제 정책이 실제로 지켜졌는지 확인해 결과에 싣는다(계획서 5.3-(4)).
         PiiResidueAuditor.Residue residue = residueAuditor.audit();
 
         long elapsedMs = System.currentTimeMillis() - startedAt;
         VoiceBatchResult result = new VoiceBatchResult(execId, window.toString(), found.size(),
-                success, fail, skipped, sent, elapsedMs, residue, outcomes);
+                success, fail, skipped, elapsedMs, residue, outcomes);
 
         logCollector.finishBatch(execId, result.execStsCd(), elapsedSec(startedAt),
                 (long) found.size(), (long) success, (long) fail, null);
@@ -191,7 +182,7 @@ public class VoiceCollectService {
      * 그 자리에서 지우지 않으면 <b>복호화된 음성이 디스크에 남는다</b>. 정책은 성공·실패를
      * 가리지 않고 즉시 삭제다(계획서 5.3-(4)).</p>
      */
-    private FileProcOutcome processOne(VoiceTarget target, List<DeidConnectorClient.Entry> entries) {
+    private FileProcOutcome processOne(VoiceTarget target) {
         long t0 = System.currentTimeMillis();
 
         if (idempotency.isProcessed(target)) {
@@ -225,7 +216,6 @@ public class VoiceCollectService {
                 return FileProcOutcome.fail(target, "STT 결과가 비어 있음", System.currentTimeMillis() - t0);
             }
 
-            entries.add(new DeidConnectorClient.Entry(pidGenerator.of(target.corrNo()), target, stt));
             idempotency.markProcessed(target);
             return FileProcOutcome.success(target, fileSize, stt.charCount(), System.currentTimeMillis() - t0);
 
@@ -326,7 +316,7 @@ public class VoiceCollectService {
      * 이번 건이 디스크에 만든 원본·복호화 산출물을 지운다.
      *
      * <p>기본은 삭제다. 복호화된 원본 음성은 그 자체로 민감하고 우리가 보관할 이유가 없다
-     * — 하류로 넘어가는 것은 STT 텍스트뿐이다. 보존이 필요하면 보존 기간·암호화 저장을
+     * — STT 가 끝나면 원본은 역할을 다한 것이다. 보존이 필요하면 보존 기간·암호화 저장을
      * 따로 정해야 한다(계획서 Q5).</p>
      *
      * <p>삭제 실패는 경고만 남기고 넘어간다. 데이터 처리 자체는 이미 끝났고, 여기서 예외를

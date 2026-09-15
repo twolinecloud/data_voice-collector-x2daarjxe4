@@ -11,11 +11,9 @@ import org.springframework.stereotype.Component;
 /**
  * STT Mock — NPU 없이 고정 텍스트를 돌려준다.
  *
- * <p><b>텍스트에 일부러 개인정보를 넣는다.</b> 성명·주민등록번호·전화번호·주소가 들어 있어야
- * 하류의 AI-R NER 비식별이 <b>실제로 동작하는지</b> 확인할 수 있다. Phase 1 의 핵심 검증 포인트가
- * 바로 이것이다 — 커넥터 페이로드의 필드명이 {@code sttScriptText} 가 아니면
- * {@code UnstructuredTextField} 레지스트리에 걸리지 않아 <b>마스킹 없이 원문이 그대로 통과한다</b>.
- * 마스킹된 결과가 돌아오는지를 눈으로 봐야 그 실수를 잡을 수 있다.</p>
+ * <p><b>텍스트에 일부러 개인정보를 넣는다.</b> 실제 통화·접견 음성에는 성명·주민등록번호·
+ * 전화번호·주소가 섞여 나온다. Mock 도 같은 모양이어야 STT 텍스트가 로그·응답에 그대로 새지
+ * 않는지(글자 수만 남기는지)를 실제와 같은 조건으로 확인할 수 있다.</p>
  *
  * <p>아래 값은 전부 <b>가공된 테스트 데이터</b>다. 실제 수용자·수신자 정보가 아니다.</p>
  */
@@ -51,7 +49,7 @@ public class MockSttClient implements SttClient {
         faultInjector.maybeInject(FaultInjector.Stage.STT);
 
         String text = (file.target().kind() == VoiceKind.MEET) ? MEET_SCRIPT : PHONE_SCRIPT;
-        // 건마다 구분되도록 식별자를 덧붙인다 — 하류에서 어느 건의 텍스트인지 추적할 수 있다.
+        // 건마다 구분되도록 식별자를 덧붙인다 — 로그에서 어느 건의 텍스트인지 추적할 수 있다.
         String body = text.strip() + "\n(테스트 데이터 / " + file.target().shortId() + ")";
         log.info("[STT:MOCK] {} — {}자", file.path().getFileName(), body.length());
         return new SttResult(body, "MOCK", 30, false);

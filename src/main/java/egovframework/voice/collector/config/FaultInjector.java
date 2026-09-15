@@ -27,8 +27,7 @@ public class FaultInjector {
 
     /** 장애 주입 지점. 로그·통계에서 어느 구간이 맞았는지 구분한다. */
     public enum Stage {
-        STT("STT"),
-        SINK("커넥터 전송");
+        STT("STT");
 
         private final String label;
 

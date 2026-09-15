@@ -72,7 +72,7 @@
   <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
     <div>
       <h4 class="mb-0">음성 수집 시뮬레이터</h4>
-      <div class="text-secondary small">보라미 음성(접견·통화) → STT → 비식별 커넥터 전달 파이프라인</div>
+      <div class="text-secondary small">보라미 음성(접견·통화) → 수집 → 복호화 → STT 파이프라인</div>
     </div>
     <div class="d-flex gap-2">
       <a class="btn btn-sm btn-outline-secondary" href="/swagger-ui.html" target="_blank">Swagger</a>
@@ -92,7 +92,7 @@
     </div>
     <div class="card-body">
       <div class="row g-3 mb-3" id="tracks"></div>
-      <div class="row g-2" id="downstream"></div>
+      <div class="row g-2" id="logc"></div>
       <div class="hint mt-3" id="dirs"></div>
       <div class="mt-2" id="warnings"></div>
       <div class="mt-2" id="probe-line"></div>
@@ -175,7 +175,7 @@
             </div>
             <button class="btn btn-sm btn-dark mt-2" id="btn-chaos">설정 적용</button>
             <div class="hint mt-2">
-              STT·커넥터 전송 구간에 실패·지연을 섞습니다. 한 건이 터져도 배치가
+              STT 구간에 실패·지연을 섞습니다. 한 건이 터져도 배치가
               <b>failCnt만 올리며 끝까지 도는지</b> 확인하는 용도입니다.
             </div>
           </div>
@@ -196,7 +196,7 @@
       <span class="small text-secondary font-monospace" id="last-exec">—</span>
     </div>
     <div class="card-body py-2">
-      <div class="row row-cols-2 row-cols-md-6 g-0" id="stats"></div>
+      <div class="row row-cols-2 row-cols-md-5 g-0" id="stats"></div>
       <div class="border-top pt-2 mt-2 small" id="pii-line">
         <span class="text-secondary">PII 원본 삭제 검증:</span> <span class="text-secondary">—</span>
       </div>
@@ -400,10 +400,8 @@ async function loadStatus(quiet) {
 
   renderTracks(s.tracks);
 
-  $('downstream').innerHTML =
-      flagCard('비식별 커넥터 (하류)', s.sink.enabled && !!s.sink.connectorBaseUrl,
-               s.sink.connectorBaseUrl || (s.sink.enabled ? '전송 켜짐 · 주소 미설정' : '전송 꺼짐'))
-    + flagCard('로그 컬렉터 (T1·T2·T4)', s.logCollector.enabled, s.logCollector.baseUrl || '주소 미설정');
+  $('logc').innerHTML =
+      flagCard('로그 컬렉터 (T1·T2·T4)', s.logCollector.enabled, s.logCollector.baseUrl || '주소 미설정');
 
   $('dirs').innerHTML =
       `수신 접견 <code>${esc(s.dirs.meetDir)}</code> · 수신 전화 <code>${esc(s.dirs.phoneDir)}</code> · `
@@ -430,10 +428,6 @@ async function loadStatus(quiet) {
       log(`⚠ 장애 주입이 켜져 있습니다 — 실패 ${s.chaos.failPercent}% · 지연 ${s.chaos.delayPercent}%(${s.chaos.delayMs}ms)`, 'wr');
     }
   }
-  if (!quiet && s.sink.enabled === false) {
-    log('ℹ 커넥터 전송이 꺼져 있습니다 — 전송 건수는 0으로 나옵니다', 'wr');
-  }
-
   // "이 조합으로는 배치가 반드시 실패한다" 를 돌리기 전에 보여준다.
   const ws = s.warnings || [];
   $('warnings').innerHTML = ws.length
@@ -456,10 +450,9 @@ function renderResult(r, kind) {
     + stat(r.successCnt.toLocaleString(), '성공',   r.successCnt>0?'text-success':'')
     + stat(r.failCnt.toLocaleString(),    '실패',   r.failCnt>0?'text-danger':'')
     + stat(r.skippedCnt.toLocaleString(), '건너뜀', r.skippedCnt>0?'text-warning':'')
-    + stat(r.sentCnt.toLocaleString(),    '전송')
     + stat(r.execStsCd ?? '-', '상태');
 
-  log(`  └ 대상 ${r.targetCnt} · 성공 ${r.successCnt} · 실패 ${r.failCnt} · 건너뜀 ${r.skippedCnt} · 전송 ${r.sentCnt}  (execId=${r.execId})`,
+  log(`  └ 대상 ${r.targetCnt} · 성공 ${r.successCnt} · 실패 ${r.failCnt} · 건너뜀 ${r.skippedCnt}  (execId=${r.execId})`,
       r.failCnt>0 ? 'wr' : 'ok');
 
   // 트랙별로 나눠 보여준다 — 전체 실행 시 어느 시나리오가 막혔는지 한 줄로 드러나게.

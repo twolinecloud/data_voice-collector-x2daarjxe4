@@ -24,7 +24,7 @@ class BatchResultSerializationTest {
     private VoiceBatchResult sample(int fail) {
         PiiResidueAuditor.Residue residue = new PiiResidueAuditor.Residue(0, 0, 0, 0, true);
         return new VoiceBatchResult("20260915VOC001", "DAILY[...]", 10, 10 - fail, fail,
-                0, 10 - fail, 1234L, residue, List.of());
+                0, 1234L, residue, List.of());
     }
 
     @Test

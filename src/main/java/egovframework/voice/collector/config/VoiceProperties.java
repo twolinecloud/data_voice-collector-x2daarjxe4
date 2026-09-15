@@ -10,7 +10,7 @@ import java.util.List;
  *
  * <p>이 과제는 보라미 조회·XVARM 브로커·복호화·STT 네 가지가 서로 다른 시점에 준비된다.
  * 하나라도 막히면 전부 멈추는 구조를 피하려고, 준비된 것부터 REAL 로 돌리고 나머지는 MOCK 으로
- * 둘 수 있게 했다. 커넥터가 쓰는 방식과 같다 —
+ * 둘 수 있게 했다.
  * <b>REAL 이면 실서버만 호출하고 실패 시 Mock 으로 빠지지 않는다</b>(Fail-fast).
  * Mock 결과가 실제인 양 섞이면 시연·검증이 전부 무의미해지기 때문이다.</p>
  */
@@ -22,7 +22,6 @@ public record VoiceProperties(
         @DefaultValue Sync sync,
         @DefaultValue Decrypt decrypt,
         @DefaultValue Stt stt,
-        @DefaultValue Sink sink,
         @DefaultValue Batch batch
 ) {
 
@@ -153,16 +152,6 @@ public record VoiceProperties(
             @DefaultValue("300") int timeoutSec
     ) {}
 
-    /** 하류 — 비식별 커넥터로 STT 텍스트를 넘긴다. */
-    public record Sink(
-            @DefaultValue("true") boolean enabled,
-            /** 커넥터 주소. K8s 서비스명 기준 {@code http://agent-connector-dp8qbi7xqh:8080} */
-            @DefaultValue("") String connectorBaseUrl,
-            /** 한 번에 보낼 레코드 수. 텍스트라 가볍지만 커넥터의 gzip 수신 한도를 넘기지 않는다. */
-            @DefaultValue("100") int chunkSize,
-            @DefaultValue("60") int timeoutSec
-    ) {}
-
     /** 배치 스케줄·대상 조건. */
     public record Batch(
             /** 일배치(정기배치) — 전날 00시부터 오늘 00시까지. 기본 새벽 2시. */
@@ -195,7 +184,7 @@ public record VoiceProperties(
              * 시연·시험 기록만 안전하게 지울 수 있다.</p>
              */
             @DefaultValue("TEST_BATCH") String testJobId,
-            /** 커넥터 헤더의 dataTypeCd. AI-R(비정형) 경로로 태우는 근거가 된다. */
+            /** 로그 컬렉터 T1 의 dataTypeCd. 이 배치가 비정형 음성 수집임을 나타낸다. */
             @DefaultValue("VOICE") String dataTypeCd,
             /** STT 후 복호화 원본을 남길지. 기본은 삭제 — PII 보유를 최소화한다. */
             @DefaultValue("false") boolean retainSourceFile

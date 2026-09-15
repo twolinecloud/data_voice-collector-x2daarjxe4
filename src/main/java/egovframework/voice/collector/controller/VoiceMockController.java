@@ -113,8 +113,6 @@ public class VoiceMockController {
                        연쇄 삭제합니다. 삭제 SQL 에 작업코드 조건이 박혀 있어 운영 배치는
                        어떤 경우에도 걸리지 않습니다.
                     2. **로컬 산출물** — 멱등 표식·수신 파일·작업 파일 (Mock 초기화와 동일)
-
-                    커넥터가 하류(PPP)로 이미 보낸 건은 여기서 지울 수 없습니다 — 우리 소관이 아닙니다.
                     """)
     @DeleteMapping("/test-data")
     public Map<String, Object> deleteTestData() {
@@ -193,7 +191,7 @@ public class VoiceMockController {
     // ══════════════════════════════════════════════════════════════════════
 
     @Operation(summary = "현재 모드 조회",
-            description = "4개 스위치의 현재 값과 기동 시 설정값을 함께 돌려줍니다.")
+            description = "5개 스위치의 현재 값과 기동 시 설정값을 함께 돌려줍니다.")
     @GetMapping("/modes")
     public Map<String, Object> getModes() {
         Map<String, Object> out = new LinkedHashMap<>();
@@ -202,6 +200,7 @@ public class VoiceMockController {
         out.put("allowed", Map.of(
                 "source", List.of("MOCK", "DIRECT_JDBC", "ESB_HTTP2DB"),
                 "broker", List.of("MOCK", "REST"),
+                "phone", List.of("MOCK", "ESB"),
                 "decrypt", List.of("SKIP", "REAL"),
                 "stt", List.of("MOCK", "NPU")));
         return out;
@@ -212,7 +211,8 @@ public class VoiceMockController {
                     스위치 하나를 **즉시** 바꿉니다. 재시작이 필요 없습니다.
 
                     - `source` : MOCK / DIRECT_JDBC / ESB_HTTP2DB
-                    - `broker` : MOCK / REST — 전화 파일 공급도 이 값을 따라갑니다
+                    - `broker` : MOCK / REST — 접견 전용
+                    - `phone`  : MOCK / ESB — 전화 전용. 브로커와 별개입니다
                     - `decrypt`: SKIP / REAL
                     - `stt`    : MOCK / NPU
 
@@ -273,8 +273,8 @@ public class VoiceMockController {
                     생성할 Mock 대상 건수를 바꿉니다. **OOM 방어 검증용**입니다.
 
                     실데이터 규모는 접견 약 1,300건(6.5GB) · 전화 약 1,300건입니다.
-                    건수를 올려도 힙이 늘지 않아야 합니다 — 파일은 스트리밍으로 다루고,
-                    커넥터 전송은 청크로 나눠 보내기 때문입니다.
+                    건수를 올려도 힙이 늘지 않아야 합니다 — 파일을 통째로 메모리에 올리지 않고
+                    스트리밍으로 다루며, 건별로 처리한 뒤 바로 지우기 때문입니다.
 
                     **처리 시간 주의**: 건당 파일 안정성 검사(`voice.sync.stable-check-ms`)가
                     그대로 곱해집니다. local 기준 1,000건 ≈ 2분, 10,000건 ≈ 20분입니다.
@@ -297,7 +297,7 @@ public class VoiceMockController {
 
     @Operation(summary = "장애 시뮬레이션 설정",
             description = """
-                    STT·커넥터 전송 구간에 **의도적으로** 실패와 지연을 섞습니다.
+                    STT 구간에 **의도적으로** 실패와 지연을 섞습니다.
 
                     확인하려는 것: 파일 1건이 터져도 배치가 죽지 않고 `failCnt` 만 올리며
                     끝까지 도는가(Fault Tolerance). 1,300건 배치에서 한 건 때문에 전체가 멈추면

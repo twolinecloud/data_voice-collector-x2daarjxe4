@@ -35,7 +35,7 @@ import java.util.Map;
  * <p>스케줄러를 기다리지 않고 배치를 돌려볼 수 있게 한다. 다음 주 시연에서
  * "지금 한 번 돌려 보겠습니다"가 가능해야 하기 때문이다.</p>
  */
-@Tag(name = "1. 음성 수집 배치", description = "보라미 음성(접견·통화) 수집 → STT → 비식별 커넥터 전달")
+@Tag(name = "1. 음성 수집 배치", description = "보라미 음성(접견·통화) 수집 → 복호화 → STT → 처리 이력 적재")
 @RestController
 @RequestMapping(value = "/api/v1/voice", produces = MediaType.APPLICATION_JSON_VALUE)
 @RequiredArgsConstructor
@@ -85,7 +85,7 @@ public class VoiceBatchController {
     }
 
     @Operation(summary = "현재 구성 조회",
-            description = "4개 스위치(source/broker/decrypt/stt)가 각각 어느 모드인지, 하류 연결이 살아 있는지 본다.")
+            description = "5개 스위치(source/broker/phone/decrypt/stt)가 각각 어느 모드인지, 로그 컬렉터 연결이 살아 있는지 본다.")
     @GetMapping("/status")
     public Map<String, Object> status() {
         Map<String, Object> modes = new LinkedHashMap<>();
@@ -94,11 +94,6 @@ public class VoiceBatchController {
         modes.put("phone", phoneFileProvider.mode());
         modes.put("decrypt", decryptService.mode());
         modes.put("stt", sttClient.mode());
-
-        Map<String, Object> sink = new LinkedHashMap<>();
-        sink.put("enabled", props.sink().enabled());
-        sink.put("connectorBaseUrl", blankToNull(props.sink().connectorBaseUrl()));
-        sink.put("chunkSize", props.sink().chunkSize());
 
         Map<String, Object> logc = new LinkedHashMap<>();
         logc.put("enabled", logCollector.isEnabled());
@@ -123,7 +118,6 @@ public class VoiceBatchController {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("modes", modes);
         out.put("configuredModes", modeState.configured());
-        out.put("sink", sink);
         out.put("logCollector", logc);
         out.put("batch", batch);
         out.put("dirs", dirs);
@@ -168,7 +162,7 @@ public class VoiceBatchController {
                         "CMMN_FILE_ENC_YN='Y' 인 건만. 키 미수령(계획서 Q8)"),
                 step("STT", "stt", sttClient.mode(),
                         sttEndpoint(),
-                        "sttScriptText 조립 → 비식별 커넥터로 전달")));
+                        "STT 텍스트 생성 — 글자 수를 T4(파일 처리 이력)에 남긴다. 이 서비스의 마지막 단계")));
 
         Map<String, Object> phone = new LinkedHashMap<>();
         phone.put("label", "전화 (PHONE)");
@@ -269,9 +263,6 @@ public class VoiceBatchController {
         if (modeState.source() == VoiceProperties.SourceMode.ESB_HTTP2DB) {
             w.add("보라미 조회가 ESB_HTTP2DB 인데 연계가 아직 구현되지 않았다(계획서 Q2·Q15) — "
                     + "조회 즉시 실패한다. MOCK 또는 DIRECT_JDBC 로 두십시오.");
-        }
-        if (props.sink().enabled() && blankToNull(props.sink().connectorBaseUrl()) == null) {
-            w.add("비식별 커넥터 전송이 켜져 있는데 주소가 없다 — 전송 건수는 0으로 나온다.");
         }
         return w;
     }

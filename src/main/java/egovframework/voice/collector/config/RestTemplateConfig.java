@@ -15,10 +15,10 @@ import java.time.Duration;
  *
  * <p><b>JDK {@link HttpClient} 기반으로 만든다.</b> 기본 {@code SimpleClientHttpRequestFactory}
  * (=HttpURLConnection)는 <b>PATCH 를 지원하지 않는데</b>, 로그 컬렉터의 T1·T2 종료 갱신이
- * 전부 PATCH 다. 커넥터가 이미 같은 함정에 걸려 전용 팩토리로 해결했고, 여기서도 같은 선택을 한다
+ * 전부 PATCH 다. 같은 함정을 이미 겪은 사내 서비스들이 전용 팩토리로 해결했고, 여기서도 같은 선택을 한다
  * (추가 의존성 없음).</p>
  *
- * <p>JSON 변환은 앱 공용 {@link ObjectMapper} 를 그대로 써서 날짜 포맷을 컬렉터·커넥터와 맞춘다.</p>
+ * <p>JSON 변환은 앱 공용 {@link ObjectMapper} 를 그대로 써서 날짜 포맷을 로그 컬렉터와 맞춘다.</p>
  */
 @Configuration
 public class RestTemplateConfig {

@@ -109,15 +109,6 @@ voice:
     wait-timeout-sec: ${VOICE_WAIT_TIMEOUT_SEC:20}
     naming-policy: ORIGINAL
 
-  # ── 비식별 커넥터 (하류) ────────────────────────────────────────────────
-  #   기본은 꺼 둔다. 커넥터 없이도 시뮬레이터가 돌아야 하고, 켜 둔 채로 커넥터가 없으면
-  #   전송 실패 로그가 쌓여 시연 화면이 지저분해진다.
-  #   커넥터를 8080 으로 띄운 뒤 VOICE_SINK_ENABLED=true 로 켠다.
-  sink:
-    enabled: ${VOICE_SINK_ENABLED:false}
-    connector-base-url: ${VOICE_CONNECTOR_BASE_URL:http://localhost:8080}
-    chunk-size: ${VOICE_CHUNK_SIZE:100}
-
   batch:
     # 로컬에서는 스케줄을 끈다. 원치 않는 시점에 배치가 돌아 대상을 소진하면
     # 시연을 다시 준비해야 한다. 실행은 시뮬레이터 버튼이나 API 로 한다.
