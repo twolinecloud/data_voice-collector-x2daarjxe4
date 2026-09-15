@@ -1,5 +1,6 @@
 package egovframework.voice.collector.batch;
 
+import egovframework.voice.collector.broker.BrokerOutputCheck;
 import egovframework.voice.collector.broker.XvarmBrokerClient;
 import egovframework.voice.collector.config.VoiceProperties;
 import egovframework.voice.collector.decrypt.DecryptService;
@@ -243,6 +244,11 @@ public class VoiceCollectService {
             XvarmBrokerClient.ExtractResult extracted = broker.extract(target);
             log.info("[Track:MEET] ③ ESB 수신 대기 — {} (브로커 산출 {})",
                     target.shortId(), extracted.filePath());
+            // 브로커가 만든 파일이 우리 쪽에 보이는데 수신 폴더 밖이면 기다려 봐야 타임아웃이다.
+            //   브로커를 local 프로파일 없이 띄웠을 때 300초를 날리던 자리 — 지금 끊는다.
+            //   운영은 보라미 서버 경로라 우리 쪽에 없어 이 판정에 걸리지 않는다(BrokerOutputCheck).
+            BrokerOutputCheck.mismatch(extracted.filePath(), props.sync().meetDir())
+                    .ifPresent(reason -> { throw new IllegalStateException(reason); });
             // 브로커가 알려준 실제 파일명을 그대로 쓴다.
             //   추측한 이름으로 찾으면 브로커가 다른 이름으로 만들었을 때 영영 못 찾고 타임아웃이 난다.
             //   Mock 브로커는 우리와 같은 명명 정책을 써서 우연히 일치했을 뿐이고,
