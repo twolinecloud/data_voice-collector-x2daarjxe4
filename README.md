@@ -67,10 +67,13 @@ curl -X POST "http://localhost:8085/api/v1/mock/modes/reset"
 ## 3. 로컬 실행
 
 ```bash
-mvn spring-boot:run -Dspring-boot.run.profiles=local
+mvn spring-boot:run
 ```
 
-`local` 의 기본은 **보라미 조회 `DIRECT_JDBC`(H2 Mock 보라미) + 브로커 `REST`(8082)** 다.
+**프로파일을 안 주면 `local` 로 뜬다**(`spring.profiles.default: local`) — IntelliJ 에서 Active profiles 를
+비워 둬도 같다. K8s 이미지는 Dockerfile 이 프로파일을 박아 넣으므로 영향이 없다.
+
+`local` 의 기본은 **포트 8085 · 보라미 조회 `DIRECT_JDBC`(H2 Mock 보라미) + 브로커 `REST`(8082)** 다.
 그래서 접견 트랙을 돌리려면 **브로커가 8082 에 `local` 프로파일로 떠 있어야 한다** — 없으면
 접견 배치가 바로 실패한다(Fail-fast, 의도된 동작). 전화·복호화·STT 는 MOCK 이라 외부 의존이 없다.
 
@@ -82,6 +85,11 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 
 브로커 없이 돌리려면 시뮬레이터의 [XVARM 브로커] 드롭다운을 `MOCK` 으로 내리면 된다
 (또는 `VOICE_BROKER_MODE=MOCK`). H2 Mock 보라미로 조회되는 대상은 **접견 2건 · 전화 3건**이다.
+
+> **브로커 출력 경로가 어긋나면** 브로커는 "추출 완료" 를 돌려주지만 우리 수신 폴더는 비어 있다.
+> 브로커 응답의 `filePath`(절대경로)에 파일이 **실제로 있는데** 수신 폴더 밖이면 5분을 기다리지 않고
+> 그 건을 즉시 실패시키며 사유에 두 경로를 적는다(`BrokerOutputCheck`). 운영은 보라미 서버 경로라
+> 우리 쪽에 존재하지 않아 이 판정에 걸리지 않는다. 배치 전 **[브로커 연결 확인]** 으로 대조하는 것이 먼저다.
 
 ### 로컬 포트 배치
 

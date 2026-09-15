@@ -1,4 +1,13 @@
 spring:
+  # ── 프로파일을 안 주면 local 이다 ──────────────────────────────────────
+  #   IntelliJ 나 java -jar 로 프로파일 없이 띄우면 이 파일의 기본값(8080 · 전 구간 MOCK ·
+  #   대기 300초 · 브로커 주소 K8s 서비스명)으로 떠서, 화면에서 손으로 바꿔 가며 시험하다
+  #   브로커 출력 경로가 어긋나면 5분씩 기다린다. 실제로 반복해서 당했다(인수인계 5.1·5.4).
+  #   로컬 기동은 항상 local(8085 · DIRECT_JDBC/REST · 짧은 타임아웃)로 떨어지게 한다.
+  #   K8s 는 Dockerfile 이 -Dspring.profiles.active=${SPRING_PROFILE} 를 박아 넣으므로
+  #   영향이 없다 — default 는 active 가 하나도 없을 때만 쓰인다.
+  profiles:
+    default: local
   application:
     name: voice-collector
     version: v1.0
