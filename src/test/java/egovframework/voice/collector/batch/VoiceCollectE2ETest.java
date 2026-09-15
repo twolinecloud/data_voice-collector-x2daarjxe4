@@ -24,10 +24,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 전 구간 Mock E2E — <b>Phase 1 의 완료 판정 기준</b>이다.
  *
  * <p>보라미도 XVARM 도 NPU 도 없는 상태에서 배치가 끝까지 도는지 본다.
- * 대상 선별 → 파일 확보 → 복호화(통과) → STT → 커넥터 전달까지의 배선이 전부 이어져 있어야 통과한다.</p>
+ * 대상 선별 → 파일 확보 → 복호화(통과) → STT → 처리 이력까지의 배선이 전부 이어져 있어야 통과한다.</p>
  *
- * <p>커넥터 전송은 꺼 둔다(local 프로파일). 실제 커넥터에 붙이는 것은 별도 단계이고,
- * 여기서 검증할 것은 <b>우리 쪽 파이프라인이 완성됐는가</b>이다.</p>
+ * <p>여기서 검증할 것은 <b>우리 쪽 파이프라인이 완성됐는가</b>이다 — 이 서비스는 STT 까지가 범위이고
+ * 텍스트를 외부로 보내지 않는다.</p>
  */
 @SpringBootTest
 @ActiveProfiles("local")
@@ -38,6 +38,10 @@ class VoiceCollectE2ETest {
 
     @DynamicPropertySource
     static void dirs(DynamicPropertyRegistry registry) {
+        // local 프로파일 기본은 DIRECT_JDBC + REST(8082 브로커) 다 — 시뮬레이터용 기본값이다.
+        // 이 테스트는 외부 의존 없이 도는 전 구간 Mock 이 전제이므로 두 스위치를 MOCK 으로 고정한다.
+        registry.add("voice.source.mode", () -> "MOCK");
+        registry.add("voice.broker.mode", () -> "MOCK");
         // 테스트가 ./work 를 오염시키지 않게 임시 디렉터리로 돌린다.
         registry.add("voice.sync.meet-dir", () -> tmp.resolve("raw/meet").toString());
         registry.add("voice.sync.phone-dir", () -> tmp.resolve("raw/phone").toString());
@@ -75,7 +79,7 @@ class VoiceCollectE2ETest {
     }
 
     @Test
-    @DisplayName("STT 텍스트가 실제로 만들어진다 — 빈 텍스트면 하류가 무의미하다")
+    @DisplayName("STT 텍스트가 실제로 만들어진다 — 빈 텍스트면 처리한 의미가 없다")
     void producesSttText() {
         VoiceBatchResult result = service.run(wideWindow(), List.of(VoiceKind.PHONE), "TEST");
 

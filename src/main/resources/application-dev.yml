@@ -4,8 +4,8 @@
 #  모든 접속 정보는 ConfigMap · Secret 의 환경변수로 주입받는다.
 #  이 파일에는 <b>기본값만</b> 둔다 — 주소·계정을 코드에 박으면 환경이 바뀔 때마다 재배포해야 한다.
 #
-#  ── 하류는 실물, 상류는 준비되는 대로 ──────────────────────────────────
-#    커넥터·로그 컬렉터는 이미 K8s 에 떠 있으므로 처음부터 실물에 붙인다.
+#  ── 로그 컬렉터는 실물, 상류는 준비되는 대로 ───────────────────────────
+#    로그 컬렉터는 이미 K8s 에 떠 있으므로 처음부터 실물에 붙인다.
 #    보라미·XVARM·STT 는 아직이라 MOCK 으로 두고, 환경변수만 바꿔 하나씩 전환한다.
 #    (런타임 전환도 가능하지만 파드 재시작 시 이 값으로 돌아온다)
 # ══════════════════════════════════════════════════════════════════════════
@@ -68,8 +68,7 @@ voice:
     # 주소는 미리 꽂아 두고 스위치만 REST 로 올리면 붙는다.
     #   MOCK → 수집 서비스 안에서 더미 파일을 만든다(브로커 없이 기동 가능)
     #   REST → 위 파드의 POST /api/v1/xvarm/extract 를 실제로 호출한다
-    # 기본을 MOCK 으로 두는 것은 커넥터와 같은 Fail-fast 정책이다 —
-    # 실물 전환은 항상 명시적으로 한다.
+    # 기본을 MOCK 으로 두는 것은 Fail-fast 정책이다 — 실물 전환은 항상 명시적으로 한다.
     mode: ${VOICE_BROKER_MODE:MOCK}          # MOCK | REST
     base-url: ${VOICE_BROKER_BASE_URL:http://borami-xvarm-broker-1joiuorqhl:8080}
     # 시뮬레이터의 원클릭 주소 프리셋. 환경마다 브로커가 사는 곳이 달라
@@ -77,7 +76,7 @@ voice:
     presets:
       - label: "개발계 K8s"
         url: "http://borami-xvarm-broker-1joiuorqhl:8080"
-      - label: "로컬 PC (IntelliJ)"
+      - label: "로컬 PC"
         url: "http://localhost:8082"
     poll-interval-ms: ${VOICE_BROKER_POLL_MS:2000}
     poll-timeout-sec: ${VOICE_BROKER_TIMEOUT_SEC:120}
@@ -105,13 +104,6 @@ voice:
     stable-check-ms: ${VOICE_STABLE_CHECK_MS:1500}
     wait-timeout-sec: ${VOICE_WAIT_TIMEOUT_SEC:300}
     naming-policy: ${VOICE_NAMING_POLICY:ORIGINAL}   # ORIGINAL | ESB_DAT (Q7)
-
-  # ── 비식별 커넥터 (하류) ────────────────────────────────────────────────
-  sink:
-    enabled: ${VOICE_SINK_ENABLED:true}
-    connector-base-url: ${VOICE_CONNECTOR_BASE_URL:http://agent-connector-dp8qbi7xqh:8080}
-    chunk-size: ${VOICE_CHUNK_SIZE:100}
-    timeout-sec: ${VOICE_SINK_TIMEOUT_SEC:60}
 
   batch:
     # 스케줄은 기본으로 꺼 둔다. 개발계에서 예고 없이 배치가 돌면 대상이 소진되어

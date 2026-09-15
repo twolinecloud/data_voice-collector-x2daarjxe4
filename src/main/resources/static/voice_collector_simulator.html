@@ -29,7 +29,9 @@
   #log .pii{ color:#c678dd; font-weight:600; }
   .tgt-table { font-size:.82rem; }
   .tgt-table td, .tgt-table th { padding:.35rem .5rem; }
-  .busy { pointer-events:none; opacity:.55; }
+  .busy { pointer-events:none; }
+  .busy .btn:not(.is-running), .busy .form-control, .busy .form-check-input { opacity:.55; }
+  .btn.is-running:disabled { opacity:1; }
   .chaos-on { background:#fff4e5; }
   .pii-clean { color:#198754; font-weight:600; }
   .pii-dirty { color:#dc3545; font-weight:600; }
@@ -60,8 +62,11 @@
   .step-fixed { flex:0 0 9.5rem; font-family:var(--mono); font-size:.75rem; color:#6c757d;
                 text-align:right; padding-top:.2rem; }
   .step-url { margin-top:.35rem; }
-  .step-url input { font-family:var(--mono); font-size:.72rem; }
-  .step-url .btn { font-size:.68rem; padding:.1rem .4rem; }
+  .step-url .form-check { min-height:0; margin-bottom:.15rem; }
+  .step-url .form-check-input { margin-top:.2rem; cursor:pointer; }
+  .step-url .form-check-label { font-size:.74rem; cursor:pointer; }
+  .step-url .form-check-label code { font-size:.72rem; }
+  .step-url .url-tag { font-weight:600; color:#495057; }
   .probe-ok  { color:#198754; font-weight:600; }
   .probe-bad { color:#dc3545; font-weight:600; }
 </style>
@@ -72,7 +77,7 @@
   <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
     <div>
       <h4 class="mb-0">음성 수집 시뮬레이터</h4>
-      <div class="text-secondary small">보라미 음성(접견·통화) → STT → 비식별 커넥터 전달 파이프라인</div>
+      <div class="text-secondary small">보라미 음성(접견·통화) → 수집 → 복호화 → STT 파이프라인</div>
     </div>
     <div class="d-flex gap-2">
       <a class="btn btn-sm btn-outline-secondary" href="/swagger-ui.html" target="_blank">Swagger</a>
@@ -92,7 +97,7 @@
     </div>
     <div class="card-body">
       <div class="row g-3 mb-3" id="tracks"></div>
-      <div class="row g-2" id="downstream"></div>
+      <div class="row g-2" id="logc"></div>
       <div class="hint mt-3" id="dirs"></div>
       <div class="mt-2" id="warnings"></div>
       <div class="mt-2" id="probe-line"></div>
@@ -175,7 +180,7 @@
             </div>
             <button class="btn btn-sm btn-dark mt-2" id="btn-chaos">설정 적용</button>
             <div class="hint mt-2">
-              STT·커넥터 전송 구간에 실패·지연을 섞습니다. 한 건이 터져도 배치가
+              STT 구간에 실패·지연을 섞습니다. 한 건이 터져도 배치가
               <b>failCnt만 올리며 끝까지 도는지</b> 확인하는 용도입니다.
             </div>
           </div>
@@ -196,7 +201,7 @@
       <span class="small text-secondary font-monospace" id="last-exec">—</span>
     </div>
     <div class="card-body py-2">
-      <div class="row row-cols-2 row-cols-md-6 g-0" id="stats"></div>
+      <div class="row row-cols-2 row-cols-md-5 g-0" id="stats"></div>
       <div class="border-top pt-2 mt-2 small" id="pii-line">
         <span class="text-secondary">PII 원본 삭제 검증:</span> <span class="text-secondary">—</span>
       </div>
@@ -298,22 +303,15 @@ function renderTracks(tracks) {
   if (!tracks) return;
   $('tracks').innerHTML = ['meet','phone'].map(k => trackCard(k, tracks[k])).join('');
 
-  // 주소 변경 — 입력 후 [적용], 또는 프리셋 클릭
+  // 주소 변경 — 라디오를 고르는 즉시 서버에 반영한다. 별도 [적용] 버튼이 없다.
   async function applyUrl(key, value) {
     const d = await call('PUT', `/api/v1/mock/endpoints/${key}?value=${encodeURIComponent(value)}`,
                          `브로커 주소 변경 → ${value || '(비움)'}`);
     if (d) log(`  └ ${d.before || '(없음)'} → ${d.after || '(없음)'}`, 'ok');
-    await loadStatus(true);
+    await loadStatus(true);   // 단계 라벨(호출 주소)까지 서버 기준으로 다시 그린다
   }
-  document.querySelectorAll('[data-url-save]').forEach(b => {
-    b.onclick = () => applyUrl(b.dataset.urlSave,
-                               document.querySelector(`input[data-url="${b.dataset.urlSave}"]`).value);
-  });
-  document.querySelectorAll('[data-url-preset]').forEach(b => {
-    b.onclick = () => applyUrl(b.dataset.urlPreset, b.dataset.urlValue);
-  });
-  document.querySelectorAll('input[data-url]').forEach(inp => {
-    inp.onkeydown = (e) => { if (e.key === 'Enter') applyUrl(inp.dataset.url, inp.value); };
+  document.querySelectorAll('input[data-url-radio]').forEach(r => {
+    r.onchange = () => { if (r.checked) applyUrl(r.dataset.urlRadio, r.value); };
   });
 
   // 단계에 붙은 스위치 바인딩
@@ -355,21 +353,11 @@ function stepRow(s, no) {
   // 툴팁에 근거·주의사항을 넣는다. 화면이 좁아 한 줄로는 다 못 보여준다.
   const tip = esc([s.note, s.endpoint ? '호출: ' + s.endpoint : ''].filter(Boolean).join(String.fromCharCode(10)));
 
-  // 주소를 바꿀 수 있는 단계(브로커)면 입력칸 + 원클릭 프리셋을 붙인다.
+  // 주소를 바꿀 수 있는 단계(브로커)면 프리셋을 라디오로 붙인다 — 고르는 즉시 반영된다.
   // 모드만 REST 로 올리고 주소를 못 바꾸면 배치가 전건 실패한다.
-  const urlUi = s.urlKey ? `
-      <div class="step-url">
-        <div class="input-group input-group-sm">
-          <input type="text" class="form-control" data-url="${s.urlKey}"
-                 value="${esc(s.url||'')}" placeholder="http://호스트:포트">
-          <button class="btn btn-outline-primary" data-url-save="${s.urlKey}">적용</button>
-        </div>
-        <div class="d-flex flex-wrap gap-1 mt-1">
-          ${(s.urlPresets||[]).map(p => `
-            <button class="btn btn-outline-secondary" data-url-preset="${s.urlKey}"
-                    data-url-value="${esc(p.url)}" title="${esc(p.url)}">${esc(p.label)}</button>`).join('')}
-        </div>
-      </div>` : '';
+  //   · 현재 주소(s.url)와 같은 항목이 선택 상태
+  //   · 기동 설정값(s.urlConfigured)과 같은 항목에 (Default) — 재기동·모드 초기화 시 돌아가는 값
+  const urlUi = s.urlKey ? stepUrlRadios(s) : '';
 
   return `<div class="step ${mock?'is-mock':'is-real'}" title="${tip}">
       <div class="step-no">${no}</div>
@@ -380,6 +368,27 @@ function stepRow(s, no) {
       </div>
       ${ctrl}
     </div>`;
+}
+
+function stepUrlRadios(s) {
+  const presets = s.urlPresets || [];
+  const matched = presets.some(p => p.url === s.url);
+  const radios = presets.map((p, i) => {
+    const id = `url-${s.urlKey}-${i}`;
+    return `<div class="form-check">
+        <input class="form-check-input" type="radio" name="url-${s.urlKey}" id="${id}"
+               data-url-radio="${s.urlKey}" value="${esc(p.url)}" ${p.url === s.url ? 'checked' : ''}>
+        <label class="form-check-label" for="${id}">
+          <span class="url-tag">[${esc(p.label)}]</span> <code>${esc(p.url)}</code>
+          ${p.url === s.urlConfigured ? '<span class="hint">(Default)</span>' : ''}
+        </label>
+      </div>`;
+  }).join('');
+  // 프리셋 밖의 값(API 로 직접 바꾼 경우)이나 빈 값은 라디오가 하나도 안 켜진다 — 그 이유를 적어 준다.
+  const note = matched ? ''
+    : s.url ? `<div class="hint">현재 주소 <code>${esc(s.url)}</code> 는 프리셋에 없는 값입니다</div>`
+            : `<div class="hint text-danger">주소가 비어 있습니다 — 프리셋을 고르십시오</div>`;
+  return `<div class="step-url">${radios}${note}</div>`;
 }
 
 function flagCard(label, on, detail) {
@@ -400,10 +409,8 @@ async function loadStatus(quiet) {
 
   renderTracks(s.tracks);
 
-  $('downstream').innerHTML =
-      flagCard('비식별 커넥터 (하류)', s.sink.enabled && !!s.sink.connectorBaseUrl,
-               s.sink.connectorBaseUrl || (s.sink.enabled ? '전송 켜짐 · 주소 미설정' : '전송 꺼짐'))
-    + flagCard('로그 컬렉터 (T1·T2·T4)', s.logCollector.enabled, s.logCollector.baseUrl || '주소 미설정');
+  $('logc').innerHTML =
+      flagCard('로그 컬렉터 (T1·T2·T4)', s.logCollector.enabled, s.logCollector.baseUrl || '주소 미설정');
 
   $('dirs').innerHTML =
       `수신 접견 <code>${esc(s.dirs.meetDir)}</code> · 수신 전화 <code>${esc(s.dirs.phoneDir)}</code> · `
@@ -430,10 +437,6 @@ async function loadStatus(quiet) {
       log(`⚠ 장애 주입이 켜져 있습니다 — 실패 ${s.chaos.failPercent}% · 지연 ${s.chaos.delayPercent}%(${s.chaos.delayMs}ms)`, 'wr');
     }
   }
-  if (!quiet && s.sink.enabled === false) {
-    log('ℹ 커넥터 전송이 꺼져 있습니다 — 전송 건수는 0으로 나옵니다', 'wr');
-  }
-
   // "이 조합으로는 배치가 반드시 실패한다" 를 돌리기 전에 보여준다.
   const ws = s.warnings || [];
   $('warnings').innerHTML = ws.length
@@ -456,10 +459,9 @@ function renderResult(r, kind) {
     + stat(r.successCnt.toLocaleString(), '성공',   r.successCnt>0?'text-success':'')
     + stat(r.failCnt.toLocaleString(),    '실패',   r.failCnt>0?'text-danger':'')
     + stat(r.skippedCnt.toLocaleString(), '건너뜀', r.skippedCnt>0?'text-warning':'')
-    + stat(r.sentCnt.toLocaleString(),    '전송')
     + stat(r.execStsCd ?? '-', '상태');
 
-  log(`  └ 대상 ${r.targetCnt} · 성공 ${r.successCnt} · 실패 ${r.failCnt} · 건너뜀 ${r.skippedCnt} · 전송 ${r.sentCnt}  (execId=${r.execId})`,
+  log(`  └ 대상 ${r.targetCnt} · 성공 ${r.successCnt} · 실패 ${r.failCnt} · 건너뜀 ${r.skippedCnt}  (execId=${r.execId})`,
       r.failCnt>0 ? 'wr' : 'ok');
 
   // 트랙별로 나눠 보여준다 — 전체 실행 시 어느 시나리오가 막혔는지 한 줄로 드러나게.
@@ -498,7 +500,35 @@ function renderPii(residue) {
   logRaw(`<span class="pii">🔒 ${esc(residue.message)}</span>`);
 }
 
-async function runBatch(path, label, kind) {
+// 배치 버튼 4개 — 실행 중에는 전부 disabled, 누른 버튼에는 스피너를 돌린다.
+// 실행이 수 분 걸릴 수 있어 "눌렸는지" 가 화면에 보여야 두 번 누르지 않는다.
+const BATCH_BTNS = ['btn-meet', 'btn-phone', 'btn-periodic', 'btn-daily'];
+function setBatchRunning(activeId, on) {
+  BATCH_BTNS.forEach(id => {
+    const b = $(id);
+    b.disabled = on;
+    if (id !== activeId) return;
+    if (on) {
+      b.dataset.label = b.innerHTML;
+      b.classList.add('is-running');
+      b.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>실행 중…';
+    } else {
+      b.innerHTML = b.dataset.label;
+      b.classList.remove('is-running');
+    }
+  });
+}
+
+async function runBatch(path, label, kind, btnId) {
+  setBatchRunning(btnId, true);
+  try {
+    await runBatchInner(path, label, kind);
+  } finally {
+    setBatchRunning(btnId, false);   // 실패·예외 경로에서도 버튼을 원복한다
+  }
+}
+
+async function runBatchInner(path, label, kind) {
   const total = kind === 'MEET'  ? Number($('ds-meet').value||0)
               : kind === 'PHONE' ? Number($('ds-phone').value||0)
               : Number($('ds-meet').value||0) + Number($('ds-phone').value||0);
@@ -555,10 +585,10 @@ async function showTargets() {
 }
 
 // ── 바인딩 ──────────────────────────────────────────────────────────────
-$('btn-meet').onclick     = () => runBatch('/api/v1/voice/batches/periodic', '접견 트랙만 실행 (10분 창)',  'MEET');
-$('btn-phone').onclick    = () => runBatch('/api/v1/voice/batches/periodic', '전화 트랙만 실행 (10분 창)',  'PHONE');
-$('btn-periodic').onclick = () => runBatch('/api/v1/voice/batches/periodic', '전체 실행 (10분 창)');
-$('btn-daily').onclick    = () => runBatch('/api/v1/voice/batches/daily',    '전체 실행 (전날 하루치)');
+$('btn-meet').onclick     = () => runBatch('/api/v1/voice/batches/periodic', '접견 트랙만 실행 (10분 창)',  'MEET',  'btn-meet');
+$('btn-phone').onclick    = () => runBatch('/api/v1/voice/batches/periodic', '전화 트랙만 실행 (10분 창)',  'PHONE', 'btn-phone');
+$('btn-periodic').onclick = () => runBatch('/api/v1/voice/batches/periodic', '전체 실행 (10분 창)',          null,    'btn-periodic');
+$('btn-daily').onclick    = () => runBatch('/api/v1/voice/batches/daily',    '전체 실행 (전날 하루치)',      null,    'btn-daily');
 
 // 브로커 출력 경로와 우리 수신 폴더가 어긋나면 "추출 완료"인데 파일이 안 보인다.
 // 배치를 돌리기 전에 눈으로 대조할 수 있게 한다.

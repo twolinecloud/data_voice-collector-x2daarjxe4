@@ -1,6 +1,8 @@
 # voice-collector — 비정형 음성 수집 서비스
 
-보라미의 수용자 음성(접견·통화)을 골라 가져와 **STT 텍스트로 만들어 비식별 커넥터에 넘기는** 서비스.
+보라미의 수용자 음성(접견·통화)을 골라 가져와 복호화하고 **STT 텍스트로 만드는** 서비스.
+범위는 STT 처리와 내부 저장·감시까지다 — STT 텍스트를 외부 서비스로 전송하지 않는다
+(비식별 커넥터 연동은 아키텍처 변경으로 제외됐다).
 
 > 설계 근거: `data_agent-connector-dp8qbi7xqh/study/회의록/9_11/음성수집_서비스_개발계획_초안_v2.md`
 
@@ -9,39 +11,40 @@
 ## 1. 이 서비스가 하는 일 / 하지 않는 일
 
 ```
-보라미 조회 → XVARM 브로커 → 파일 수신 → 복호화 → STT → ┃ POST /deid/connect
-     (이 서비스의 범위)                                  ┃
-                                                        ▼
-                                    agent-connector : AI-R 비식별 → PPP 전송
-                                    log-collector   : T1 · T2 · T4 적재
+보라미 조회 → XVARM 브로커 → 파일 수신 → 복호화 → STT → 처리 이력(T1·T2·T4) ┃
+                         (이 서비스의 범위)                                  ┃
+                                                                            ▼
+                                                    log-collector : T1 · T2 · T4 적재 (API)
 ```
 
 | 하는 일 | 하지 않는 일 (다른 서비스 책임) |
 |---|---|
-| 대상 선별(특이수용자 필터) | 비식별 → `agent-connector` |
-| XVARM 추출 요청 | PPP 전송 → `agent-connector` |
-| 파일 수신·포맷 판별 | 로그 테이블 INSERT → `log-collector` (API 로만 적재) |
-| 복호화 | 재식별 매핑 → `data-collector` |
-| STT 호출 | STT 엔진 자체 → NPU 서버 |
+| 대상 선별(특이수용자 필터) | 로그 테이블 INSERT → `log-collector` (API 로만 적재) |
+| XVARM 추출 요청 | 재식별 매핑 → `data-collector` |
+| 파일 수신·포맷 판별 | STT 엔진 자체 → NPU 서버 |
+| 복호화 | STT 텍스트 외부 전송 → **하지 않는다** (커넥터 연동 제외) |
+| STT 호출 · 원본 즉시 삭제 · 처리 이력 적재 | |
 
-**R&R 은 2026-08-19 에 확정된 것이다.** 로그 테이블(T1~T11)의 단일 writer 는 로그 컬렉터이고,
-커넥터조차 자기 DB INSERT 코드를 걷어냈다. 이 서비스도 자체 로그 테이블을 만들지 않는다.
+**R&R 은 2026-08-19 에 확정된 것이다.** 로그 테이블(T1~T11)의 단일 writer 는 로그 컬렉터다.
+이 서비스도 자체 로그 테이블을 만들지 않는다.
 
 ---
 
-## 2. 4개 스위치 — 준비된 것부터 실물로
+## 2. 5개 스위치 — 준비된 것부터 실물로
 
-외부 의존 네 가지가 서로 다른 시점에 준비된다. 하나가 막혀도 나머지는 진행되도록 각각 독립 스위치다.
+외부 의존이 서로 다른 시점에 준비된다. 하나가 막혀도 나머지는 진행되도록 각각 독립 스위치다.
+접견(브로커)과 전화(파일 연계)는 연동 주체가 달라 스위치도 따로 둔다.
 
-| 스위치 | 값 | 기본 | 실물 전환 조건 |
+| 스위치 | 값 | 기본 (`local`) | 실물 전환 조건 |
 |---|---|---|---|
-| `voice.source.mode` | `MOCK` / `DIRECT_JDBC` / `ESB_HTTP2DB` | MOCK | 인터페이스ID(Q2)·I/F 테이블(Q15) |
-| `voice.broker.mode` | `MOCK` / `REST` | MOCK | XVARM 사양(Q3), 브로커 배포 |
-| `voice.decrypt.mode` | `SKIP` / `REAL` | SKIP | 복호화 주체 확정(Q13), 키 수령(Q8) |
-| `voice.stt.mode` | `MOCK` / `NPU` | MOCK | NPU API 사양(Q9) |
+| `voice.source.mode` | `MOCK` / `DIRECT_JDBC` / `ESB_HTTP2DB` | MOCK (**DIRECT_JDBC**) | 인터페이스ID(Q2)·I/F 테이블(Q15) |
+| `voice.broker.mode` | `MOCK` / `REST` — 접견 전용 | MOCK (**REST**) | XVARM 사양(Q3), 브로커 배포 |
+| `voice.phone.mode` | `MOCK` / `ESB` — 전화 전용 | MOCK (MOCK) | ESB 전화 연계 프로바이더 구성 |
+| `voice.decrypt.mode` | `SKIP` / `REAL` | SKIP (SKIP) | 복호화 주체 확정(Q13), 키 수령(Q8) |
+| `voice.stt.mode` | `MOCK` / `NPU` | MOCK (MOCK) | NPU API 사양(Q9) |
 
 > **REAL 모드는 실패해도 Mock 으로 빠지지 않는다**(Fail-fast). Mock 결과가 실제인 양 섞이면
-> 시연·검증이 통째로 무의미해지기 때문이다. 커넥터와 같은 정책이다.
+> 시연·검증이 통째로 무의미해지기 때문이다.
 
 ### 런타임 전환 — 재시작이 필요 없다
 
@@ -49,9 +52,9 @@
 그래서 시연 중에도 "이건 아직 Mock, 이건 실물"을 바꿔 가며 보여줄 수 있다.
 
 ```bash
-curl -X PUT "http://localhost:8081/api/v1/mock/modes/stt?value=NPU"
-curl      "http://localhost:8081/api/v1/mock/modes"      # 현재값 + 기동 설정값 + 허용값
-curl -X POST "http://localhost:8081/api/v1/mock/modes/reset"
+curl -X PUT "http://localhost:8085/api/v1/mock/modes/stt?value=NPU"
+curl      "http://localhost:8085/api/v1/mock/modes"      # 현재값 + 기동 설정값 + 허용값
+curl -X POST "http://localhost:8085/api/v1/mock/modes/reset"
 ```
 
 시뮬레이터 화면의 드롭다운이 이 API 를 호출한다.
@@ -67,27 +70,39 @@ curl -X POST "http://localhost:8081/api/v1/mock/modes/reset"
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
-전 구간 MOCK 이라 **외부 의존이 하나도 없어도 배치가 끝까지 돈다.**
+`local` 의 기본은 **보라미 조회 `DIRECT_JDBC`(H2 Mock 보라미) + 브로커 `REST`(8082)** 다.
+그래서 접견 트랙을 돌리려면 **브로커가 8082 에 `local` 프로파일로 떠 있어야 한다** — 없으면
+접견 배치가 바로 실패한다(Fail-fast, 의도된 동작). 전화·복호화·STT 는 MOCK 이라 외부 의존이 없다.
+
+```bash
+# 브로커 (다른 레포) — local 프로파일이 출력 폴더를 이 레포의 work/voice_raw/meet 로 맞춘다
+cd ../data_borami-xvarm-broker-1joiuorqhl
+mvn spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+브로커 없이 돌리려면 시뮬레이터의 [XVARM 브로커] 드롭다운을 `MOCK` 으로 내리면 된다
+(또는 `VOICE_BROKER_MODE=MOCK`). H2 Mock 보라미로 조회되는 대상은 **접견 2건 · 전화 3건**이다.
 
 ### 로컬 포트 배치
 
-세 서비스를 동시에 띄워도 겹치지 않게 정해져 있다.
+사내 서비스를 동시에 띄워도 겹치지 않게 정해져 있다.
 
 | 포트 | 서비스 | 비고 |
 |---:|---|---|
-| 8080 | `agent-connector` | 비식별 커넥터 |
-| **8081** | **`voice-collector`** | 이 서비스 |
+| 8080 | `agent-connector` | 사내 타 서비스 (이 서비스와 연동 없음) |
+| 8082 | `borami-xvarm-broker` | XVARM 브로커 — 접견 트랙이 호출 |
+| **8085** | **`voice-collector`** | 이 서비스 |
 | 8090 | `log-collector` | context-path **`/logc`** |
 
-> 커넥터와 로그 컬렉터의 포트는 각 프로젝트의 `application-local.yml` 에 이미 정해져 있어,
-> 이 서비스가 8081 을 쓴다.
+> 8080·8090 은 각 프로젝트의 `application-local.yml` 에 이미 정해져 있고 8082 는 브로커가 쓴다.
+> 그래서 이 서비스는 8085 를 쓴다.
 
 ### 화면 두 개
 
 | 주소 | 용도 |
 |---|---|
-| **`http://localhost:8081/voice_collector_simulator.html`** | **시뮬레이터** — 시연용 조작 화면 |
-| `http://localhost:8081/swagger-ui.html` | Swagger — API 개별 호출·스펙 확인 |
+| **`http://localhost:8085/voice_collector_simulator.html`** | **시뮬레이터** — 시연용 조작 화면 |
+| `http://localhost:8085/swagger-ui.html` | Swagger — API 개별 호출·스펙 확인 |
 
 ### 로그 컬렉터 연동 (로컬)
 
@@ -105,13 +120,16 @@ log-collector:
 
 시뮬레이터 화면 구성:
 
-- **① 처리 구간 모드** — 4개 스위치를 **드롭다운으로 즉시 전환**(서버 재시작 불필요).
-  MOCK/SKIP 은 주황, 실물은 초록. 하류(커넥터·로그 컬렉터) 연결 여부도 함께 본다
+- **① 처리 구간 모드** — 접견·전화 2트랙의 스위치를 **드롭다운으로 즉시 전환**(서버 재시작 불필요).
+  MOCK/SKIP 은 주황, 실물은 초록. 로그 컬렉터 연결 여부도 함께 본다.
+  브로커가 `REST` 면 단계 아래에 **주소 라디오**(`개발계 K8s` / `로컬 PC`)가 뜨고 고르는 즉시 반영된다 —
+  기동 설정값과 같은 항목에 `(Default)` 가 붙는다(`voice.broker.presets` 에서 내려준다)
 - **② 제어**
-  - 배치: `10분 주기` · `일배치` · `Mock 초기화/생성` · `대상 미리보기` · `수신 파일` · `PII 잔여`
+  - 배치: `접견만` · `전화만` · `10분 주기` · `일배치` — 실행 중에는 버튼이 잠기고 누른 버튼에 스피너가 돈다
+  - 보조: `Mock 초기화/생성` · `대상 미리보기` · `수신 파일` · `PII 잔여` · `브로커 연결 확인`
   - **대용량 Mock**: 접견·전화 건수 입력 + 프리셋(10 / 1,000 / 5,000 / 10,000건)
   - **장애 주입**: 활성 토글 + 실패 % · 지연 % · 지연 ms
-- **③ 최근 배치 결과** — 대상 / 성공 / 실패 / 건너뜀 / 전송 / 상태 +
+- **③ 최근 배치 결과** — 대상 / 성공 / 실패 / 건너뜀 / 상태 +
   **PII 원본 삭제 검증** 한 줄
 - **④ 실행 로그** — 호출 API·응답 시간·결과 요약·실패 사유, 그리고
   `🔒 작업 폴더 내 잔여 파일: 0건 (삭제 완료)` 를 배치마다 명시적으로 출력
@@ -121,24 +139,13 @@ log-collector:
 
 ```bash
 # CLI 로 하려면
-curl -X POST "http://localhost:8080/api/v1/mock/reset"          # 초기화
-curl      "http://localhost:8080/api/v1/mock/targets"           # 대상 미리보기
-curl -X POST "http://localhost:8080/api/v1/voice/batches/daily" # 배치 실행
-curl      "http://localhost:8080/api/v1/voice/status"           # 현재 구성
+curl -X POST "http://localhost:8085/api/v1/mock/reset"          # 초기화
+curl      "http://localhost:8085/api/v1/mock/targets"           # 대상 미리보기
+curl -X POST "http://localhost:8085/api/v1/voice/batches/daily" # 배치 실행
+curl      "http://localhost:8085/api/v1/voice/status"           # 현재 구성
 ```
 
 > `/api/v1/mock/**` 는 **시연 전용**이다. 운영 배포 시 인그레스·게이트웨이에서 차단한다.
-
-### 커넥터에 실제로 붙여 보기
-
-```bash
-mvn spring-boot:run -Dspring-boot.run.profiles=local \
-  -Dspring-boot.run.arguments="--voice.sink.enabled=true --voice.sink.connector-base-url=http://localhost:8081"
-```
-
-**확인할 것**: 커넥터 응답에서 STT 텍스트의 성명·주민번호·전화번호가 **마스킹되어** 돌아오는지.
-Mock STT 텍스트에는 일부러 개인정보를 넣어 두었다(전부 가공 데이터).
-마스킹되지 않고 그대로 나온다면 `sttScriptText` 필드명이 어긋난 것이다 — 3장 참조.
 
 ### 4단 조인 SQL 검증 (H2 Mock)
 
@@ -187,11 +194,11 @@ kubectl port-forward -n service-core svc/admin-db-fy9tjq4tsk 15432:5432
 스트리밍·청크 처리가 메모리를 지키는지 알 수 없어, 건수를 런타임에 올릴 수 있게 했다.
 
 ```bash
-curl -X PUT "http://localhost:8081/api/v1/mock/dataset?meet=500&phone=500"
+curl -X PUT "http://localhost:8085/api/v1/mock/dataset?meet=500&phone=500"
 ```
 
 - 건수를 올려도 **힙이 비례해 늘지 않아야** 한다 — 파일은 스트리밍으로 다루고
-  커넥터 전송은 청크(기본 100건)로 나눠 보낸다
+  건별로 처리한 뒤 바로 지운다
 - **200건을 넘으면** Mock WAV 를 1초짜리로 줄인다. 우리가 보려는 것은 건수에 대한
   메모리 거동이지 파일 크기가 아니고, 10,000건 × 2초는 640MB 라 디스크만 잡아먹는다
 - **처리 시간 주의**: 건당 파일 안정성 검사(`stable-check-ms`, local 100ms)가 그대로
@@ -200,10 +207,10 @@ curl -X PUT "http://localhost:8081/api/v1/mock/dataset?meet=500&phone=500"
 ### 장애 주입 (Chaos)
 
 ```bash
-curl -X PUT "http://localhost:8081/api/v1/mock/chaos?enabled=true&failPercent=10&delayPercent=10&delayMs=2000"
+curl -X PUT "http://localhost:8085/api/v1/mock/chaos?enabled=true&failPercent=10&delayPercent=10&delayMs=2000"
 ```
 
-STT·커넥터 전송 구간에 의도적으로 실패와 지연을 섞는다. **확인하려는 것은
+STT 구간에 의도적으로 실패와 지연을 섞는다. **확인하려는 것은
 파일 1건이 터져도 배치가 죽지 않고 `failCnt` 만 올리며 끝까지 도는가**이다.
 1,300건 배치에서 한 건 때문에 전체가 멈추면 나머지를 전부 다시 처리해야 한다.
 
@@ -285,13 +292,6 @@ im.tb_imph_ucdr_ds : total=25, telp_stt_flpth_nm 채워진 건 = 0
 ---
 
 ## 6. 절대 바꾸면 안 되는 것
-
-### `sttScriptText`
-
-커넥터의 `UnstructuredTextField` 레지스트리에 등록된 이름이다. **한 글자라도 다르면
-AI-R NER 대상에서 빠지고, 비식별되지 않은 원문이 그대로 PPP 로 나간다.** 에러도 나지 않는다.
-
-`DeidConnectorClient.STT_FIELD` 상수로 못 박았고 `DeidConnectorClientTest` 가 지킨다.
 
 ### T4 = 파일 1건 = 1행
 
@@ -375,8 +375,7 @@ egovframework.voice.collector
 ├─ broker/     XVARM 브로커 — Mock / Rest
 ├─ sync/       파일 수신 — FileArrivalWatcher · EsbFileNamingPolicy · PhoneFileProvider
 ├─ decrypt/    복호화 — DecryptService · Noop / PhoneAria / MeetRvs
-├─ stt/        STT — Mock / Npu
-├─ sink/       DeidConnectorClient  ★ 종착점
+├─ stt/        STT — Mock / Npu  ★ 마지막 처리 단계 (텍스트를 외부로 보내지 않는다)
 ├─ logging/    LogCollectorClient (T1·T2·T4)
 ├─ mapper/     BoramiVoiceMapper (MyBatis)
 ├─ model/      VoiceTarget · VoiceFile · SttResult · FileProcOutcome …

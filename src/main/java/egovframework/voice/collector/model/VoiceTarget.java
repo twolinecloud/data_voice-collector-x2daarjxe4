@@ -7,8 +7,8 @@ import java.time.LocalDateTime;
  *
  * <p><b>PII 를 일부러 담지 않는다.</b> {@code TB_IMPH_UCDR_DS} 에는 수신자명({@code RCVER_NM})·
  * 지인관계명({@code ACQT_RLTNS_NM})·국제전화번호({@code INTRL_TELNO}) 같은 개인정보가 그대로 있지만,
- * 이 서비스가 하류로 넘기는 것은 <b>STT 텍스트뿐</b>이다. 메타 PII 를 들고 다니면 비식별 대상이
- * 불필요하게 넓어지고, 로그·에러스택에 섞여 나갈 위험만 는다.</p>
+ * 이 서비스가 처리에 쓰는 것은 <b>파일을 찾는 키와 STT 텍스트뿐</b>이다. 메타 PII 를 들고 다니면
+ * 로그·에러스택에 섞여 나갈 위험만 는다.</p>
  *
  * @param kind           접견 / 전화
  * @param corrNo         교정번호 {@code CORR_NO}

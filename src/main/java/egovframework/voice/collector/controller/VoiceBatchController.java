@@ -35,7 +35,7 @@ import java.util.Map;
  * <p>스케줄러를 기다리지 않고 배치를 돌려볼 수 있게 한다. 다음 주 시연에서
  * "지금 한 번 돌려 보겠습니다"가 가능해야 하기 때문이다.</p>
  */
-@Tag(name = "1. 음성 수집 배치", description = "보라미 음성(접견·통화) 수집 → STT → 비식별 커넥터 전달")
+@Tag(name = "1. 음성 수집 배치", description = "보라미 음성(접견·통화) 수집 → 복호화 → STT → 처리 이력 적재")
 @RestController
 @RequestMapping(value = "/api/v1/voice", produces = MediaType.APPLICATION_JSON_VALUE)
 @RequiredArgsConstructor
@@ -85,7 +85,7 @@ public class VoiceBatchController {
     }
 
     @Operation(summary = "현재 구성 조회",
-            description = "4개 스위치(source/broker/decrypt/stt)가 각각 어느 모드인지, 하류 연결이 살아 있는지 본다.")
+            description = "5개 스위치(source/broker/phone/decrypt/stt)가 각각 어느 모드인지, 로그 컬렉터 연결이 살아 있는지 본다.")
     @GetMapping("/status")
     public Map<String, Object> status() {
         Map<String, Object> modes = new LinkedHashMap<>();
@@ -94,11 +94,6 @@ public class VoiceBatchController {
         modes.put("phone", phoneFileProvider.mode());
         modes.put("decrypt", decryptService.mode());
         modes.put("stt", sttClient.mode());
-
-        Map<String, Object> sink = new LinkedHashMap<>();
-        sink.put("enabled", props.sink().enabled());
-        sink.put("connectorBaseUrl", blankToNull(props.sink().connectorBaseUrl()));
-        sink.put("chunkSize", props.sink().chunkSize());
 
         Map<String, Object> logc = new LinkedHashMap<>();
         logc.put("enabled", logCollector.isEnabled());
@@ -123,7 +118,6 @@ public class VoiceBatchController {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("modes", modes);
         out.put("configuredModes", modeState.configured());
-        out.put("sink", sink);
         out.put("logCollector", logc);
         out.put("batch", batch);
         out.put("dirs", dirs);
@@ -168,7 +162,7 @@ public class VoiceBatchController {
                         "CMMN_FILE_ENC_YN='Y' 인 건만. 키 미수령(계획서 Q8)"),
                 step("STT", "stt", sttClient.mode(),
                         sttEndpoint(),
-                        "sttScriptText 조립 → 비식별 커넥터로 전달")));
+                        "STT 텍스트 생성 — 글자 수를 T4(파일 처리 이력)에 남긴다. 이 서비스의 마지막 단계")));
 
         Map<String, Object> phone = new LinkedHashMap<>();
         phone.put("label", "전화 (PHONE)");
@@ -200,6 +194,10 @@ public class VoiceBatchController {
      * <p>모드만 REST 로 올리고 주소를 못 바꾸면 배치가 전건 실패한다. 실제로 그 상태로
      * 두 번 막혔다. 브로커가 사는 곳은 환경마다 다르므로(개발계 K8s 서비스명 / 로컬 localhost)
      * 스위치 옆에서 바로 고를 수 있어야 한다.</p>
+     *
+     * <p>화면은 프리셋을 라디오로 그리고, 현재 주소({@code url})와 같은 항목을 선택 상태로,
+     * 기동 설정값({@code urlConfigured})과 같은 항목에 (Default) 를 붙인다 — 어느 것이
+     * 재기동·모드 초기화 시 돌아가는 값인지 화면만 보고 알 수 있어야 한다.</p>
      */
     private Map<String, Object> brokerStep() {
         Map<String, Object> m = step("XVARM 브로커", "broker", broker.mode(),
@@ -210,6 +208,7 @@ public class VoiceBatchController {
         if (modeState.broker() == VoiceProperties.BrokerMode.REST) {
             m.put("urlKey", "broker");
             m.put("url", modeState.brokerBaseUrl());
+            m.put("urlConfigured", modeState.configuredBrokerBaseUrl());
             m.put("urlPresets", props.broker().presets().stream()
                     .map(x -> {
                         Map<String, Object> pm = new LinkedHashMap<>();
@@ -269,9 +268,6 @@ public class VoiceBatchController {
         if (modeState.source() == VoiceProperties.SourceMode.ESB_HTTP2DB) {
             w.add("보라미 조회가 ESB_HTTP2DB 인데 연계가 아직 구현되지 않았다(계획서 Q2·Q15) — "
                     + "조회 즉시 실패한다. MOCK 또는 DIRECT_JDBC 로 두십시오.");
-        }
-        if (props.sink().enabled() && blankToNull(props.sink().connectorBaseUrl()) == null) {
-            w.add("비식별 커넥터 전송이 켜져 있는데 주소가 없다 — 전송 건수는 0으로 나온다.");
         }
         return w;
     }

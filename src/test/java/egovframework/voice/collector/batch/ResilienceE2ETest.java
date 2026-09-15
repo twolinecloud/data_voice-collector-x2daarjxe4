@@ -43,13 +43,15 @@ class ResilienceE2ETest {
 
     @DynamicPropertySource
     static void dirs(DynamicPropertyRegistry registry) {
+        // local 프로파일 기본(DIRECT_JDBC + REST)과 무관하게 전 구간 Mock 으로 고정한다.
+        registry.add("voice.source.mode", () -> "MOCK");
+        registry.add("voice.broker.mode", () -> "MOCK");
         registry.add("voice.sync.meet-dir", () -> tmp.resolve("raw/meet").toString());
         registry.add("voice.sync.phone-dir", () -> tmp.resolve("raw/phone").toString());
         registry.add("voice.sync.work-dir", () -> tmp.resolve("work").toString());
         registry.add("voice.sync.wait-timeout-sec", () -> "15");
         registry.add("voice.sync.stable-check-ms", () -> "30");
         registry.add("log-collector.enabled", () -> "false");
-        registry.add("voice.sink.enabled", () -> "false");
     }
 
     @Autowired

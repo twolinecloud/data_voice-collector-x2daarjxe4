@@ -7,7 +7,7 @@ package egovframework.voice.collector.model;
  * 수집 단계에서 쓰는 것은 아래 셋뿐이다.</p>
  */
 public enum ProcStatus {
-    /** 정상적으로 STT 텍스트까지 만들어 하류로 넘겼다. */
+    /** 정상적으로 STT 텍스트까지 만들었다. */
     SUCCESS,
     /** 처리 중 실패 — 사유를 T4 에 남긴다. */
     FAIL,

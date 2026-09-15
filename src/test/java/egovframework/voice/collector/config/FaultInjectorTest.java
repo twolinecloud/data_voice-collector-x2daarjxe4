@@ -45,7 +45,7 @@ class FaultInjectorTest {
         injector.configure(true, 0, 0, 0L);
 
         for (int i = 0; i < 50; i++) {
-            assertThatCode(() -> injector.maybeInject(Stage.SINK)).doesNotThrowAnyException();
+            assertThatCode(() -> injector.maybeInject(Stage.STT)).doesNotThrowAnyException();
         }
         assertThat(injector.injectedFailures()).isZero();
     }
@@ -72,7 +72,7 @@ class FaultInjectorTest {
         injector.configure(true, 0, 100, 150L);
 
         long t0 = System.currentTimeMillis();
-        injector.maybeInject(Stage.SINK);
+        injector.maybeInject(Stage.STT);
         long elapsed = System.currentTimeMillis() - t0;
 
         assertThat(elapsed).isGreaterThanOrEqualTo(150L);

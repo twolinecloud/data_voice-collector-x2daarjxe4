@@ -68,7 +68,6 @@ class RestXvarmBrokerClientTest {
                 new VoiceProperties.Sync("m", "p", "w", 10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),
                 new VoiceProperties.Stt(VoiceProperties.SttMode.MOCK, "", 30),
-                new VoiceProperties.Sink(false, "", 100, 30),
                 new VoiceProperties.Batch("0 0 2 * * *", "0 */10 * * * *", 20, false,
                         List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "VOICE", false));
     }
@@ -186,7 +185,7 @@ class RestXvarmBrokerClientTest {
                 props().source(),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, "", java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
-                props().sync(), props().decrypt(), props().stt(), props().sink(), props().batch());
+                props().sync(), props().decrypt(), props().stt(), props().batch());
 
         assertThatThrownBy(() ->
                 new RestXvarmBrokerClient(noUrl, modeState(noUrl), rt, new EsbFileNamingPolicy()).extract(meet()))

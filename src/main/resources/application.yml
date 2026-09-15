@@ -7,7 +7,7 @@ spring:
     date-format: "yyyy-MM-dd'T'HH:mm:ss"
     default-property-inclusion: non_null
 
-  # DB 시간 표준 = KST. 로그 컬렉터·커넥터와 같은 시계를 봐야 한 배치의 T1·T4 가 어긋나지 않는다.
+  # DB 시간 표준 = KST. 로그 컬렉터와 같은 시계를 봐야 한 배치의 T1·T4 가 어긋나지 않는다.
   # (Main.main 에서 JVM 기본 타임존도 고정한다)
   datasource:
     # 기본은 H2 인메모리 Mock 보라미다. 개발계에서 4단 조인 SQL 자체를 검증하려고 둔다.
@@ -56,7 +56,7 @@ springdoc:
 # ── 로그 컬렉터 ────────────────────────────────────────────────────────────
 #   R&R: 로그 테이블(T1~T11)의 단일 writer 는 로그 컬렉터다. 이 서비스는 T1·T2·T4 를 API 로 적재한다.
 #   base-url 은 context-path(/logc)까지 포함해서 준다.
-#   기본 false — 컬렉터 없이도 기동·시연이 되게 하는 방어적 기본값이다(커넥터와 동일한 정책).
+#   기본 false — 컬렉터 없이도 기동·시연이 되게 하는 방어적 기본값이다.
 log-collector:
   enabled: ${LOG_COLLECTOR_ENABLED:false}
   base-url: ${LOG_COLLECTOR_BASE_URL:}
@@ -100,7 +100,7 @@ voice:
     presets:
       - label: "개발계 K8s"
         url: "http://borami-xvarm-broker-1joiuorqhl:8080"
-      - label: "로컬 PC (IntelliJ)"
+      - label: "로컬 PC"
         url: "http://localhost:8082"
     poll-interval-ms: 2000
     poll-timeout-sec: 120
@@ -128,12 +128,6 @@ voice:
     mode: ${VOICE_STT_MODE:MOCK}             # MOCK | NPU
     base-url: ${VOICE_STT_BASE_URL:}
     timeout-sec: ${VOICE_STT_TIMEOUT_SEC:300}
-
-  sink:
-    enabled: ${VOICE_SINK_ENABLED:true}
-    connector-base-url: ${VOICE_CONNECTOR_BASE_URL:}
-    chunk-size: 100
-    timeout-sec: 60
 
   batch:
     schedule-enabled: ${VOICE_SCHEDULE_ENABLED:false}

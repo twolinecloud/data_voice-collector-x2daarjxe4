@@ -27,10 +27,6 @@ voice:
     phone-dir: ${VOICE_PHONE_DIR:/k8s/voice_raw/phone}
     work-dir: ${VOICE_WORK_DIR:/k8s/voice_work}
 
-  sink:
-    enabled: true
-    connector-base-url: ${VOICE_CONNECTOR_BASE_URL}
-
   batch:
     schedule-enabled: ${VOICE_SCHEDULE_ENABLED:true}
     retain-source-file: false     # 복호화된 원본 음성은 STT 후 지운다
