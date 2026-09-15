@@ -86,7 +86,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 
 | 주소 | 용도 |
 |---|---|
-| **`http://localhost:8081/simulator.html`** | **시뮬레이터** — 시연용 조작 화면 |
+| **`http://localhost:8081/voice_collector_simulator.html`** | **시뮬레이터** — 시연용 조작 화면 |
 | `http://localhost:8081/swagger-ui.html` | Swagger — API 개별 호출·스펙 확인 |
 
 ### 로그 컬렉터 연동 (로컬)
@@ -366,7 +366,7 @@ Jenkins 파이프라인이 `${GROUP_NAME}_HelmChart` 레포의 `$STAGE/$SERVICE_
 ## 7. 패키지 구조
 
 ```
-src/main/resources/static/simulator.html   ← 시연용 조작 화면
+src/main/resources/static/voice_collector_simulator.html   ← 시연용 조작 화면
 
 egovframework.voice.collector
 ├─ controller/ VoiceBatchController(운영·시연) · VoiceMockController(Mock 전용)

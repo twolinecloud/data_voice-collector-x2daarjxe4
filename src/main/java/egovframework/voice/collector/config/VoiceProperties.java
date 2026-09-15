@@ -80,11 +80,28 @@ public record VoiceProperties(
     /** 보라미 WAS 안에 배포될 XVARM 브로커 호출 설정. */
     public record Broker(
             @DefaultValue("MOCK") BrokerMode mode,
+            /**
+             * 브로커 주소. 기동 초기값이며, 시뮬레이터에서 런타임으로 바꿀 수 있다
+             * ({@code VoiceModeState.brokerBaseUrl}). 바꾼 값은 이 프로세스에만 남는다.
+             */
             @DefaultValue("") String baseUrl,
+            /**
+             * 시뮬레이터의 원클릭 주소 프리셋. 환경마다 브로커가 사는 곳이 달라
+             * (개발계는 K8s 서비스명, 로컬은 localhost) 매번 손으로 치게 하지 않으려는 것이다.
+             * 설정으로 빼 둔 이유는 주소가 바뀌었을 때 화면 코드를 고치지 않게 하려는 것.
+             */
+            List<Preset> presets,
             /** 추출 완료를 기다리는 폴링 간격. 브로커는 202 로 받고 상태를 따로 알려준다. */
             @DefaultValue("2000") long pollIntervalMs,
             @DefaultValue("120") int pollTimeoutSec
-    ) {}
+    ) {
+        public Broker {
+            presets = (presets == null) ? List.of() : List.copyOf(presets);
+        }
+    }
+
+    /** 시뮬레이터에서 한 번에 고를 수 있는 주소 후보. */
+    public record Preset(String label, String url) {}
 
     /**
      * 전화 파일 연계 경로. <b>브로커(XVARM)와 무관한 별도 트랙이다.</b>

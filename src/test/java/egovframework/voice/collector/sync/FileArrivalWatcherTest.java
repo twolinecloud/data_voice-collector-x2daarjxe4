@@ -33,7 +33,7 @@ class FileArrivalWatcherTest {
                 new VoiceProperties.Source(VoiceProperties.SourceMode.MOCK, "", "",
                         new VoiceProperties.Schema("", "", "", ""),
                         new VoiceProperties.Flag("Y", "Y", "N", "Y")),
-                new VoiceProperties.Broker(VoiceProperties.BrokerMode.MOCK, "", 10, 3),
+                new VoiceProperties.Broker(VoiceProperties.BrokerMode.MOCK, "", java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 new VoiceProperties.Sync(meet.toString(), phone.toString(), tmp.resolve("w").toString(),
                         20, 3, EsbFileNamingPolicy.Policy.ORIGINAL),

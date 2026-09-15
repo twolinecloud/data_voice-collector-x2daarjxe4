@@ -5,7 +5,7 @@
 #
 #  ── 로컬 포트 배치 ────────────────────────────────────────────────────────
 #    8080  agent-connector   (비식별 커넥터)
-#    8081  voice-collector   (이 서비스)          ← 시뮬레이터 http://localhost:8081/simulator.html
+#    8081  voice-collector   (이 서비스)          ← 시뮬레이터 http://localhost:8081/voice_collector_simulator.html
 #    8090  log-collector     (context-path /logc)
 #
 #    커넥터가 8080 을 쓰고 로그 컬렉터가 8090 을 쓰도록 이미 정해져 있어(각 프로젝트의
@@ -77,6 +77,13 @@ voice:
   broker:
     mode: ${VOICE_BROKER_MODE:MOCK}
     base-url: ${VOICE_BROKER_BASE_URL:http://localhost:8082}
+    # 시뮬레이터의 원클릭 주소 프리셋. 환경마다 브로커가 사는 곳이 달라
+    # 매번 손으로 치지 않게 둔다. 주소가 바뀌면 여기만 고치면 화면에 그대로 반영된다.
+    presets:
+      - label: "개발계 K8s"
+        url: "http://borami-xvarm-broker-1joiuorqhl:8080"
+      - label: "로컬 PC (IntelliJ)"
+        url: "http://localhost:8082"
     poll-interval-ms: ${VOICE_BROKER_POLL_MS:500}
     poll-timeout-sec: ${VOICE_BROKER_TIMEOUT_SEC:30}
   # ── 전화 파일 연계 ──────────────────────────────────────────────────────

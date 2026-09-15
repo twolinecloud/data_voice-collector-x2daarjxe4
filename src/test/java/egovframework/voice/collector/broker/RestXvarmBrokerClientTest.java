@@ -46,7 +46,15 @@ class RestXvarmBrokerClientTest {
     void setUp() {
         rt = new RestTemplate();
         server = MockRestServiceServer.createServer(rt);
-        client = new RestXvarmBrokerClient(props(), rt, new EsbFileNamingPolicy());
+        client = new RestXvarmBrokerClient(props(), modeState(props()), rt, new EsbFileNamingPolicy());
+    }
+
+    /** 런타임 상태는 설정에서 초기화된다 — @PostConstruct 를 직접 불러 준다. */
+    private static egovframework.voice.collector.config.VoiceModeState modeState(VoiceProperties p) {
+        egovframework.voice.collector.config.VoiceModeState s =
+                new egovframework.voice.collector.config.VoiceModeState(p);
+        s.resetToConfigured();
+        return s;
     }
 
     private VoiceProperties props() {
@@ -55,7 +63,7 @@ class RestXvarmBrokerClientTest {
                         new VoiceProperties.Schema("", "", "", ""),
                         new VoiceProperties.Flag("Y", "Y", "N", "Y")),
                 // 폴링 간격을 짧게 — 테스트가 몇 초씩 잡고 있을 이유가 없다
-                new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, BASE, 10, 3),
+                new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, BASE, java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 new VoiceProperties.Sync("m", "p", "w", 10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),
@@ -176,13 +184,13 @@ class RestXvarmBrokerClientTest {
     void requiresBaseUrl() {
         VoiceProperties noUrl = new VoiceProperties(
                 props().source(),
-                new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, "", 10, 3),
+                new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, "", java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 props().sync(), props().decrypt(), props().stt(), props().sink(), props().batch());
 
         assertThatThrownBy(() ->
-                new RestXvarmBrokerClient(noUrl, rt, new EsbFileNamingPolicy()).extract(meet()))
+                new RestXvarmBrokerClient(noUrl, modeState(noUrl), rt, new EsbFileNamingPolicy()).extract(meet()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("base-url");
+                .hasMessageContaining("주소가 비어 있다");
     }
 }

@@ -45,7 +45,7 @@ public class OpenApiConfig {
                         성명·주민번호·전화번호가 **마스킹되어** 돌아와야 합니다. \
                         그대로 나오면 `sttScriptText` 필드명이 어긋난 것입니다.
 
-                        > 시뮬레이터 화면: [/simulator.html](/simulator.html)
+                        > 시뮬레이터 화면: [/voice_collector_simulator.html](/voice_collector_simulator.html)
                         """)
                 .license(new License().name("내부 프로젝트 (KCAIS)")));
     }

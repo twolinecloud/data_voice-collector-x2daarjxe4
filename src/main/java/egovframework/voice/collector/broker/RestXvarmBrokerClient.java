@@ -37,6 +37,7 @@ import java.util.Map;
 public class RestXvarmBrokerClient implements XvarmBrokerClient {
 
     private final VoiceProperties props;
+    private final egovframework.voice.collector.config.VoiceModeState modeState;
     private final RestTemplate voiceRestTemplate;
     private final egovframework.voice.collector.sync.EsbFileNamingPolicy namingPolicy;
 
@@ -52,11 +53,11 @@ public class RestXvarmBrokerClient implements XvarmBrokerClient {
      */
     public Map<String, Object> probe() {
         Map<String, Object> out = new java.util.LinkedHashMap<>();
-        String base = props.broker().baseUrl();
+        String base = baseUrl();
         out.put("baseUrl", base);
         if (!StringUtils.hasText(base)) {
             out.put("reachable", false);
-            out.put("error", "voice.broker.base-url 이 비어 있다 — REST 모드에서는 필수다");
+            out.put("error", "브로커 주소가 비어 있다 — 시뮬레이터에서 주소를 고르거나 VOICE_BROKER_BASE_URL 을 주십시오");
             return out;
         }
         try {
@@ -120,10 +121,21 @@ public class RestXvarmBrokerClient implements XvarmBrokerClient {
         return "REST";
     }
 
+    /**
+     * 지금 쓸 브로커 주소. <b>설정이 아니라 런타임 상태에서 읽는다</b> —
+     * 시뮬레이터에서 주소를 바꾸면 재기동 없이 바로 반영되어야 하기 때문이다.
+     */
+    private String baseUrl() {
+        return modeState.brokerBaseUrl();
+    }
+
     private String requireBaseUrl() {
-        String base = props.broker().baseUrl();
+        String base = baseUrl();
         if (!StringUtils.hasText(base)) {
-            throw new IllegalStateException("voice.broker.base-url 이 비어 있다 — REST 모드에서는 필수다");
+            throw new IllegalStateException(
+                    "브로커 주소가 비어 있다 — REST 모드에서는 필수다. "
+                            + "시뮬레이터의 [XVARM 브로커] 단계에서 주소를 고르거나, "
+                            + "VOICE_BROKER_BASE_URL 환경변수를 주십시오.");
         }
         return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
     }

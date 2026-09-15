@@ -72,6 +72,13 @@ voice:
     # 실물 전환은 항상 명시적으로 한다.
     mode: ${VOICE_BROKER_MODE:MOCK}          # MOCK | REST
     base-url: ${VOICE_BROKER_BASE_URL:http://borami-xvarm-broker-1joiuorqhl:8080}
+    # 시뮬레이터의 원클릭 주소 프리셋. 환경마다 브로커가 사는 곳이 달라
+    # 매번 손으로 치지 않게 둔다. 주소가 바뀌면 여기만 고치면 화면에 그대로 반영된다.
+    presets:
+      - label: "개발계 K8s"
+        url: "http://borami-xvarm-broker-1joiuorqhl:8080"
+      - label: "로컬 PC (IntelliJ)"
+        url: "http://localhost:8082"
     poll-interval-ms: ${VOICE_BROKER_POLL_MS:2000}
     poll-timeout-sec: ${VOICE_BROKER_TIMEOUT_SEC:120}
   # ── 전화 파일 연계 ──────────────────────────────────────────────────────

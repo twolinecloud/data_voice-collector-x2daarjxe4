@@ -131,6 +131,10 @@ public class VoiceBatchController {
         //   화면에 하드코딩하면 설정을 바꿔도 그림이 그대로라 "무엇이 실제로 도는지"를
         //   화면만 보고는 알 수 없게 된다 — 실제로 그래서 전화 트랙이 브로커 스위치에
         //   끌려가는 것을 아무도 눈치채지 못했다.
+        Map<String, Object> endpoints = new LinkedHashMap<>();
+        endpoints.put("brokerBaseUrl", modeState.brokerBaseUrl());
+        endpoints.put("brokerBaseUrlConfigured", modeState.configuredBrokerBaseUrl());
+        out.put("endpoints", endpoints);
         out.put("tracks", tracks());
         // "이 조합으로는 반드시 실패한다" 를 배치 전에 알린다.
         out.put("warnings", warnings());
@@ -155,9 +159,7 @@ public class VoiceBatchController {
                 step("보라미 조회", "source", source.mode(),
                         sourceEndpoint(),
                         "TB_IMSC_PTPR_DT → TB_RERD_TFIN_DS → TB_SMSM_CMFI_BS → XVARM.ASYSCONTENTELEMENT (4단 조인)"),
-                step("XVARM 브로커", "broker", broker.mode(),
-                        brokerEndpoint(),
-                        "POST /api/v1/xvarm/extract 로 추출 지시 후 상태 폴링. XVARM 이 보라미 임시 폴더에 파일을 만든다"),
+                brokerStep(),
                 step("ESB 수신", null, props.sync().namingPolicy().name(),
                         props.sync().meetDir(),
                         "ESB FILE2FILE(P20) 이 동기화해 준 파일을 감시한다. 크기가 안정되어야 처리한다"),
@@ -192,6 +194,34 @@ public class VoiceBatchController {
         return out;
     }
 
+    /**
+     * 브로커 단계 — 모드 드롭다운에 더해 <b>주소를 화면에서 바꿀 수 있게</b> 정보를 싣는다.
+     *
+     * <p>모드만 REST 로 올리고 주소를 못 바꾸면 배치가 전건 실패한다. 실제로 그 상태로
+     * 두 번 막혔다. 브로커가 사는 곳은 환경마다 다르므로(개발계 K8s 서비스명 / 로컬 localhost)
+     * 스위치 옆에서 바로 고를 수 있어야 한다.</p>
+     */
+    private Map<String, Object> brokerStep() {
+        Map<String, Object> m = step("XVARM 브로커", "broker", broker.mode(),
+                brokerEndpoint(),
+                "POST /api/v1/xvarm/extract 로 추출 지시 후 상태 폴링. XVARM 이 보라미 임시 폴더에 파일을 만든다");
+        // MOCK 일 때는 주소를 쓰지 않으므로 편집 UI 를 내보내지 않는다 — 안 쓰는 값을
+        // 고치게 두면 "바꿨는데 왜 그대로지?" 가 된다.
+        if (modeState.broker() == VoiceProperties.BrokerMode.REST) {
+            m.put("urlKey", "broker");
+            m.put("url", modeState.brokerBaseUrl());
+            m.put("urlPresets", props.broker().presets().stream()
+                    .map(x -> {
+                        Map<String, Object> pm = new LinkedHashMap<>();
+                        pm.put("label", x.label());
+                        pm.put("url", x.url());
+                        return pm;
+                    })
+                    .toList());
+        }
+        return m;
+    }
+
     private Map<String, Object> step(String label, String switchKey, String mode, String endpoint, String note) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("label", label);
@@ -219,7 +249,7 @@ public class VoiceBatchController {
         if (modeState.broker() == VoiceProperties.BrokerMode.MOCK) {
             return "내부 Mock 브로커 — " + props.sync().meetDir() + " 에 직접 생성";
         }
-        String base = blankToNull(props.broker().baseUrl());
+        String base = blankToNull(modeState.brokerBaseUrl());
         if (base == null) {
             // 주소를 경로와 이어붙이면 "브로커 주소 미설정/api/v1/..." 처럼 읽혀 설정된 것처럼 보인다.
             // 배치를 돌려야 비로소 실패하므로, 여기서 문제로 드러나게 한다.
@@ -232,10 +262,9 @@ public class VoiceBatchController {
     private List<String> warnings() {
         List<String> w = new java.util.ArrayList<>();
         if (modeState.broker() == VoiceProperties.BrokerMode.REST
-                && blankToNull(props.broker().baseUrl()) == null) {
-            w.add("접견 트랙: 브로커가 REST 인데 voice.broker.base-url 이 비어 있다 — "
-                    + "접견 배치는 전건 실패한다. 수집기를 local 프로파일로 띄우거나 "
-                    + "VOICE_BROKER_BASE_URL=http://localhost:8082 를 주십시오.");
+                && blankToNull(modeState.brokerBaseUrl()) == null) {
+            w.add("접견 트랙: 브로커가 REST 인데 주소가 비어 있다 — 접견 배치는 전건 실패한다. "
+                    + "아래 [XVARM 브로커] 단계에서 주소 프리셋을 고르십시오(로컬 테스트는 로컬 PC).");
         }
         if (modeState.source() == VoiceProperties.SourceMode.ESB_HTTP2DB) {
             w.add("보라미 조회가 ESB_HTTP2DB 인데 연계가 아직 구현되지 않았다(계획서 Q2·Q15) — "

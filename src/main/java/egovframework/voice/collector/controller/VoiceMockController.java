@@ -230,6 +230,33 @@ public class VoiceMockController {
         return out;
     }
 
+    @Operation(summary = "브로커 주소 변경",
+            description = """
+                    XVARM 브로커 주소(`voice.broker.base-url`)를 **재시작 없이** 바꿉니다.
+
+                    브로커가 사는 곳은 환경마다 다릅니다.
+
+                    | 환경 | 주소 |
+                    |---|---|
+                    | 개발계 K8s | `http://borami-xvarm-broker-1joiuorqhl:8080` |
+                    | 로컬 PC (IntelliJ) | `http://localhost:8082` |
+
+                    모드만 `REST` 로 올리고 주소를 안 바꾸면 접견 배치가 **전건 실패**합니다.
+                    빈 값도 허용합니다 — 그 실패를 일부러 재현해 볼 수 있어야 하기 때문입니다.
+
+                    변경은 **이 프로세스에만** 남습니다. 재기동하면 설정값으로 돌아갑니다.
+                    """)
+    @PutMapping("/endpoints/broker")
+    public Map<String, Object> setBrokerBaseUrl(@RequestParam(required = false, defaultValue = "") String value) {
+        String before = modeState.setBrokerBaseUrl(value);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("endpoint", "broker");
+        out.put("before", before);
+        out.put("after", modeState.brokerBaseUrl());
+        out.put("configured", modeState.configuredBrokerBaseUrl());
+        return out;
+    }
+
     @Operation(summary = "모드 초기화", description = "기동 시 설정값(application.yml / 환경변수)으로 되돌립니다.")
     @PostMapping("/modes/reset")
     public Map<String, Object> resetModes() {

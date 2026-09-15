@@ -26,7 +26,7 @@ class VoiceModeStateTest {
                 new VoiceProperties.Source(VoiceProperties.SourceMode.MOCK, "", "",
                         new VoiceProperties.Schema("", "", "", ""),
                         new VoiceProperties.Flag("Y", "Y", "N", "Y")),
-                new VoiceProperties.Broker(VoiceProperties.BrokerMode.MOCK, "", 100, 10),
+                new VoiceProperties.Broker(VoiceProperties.BrokerMode.MOCK, "", java.util.List.of(), 100, 10),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 new VoiceProperties.Sync("m", "p", "w", 10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),

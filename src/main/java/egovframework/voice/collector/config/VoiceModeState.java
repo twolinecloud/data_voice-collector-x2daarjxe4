@@ -44,6 +44,15 @@ public class VoiceModeState {
     private volatile DecryptMode decrypt;
     private volatile SttMode stt;
 
+    /**
+     * XVARM 브로커 주소 — <b>모드가 아니라 주소지만 같은 곳에서 관리한다.</b>
+     *
+     * <p>브로커가 사는 곳이 환경마다 다르다(개발계는 K8s 서비스명, 로컬은 localhost).
+     * 모드만 REST 로 올리고 주소를 안 바꾸면 배치가 전건 실패하는데, 그러면 모드 스위치만
+     * 런타임으로 두는 의미가 없다. 주소도 같이 바꿀 수 있어야 스위치가 제 역할을 한다.</p>
+     */
+    private volatile String brokerBaseUrl;
+
     @PostConstruct
     void init() {
         this.source = props.source().mode();
@@ -51,6 +60,7 @@ public class VoiceModeState {
         this.phone = props.phone().mode();
         this.decrypt = props.decrypt().mode();
         this.stt = props.stt().mode();
+        this.brokerBaseUrl = nullToBlank(props.broker().baseUrl());
         log.info("[Mode] 초기 모드 — 접견트랙(source={} broker={}) · 전화트랙(source={} phone={}) · 공통(decrypt={} stt={})",
                 source, broker, source, phone, decrypt, stt);
     }
@@ -74,6 +84,38 @@ public class VoiceModeState {
 
     public SttMode stt() {
         return stt;
+    }
+
+    /** 현재 브로커 주소. 비어 있을 수 있다(REST 모드에서는 그 상태로 호출하면 실패한다). */
+    public String brokerBaseUrl() {
+        return brokerBaseUrl;
+    }
+
+    /**
+     * 브로커 주소를 바꾼다. 빈 값은 "주소 없음"으로 허용한다 — 일부러 지우고
+     * 실패를 재현해 볼 수 있어야 한다.
+     *
+     * @return 바뀌기 전 값
+     * @throws IllegalArgumentException http/https 로 시작하지 않는 값
+     */
+    public String setBrokerBaseUrl(String value) {
+        String v = (value == null) ? "" : value.trim();
+        while (v.endsWith("/")) {
+            v = v.substring(0, v.length() - 1);   // 뒤 슬래시는 경로를 붙일 때 이중이 된다
+        }
+        if (!v.isEmpty() && !(v.startsWith("http://") || v.startsWith("https://"))) {
+            throw new IllegalArgumentException(
+                    "브로커 주소는 http:// 또는 https:// 로 시작해야 한다: " + value);
+        }
+        String before = brokerBaseUrl;
+        brokerBaseUrl = v;
+        log.info("[Mode] 브로커 주소 변경 — {} → {}",
+                before.isEmpty() ? "(없음)" : before, v.isEmpty() ? "(없음)" : v);
+        return before;
+    }
+
+    private static String nullToBlank(String s) {
+        return s == null ? "" : s.trim();
     }
 
     /** 현재 모드 전체(조회·화면 표시용). */
@@ -140,6 +182,11 @@ public class VoiceModeState {
     /** 기동 시 설정값으로 되돌린다. */
     public void resetToConfigured() {
         init();
+    }
+
+    /** 기동 시 설정된 브로커 주소(되돌리기 기준). */
+    public String configuredBrokerBaseUrl() {
+        return nullToBlank(props.broker().baseUrl());
     }
 
     private <E extends Enum<E>> E parse(Class<E> type, String value, String key) {

@@ -59,6 +59,9 @@
   .step-sel select { font-family:var(--mono); font-size:.75rem; font-weight:600; }
   .step-fixed { flex:0 0 9.5rem; font-family:var(--mono); font-size:.75rem; color:#6c757d;
                 text-align:right; padding-top:.2rem; }
+  .step-url { margin-top:.35rem; }
+  .step-url input { font-family:var(--mono); font-size:.72rem; }
+  .step-url .btn { font-size:.68rem; padding:.1rem .4rem; }
   .probe-ok  { color:#198754; font-weight:600; }
   .probe-bad { color:#dc3545; font-weight:600; }
 </style>
@@ -295,6 +298,24 @@ function renderTracks(tracks) {
   if (!tracks) return;
   $('tracks').innerHTML = ['meet','phone'].map(k => trackCard(k, tracks[k])).join('');
 
+  // 주소 변경 — 입력 후 [적용], 또는 프리셋 클릭
+  async function applyUrl(key, value) {
+    const d = await call('PUT', `/api/v1/mock/endpoints/${key}?value=${encodeURIComponent(value)}`,
+                         `브로커 주소 변경 → ${value || '(비움)'}`);
+    if (d) log(`  └ ${d.before || '(없음)'} → ${d.after || '(없음)'}`, 'ok');
+    await loadStatus(true);
+  }
+  document.querySelectorAll('[data-url-save]').forEach(b => {
+    b.onclick = () => applyUrl(b.dataset.urlSave,
+                               document.querySelector(`input[data-url="${b.dataset.urlSave}"]`).value);
+  });
+  document.querySelectorAll('[data-url-preset]').forEach(b => {
+    b.onclick = () => applyUrl(b.dataset.urlPreset, b.dataset.urlValue);
+  });
+  document.querySelectorAll('input[data-url]').forEach(inp => {
+    inp.onkeydown = (e) => { if (e.key === 'Enter') applyUrl(inp.dataset.url, inp.value); };
+  });
+
   // 단계에 붙은 스위치 바인딩
   document.querySelectorAll('select[data-switch]').forEach(sel => {
     sel.onchange = async () => {
@@ -333,11 +354,29 @@ function stepRow(s, no) {
 
   // 툴팁에 근거·주의사항을 넣는다. 화면이 좁아 한 줄로는 다 못 보여준다.
   const tip = esc([s.note, s.endpoint ? '호출: ' + s.endpoint : ''].filter(Boolean).join(String.fromCharCode(10)));
+
+  // 주소를 바꿀 수 있는 단계(브로커)면 입력칸 + 원클릭 프리셋을 붙인다.
+  // 모드만 REST 로 올리고 주소를 못 바꾸면 배치가 전건 실패한다.
+  const urlUi = s.urlKey ? `
+      <div class="step-url">
+        <div class="input-group input-group-sm">
+          <input type="text" class="form-control" data-url="${s.urlKey}"
+                 value="${esc(s.url||'')}" placeholder="http://호스트:포트">
+          <button class="btn btn-outline-primary" data-url-save="${s.urlKey}">적용</button>
+        </div>
+        <div class="d-flex flex-wrap gap-1 mt-1">
+          ${(s.urlPresets||[]).map(p => `
+            <button class="btn btn-outline-secondary" data-url-preset="${s.urlKey}"
+                    data-url-value="${esc(p.url)}" title="${esc(p.url)}">${esc(p.label)}</button>`).join('')}
+        </div>
+      </div>` : '';
+
   return `<div class="step ${mock?'is-mock':'is-real'}" title="${tip}">
       <div class="step-no">${no}</div>
       <div class="step-main">
         <div class="step-label">${esc(s.label)}</div>
         <div class="step-ep" title="${esc(s.endpoint||'')}">${esc(s.endpoint||'—')}</div>
+        ${urlUi}
       </div>
       ${ctrl}
     </div>`;
@@ -362,7 +401,8 @@ async function loadStatus(quiet) {
   renderTracks(s.tracks);
 
   $('downstream').innerHTML =
-      flagCard('비식별 커넥터 (하류)', s.sink.enabled, s.sink.connectorBaseUrl || '주소 미설정')
+      flagCard('비식별 커넥터 (하류)', s.sink.enabled && !!s.sink.connectorBaseUrl,
+               s.sink.connectorBaseUrl || (s.sink.enabled ? '전송 켜짐 · 주소 미설정' : '전송 꺼짐'))
     + flagCard('로그 컬렉터 (T1·T2·T4)', s.logCollector.enabled, s.logCollector.baseUrl || '주소 미설정');
 
   $('dirs').innerHTML =
