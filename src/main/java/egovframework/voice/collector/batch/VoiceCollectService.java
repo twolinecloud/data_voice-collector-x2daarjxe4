@@ -348,15 +348,15 @@ public class VoiceCollectService {
             if (o.status() == egovframework.voice.collector.model.ProcStatus.SKIPPED) {
                 continue;   // 이번 배치가 처리한 건이 아니다 — 집계에 넣으면 대사가 어긋난다
             }
+            // 컬렉터 T4 스펙 순서대로: REC_FILE_ID · FILE_PATH · FILE_NM · INMATE_PID · FILE_SIZE · PROC_STS_CD · ERR_STACK
             rows.add(new LogCollectorClient.FileProcReq(
-                    pidGenerator.of(o.target().corrNo()),
-                    o.target().kind().name(),
+                    o.target().idempotencyKey(),          // 접견 TARE_FILE_NO / 전화 VRFC_ESTL_ID — NOT NULL
+                    o.target().srcFilePath(),             // 보라미 쪽 원본 경로(우리 임시 경로가 아니다)
                     o.target().srcFileName(),
+                    pidGenerator.of(o.target().corrNo()),
                     o.fileSize(),
                     o.status().name(),
-                    o.sttChars(),
-                    o.isSuccess() ? null : "DATA",
-                    o.errMsg()));
+                    o.isSuccess() ? null : LogCollectorClient.FileProcReq.errStackOf(o.errMsg())));
         }
         return rows;
     }

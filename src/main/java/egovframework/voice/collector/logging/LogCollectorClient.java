@@ -164,21 +164,22 @@ public class LogCollectorClient {
     /**
      * T4({@code TB_FILE_PROC_LOG}) 를 <b>bulk 적재</b>한다 — 파일 1건 = 1행.
      *
-     * <p><b>⚠ 요청 DTO 필드명이 추정이다</b>(계획서 Q4). 컬렉터의 {@code file-procs} API 는
-     * 이미 구현되어 있지만 요청 스키마를 확인하지 못했다. T5({@code DeidentSendReq}) 의
-     * 필드 작명을 따라 맞춰 두었으니, 실제 스키마를 받으면 이 record 만 고치면 된다.</p>
+     * <p>요청 스키마는 컬렉터 {@code docs/API_SPEC.md} §T4 ⑥ 을 따른다(계획서 Q4 해소, 2026-09-15):
+     * {@code REC_FILE_ID · FILE_PATH · FILE_NM · INMATE_PID · FILE_SIZE · PROC_STS_CD(C04) · ERR_STACK?}.
+     * 예전에 추정으로 보내던 {@code fileTypeCd}·{@code sttCharCnt}·{@code errTypeCd} 는 컬렉터가
+     * 무시했고, 정작 필수인 {@code recFileId} 가 빠져 NOT NULL 위반으로 한 건도 적재되지 않았다.</p>
      *
-     * @return 채번된 id 목록. 미적재·실패 시 빈 목록
+     * @return 채번된 FILE_PROC_ID 목록({@code yyyyMMddTSTnnnNNN} 꼴 문자열). 미적재·실패 시 빈 목록
      */
-    public List<Long> createFileProcs(String execId, List<FileProcReq> rows) {
+    public List<String> createFileProcs(String execId, List<FileProcReq> rows) {
         if (!isEnabled() || rows == null || rows.isEmpty()) {
             return List.of();
         }
         JsonNode result = exchange(HttpMethod.POST,
                 url("/api/v1/logs/batches/" + execId + "/file-procs"), rows);
-        List<Long> ids = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
         if (result != null && result.path("ids").isArray()) {
-            result.path("ids").forEach(n -> ids.add(n.asLong()));
+            result.path("ids").forEach(n -> ids.add(n.asText()));
         }
         return ids;
     }
@@ -261,17 +262,44 @@ public class LogCollectorClient {
                                 Long inCnt, Long outCnt, Long errCnt, String errStack) {}
 
     /**
-     * T4 적재 요청 1건 — <b>필드명 추정</b>(Q4).
+     * T4 적재 요청 1건 — 컬렉터 {@code LogDto.FileProcReq} 와 필드명이 같아야 한다.
      *
-     * @param inmatePid   비식별 수용자ID. 교정번호를 그대로 넣지 않는다.
-     * @param fileTypeCd  MEET / PHONE
-     * @param fileNm      파일명. 경로는 넣지 않는다(내부 구조 노출 방지)
-     * @param fileSize    byte
-     * @param procStsCd   SUCCESS / FAIL
-     * @param sttCharCnt  STT 결과 글자 수
-     * @param errTypeCd   실패 시 오류 유형(ERR_TYPE_CD)
-     * @param errStack    실패 사유. PII 가 섞이지 않도록 원문을 넣지 않는다
+     * <p>T4 는 <b>처리 상태만</b> 남기는 표다(스펙: "분석 결과는 본 테이블 미저장"). STT 글자 수·트랙
+     * 종류 같은 것은 컬럼이 없으므로 보내지 않는다 — 배치 결과({@code FileProcOutcome})와 로그에만 남는다.</p>
+     *
+     * @param recFileId 보라미 녹취 식별자 — 접견 {@code TARE_FILE_NO}, 전화 {@code VRFC_ESTL_ID}
+     *                  (= 멱등 키). <b>NOT NULL</b>. 전화의 {@code TELP_RECRD_FILE_ID} 는 실DB 에서 전부
+     *                  NULL 이었으므로(2026-09-12) 그것으로는 이 자리를 채울 수 없다
+     * @param filePath  보라미 쪽 원본 경로({@code TARE_FLPTH_NM} / {@code TELP_RECRD_FLPTH_NM}).
+     *                  우리 수신·작업 경로는 넣지 않는다 — 처리 직후 지워지는 임시 위치라 추적 가치가 없고
+     *                  내부 구조만 드러난다
+     * @param fileNm    원본 파일명
+     * @param inmatePid 비식별 수용자ID. 교정번호를 그대로 넣지 않는다
+     * @param fileSize  byte
+     * @param procStsCd C04 — SUCCESS / FAIL
+     * @param errStack  실패 사유, 컬렉터 표준 {@code [코드] 상세} 한 줄({@link #errStackOf}). 성공이면 null.
+     *                  PII 가 섞이지 않도록 원문을 넣지 않는다
      */
-    public record FileProcReq(String inmatePid, String fileTypeCd, String fileNm, Long fileSize,
-                              String procStsCd, Integer sttCharCnt, String errTypeCd, String errStack) {}
+    public record FileProcReq(String recFileId, String filePath, String fileNm, String inmatePid,
+                              Long fileSize, String procStsCd, String errStack) {
+
+        /**
+         * 실패 사유를 컬렉터 표준 {@code [코드] 상세} 로 만든다. 코드는 C12(ERR_TYPE_CD) 중에서 고른다 —
+         * 수신 대기 타임아웃은 {@code TIMEOUT}, 브로커·STT 에 붙지 못한 것은 {@code CONNECTION},
+         * 나머지(빈 STT·복호화 실패·경로 불일치 등)는 {@code DATA}. 컬렉터는 앞의 코드를 그대로 쓰고,
+         * 없으면 본문에서 추론하다가 {@code [ERR]} 로 떨어뜨리므로 여기서 붙여 보내는 편이 정확하다.
+         *
+         * @return 사유가 없으면 null — 성공 건에 빈 문자열을 남기지 않는다
+         */
+        public static String errStackOf(String reason) {
+            if (reason == null || reason.isBlank()) {
+                return null;
+            }
+            String r = reason.toLowerCase();
+            String code = r.contains("타임아웃") || r.contains("timeout") || r.contains("timed out") ? "TIMEOUT"
+                    : r.contains("connect") || r.contains("i/o error") || r.contains("연결") ? "CONNECTION"
+                    : "DATA";
+            return "[" + code + "] " + reason.strip();
+        }
+    }
 }

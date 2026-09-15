@@ -162,7 +162,7 @@ public class VoiceBatchController {
                         "CMMN_FILE_ENC_YN='Y' 인 건만. 키 미수령(계획서 Q8)"),
                 step("STT", "stt", sttClient.mode(),
                         sttEndpoint(),
-                        "STT 텍스트 생성 — 글자 수를 T4(파일 처리 이력)에 남긴다. 이 서비스의 마지막 단계")));
+                        "STT 텍스트 생성 — 이 서비스의 마지막 단계. T4 에는 처리 상태만 남고 텍스트·글자 수는 배치 결과에만 실린다")));
 
         Map<String, Object> phone = new LinkedHashMap<>();
         phone.put("label", "전화 (PHONE)");
