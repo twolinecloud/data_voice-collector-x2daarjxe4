@@ -269,7 +269,7 @@ public class VoiceCollectService {
 
             SttResult reused = target.hasSourceStt() ? tryReadSourceStt(target) : null;
             if (reused == null) {
-                VoiceFile file = acquire(target);
+                VoiceFile file = acquire(target, ctx.execId);
                 toClean.add(file.path());
                 fileSize = file.sizeBytes();
 
@@ -328,10 +328,10 @@ public class VoiceCollectService {
      * 전화는 별도 ESB 프로바이더가 떨궈 주는 것을 <b>기다린다</b>.
      * 어느 쪽이든 마지막은 수신 디렉터리를 보는 것으로 같다.</p>
      */
-    private VoiceFile acquire(VoiceTarget target) {
+    private VoiceFile acquire(VoiceTarget target, String execId) {
         if (target.kind() == VoiceKind.MEET) {
-            log.info("[Track:MEET] ② XVARM 추출 요청 — {} via 브로커 {}", target.shortId(), broker.mode());
-            XvarmBrokerClient.ExtractResult extracted = broker.extract(target);
+            log.info("[Track:MEET] ② XVARM 추출 요청 — {} via 브로커 {} (execId={})", target.shortId(), broker.mode(), execId);
+            XvarmBrokerClient.ExtractResult extracted = broker.extract(target, execId);
             log.info("[Track:MEET] ③ ESB 수신 대기 — {} (브로커 산출 {})",
                     target.shortId(), extracted.filePath());
             // 브로커가 만든 파일이 우리 쪽에 보이는데 수신 폴더 밖이면 기다려 봐야 타임아웃이다.

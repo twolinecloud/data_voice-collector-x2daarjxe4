@@ -28,8 +28,9 @@ import java.util.Map;
  *   GET  /api/v1/xvarm/extract/{id}      → 200 {status: DONE|RUNNING|FAILED, filePath, fileSize}
  * </pre>
  *
- * <p><b>멱등</b>: {@code requestId} 를 우리가 만들어 보낸다. 같은 값으로 재요청하면 브로커가
- * 중복 추출하지 않고 기존 상태를 돌려준다. 배치가 재실행돼도 XVARM 에 같은 일을 두 번 시키지 않는다.</p>
+ * <p><b>멱등</b>: {@code requestId} 를 우리가 만들어 보낸다({@code VOC-{execId}-{대상키}}). 같은 값으로
+ * 재요청하면 브로커가 중복 추출하지 않고 기존 상태를 돌려준다. 키에 EXEC_ID 가 들어 있어 <b>재처리 배치는
+ * 새로 추출받고</b>, 한 배치 안에서는 멱등 표식이 같은 대상을 두 번 요청하지 않게 막는다.</p>
  */
 @Log4j2
 @Component
@@ -75,8 +76,14 @@ public class RestXvarmBrokerClient implements XvarmBrokerClient {
 
     @Override
     public ExtractResult extract(VoiceTarget target) {
+        return extract(target, null);
+    }
+
+    @Override
+    public ExtractResult extract(VoiceTarget target, String execId) {
         String base = requireBaseUrl();
-        String requestId = "VOC-" + target.idempotencyKey();
+        // 배치마다 다른 키 — 재처리 배치가 브로커의 멱등 캐시("이미 DONE")에 걸리지 않게 한다.
+        String requestId = XvarmBrokerClient.requestIdOf(target, execId);
 
         // 원하는 파일명을 함께 보낸다. ESB 가 업무 파일명을 그대로 옮기는 규약(ORIGINAL)일 때
         // 수신 측에서 바로 찾을 수 있다. 브로커가 다른 이름으로 만들면 응답의 filePath 가

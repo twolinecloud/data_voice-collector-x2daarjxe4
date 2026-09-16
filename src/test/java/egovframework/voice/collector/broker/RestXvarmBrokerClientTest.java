@@ -21,6 +21,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
@@ -145,6 +146,22 @@ class RestXvarmBrokerClientTest {
 
         assertThat(client.extract(meet()).requestId()).isEqualTo("VOC-TARE-0001");
         server.verify();   // 조회 URL 에 같은 키가 쓰였다
+    }
+
+    @Test
+    @DisplayName("EXEC_ID 를 주면 요청 키에 들어간다 — 재처리 배치가 브로커 멱등 캐시에 걸리지 않게")
+    void requestIdCarriesExecId() {
+        server.expect(requestTo(BASE + "/api/v1/xvarm/extract"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.requestId").value("VOC-20260916TST003-TARE-0001"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.ACCEPTED)
+                        .contentType(MediaType.APPLICATION_JSON).body("{\"status\":\"ACCEPTED\"}"));
+        server.expect(requestTo(BASE + "/api/v1/xvarm/extract/VOC-20260916TST003-TARE-0001"))
+                .andRespond(withSuccess("{\"status\":\"DONE\",\"filePath\":\"/x/f.m4a\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThat(client.extract(meet(), "20260916TST003").requestId()).isEqualTo("VOC-20260916TST003-TARE-0001");
+        server.verify();
     }
 
     @Test

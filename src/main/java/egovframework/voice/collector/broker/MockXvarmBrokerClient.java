@@ -39,7 +39,12 @@ public class MockXvarmBrokerClient implements XvarmBrokerClient {
 
     @Override
     public ExtractResult extract(VoiceTarget target) {
-        String requestId = "MOCKREQ-" + target.idempotencyKey();
+        return extract(target, null);
+    }
+
+    @Override
+    public ExtractResult extract(VoiceTarget target, String execId) {
+        String requestId = "MOCKREQ-" + (execId == null ? "" : execId + "-") + target.idempotencyKey();
         Path dir = dirs.receiveDir(target.kind());
         Path file = dir.resolve(namingPolicy.expectedFileName(target, props.sync().namingPolicy()));
         try {

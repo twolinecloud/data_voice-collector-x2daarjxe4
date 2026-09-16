@@ -32,12 +32,17 @@ public class XvarmBrokerRouter implements XvarmBrokerClient {
 
     @Override
     public ExtractResult extract(VoiceTarget target) {
+        return extract(target, null);
+    }
+
+    @Override
+    public ExtractResult extract(VoiceTarget target, String execId) {
         String mode = state.broker().name();
         XvarmBrokerClient impl = byMode.get(mode);
         if (impl == null) {
             throw new IllegalStateException("브로커 구현이 없다: " + mode + " (등록: " + byMode.keySet() + ")");
         }
-        return impl.extract(target);
+        return impl.extract(target, execId);
     }
 
     @Override
