@@ -2,17 +2,20 @@ package egovframework.voice.collector.batch;
 
 import egovframework.voice.collector.broker.BrokerOutputCheck;
 import egovframework.voice.collector.broker.XvarmBrokerClient;
+import egovframework.voice.collector.config.VoiceDirState;
 import egovframework.voice.collector.config.VoiceProperties;
 import egovframework.voice.collector.decrypt.DecryptService;
 import egovframework.voice.collector.logging.LogCollectorClient;
 import egovframework.voice.collector.model.BatchWindow;
 import egovframework.voice.collector.model.FileProcOutcome;
+import egovframework.voice.collector.model.ProcStatus;
 import egovframework.voice.collector.model.SttResult;
 import egovframework.voice.collector.model.VoiceFile;
 import egovframework.voice.collector.model.VoiceKind;
 import egovframework.voice.collector.model.VoiceTarget;
 import egovframework.voice.collector.source.BoramiSourceClient;
 import egovframework.voice.collector.stt.SttClient;
+import egovframework.voice.collector.stt.SttOutputStore;
 import egovframework.voice.collector.sync.FileArrivalWatcher;
 import egovframework.voice.collector.util.InmatePidGenerator;
 import lombok.RequiredArgsConstructor;
@@ -25,14 +28,21 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 음성 수집 배치의 본체 — <b>대상 선별 → 파일 확보 → 복호화 → STT → 처리 이력 적재</b>.
+ * 음성 수집 배치의 본체 — <b>대상 선별 → 파일 확보 → 복호화 → STT → 출력 저장 → 처리 이력 적재</b>.
  *
  * <p><b>이 서비스의 범위는 STT 처리와 내부 저장·감시까지다.</b> STT 텍스트를 외부 서비스로
- * 전송하지 않는다(비식별 커넥터 연동은 아키텍처 변경으로 제외됐다). 로그 테이블 INSERT 는
- * 로그 컬렉터 API 로만 하고, 재식별 매핑 적재는 다른 서비스의 책임이다.</p>
+ * 전송하지 않는다(비식별 커넥터 연동은 아키텍처 변경으로 제외됐다). 텍스트는 배치 단위 출력 폴더
+ * ({@code {output}/{execId}/})에 남기고, 로그 테이블 INSERT 는 로그 컬렉터 API 로만 한다.</p>
+ *
+ * <p><b>T2 단계는 커넥터 호출 여부와 무관하게 남긴다.</b> 비정형 체인(COLLECT → ANALYZE → DEIDENT → SEND)
+ * 중 이 서비스가 도는 두 단계를 기록한다 —
+ * {@code COLLECT}(파일 확보·복호화)는 배치 시작에 열고, {@code ANALYZE}(STT·출력 저장)는 첫 STT 가
+ * 시작될 때 열어 <b>STT 처리가 끝난 직후</b> 마감한다. 뒤의 DEIDENT·SEND 는 하류의 몫이다.</p>
  *
  * <p><b>건별 격리</b>: 한 건이 실패해도 배치를 멈추지 않는다. 1,300건을 도는 배치에서
  * 한 파일이 깨졌다고 전체가 중단되면 나머지 1,299건을 다시 처리해야 한다.
@@ -48,16 +58,17 @@ public class VoiceCollectService {
     private static final DateTimeFormatter LOCAL_TIME = DateTimeFormatter.ofPattern("HHmmss");
 
     private final VoiceProperties props;
+    private final VoiceDirState dirs;
     private final BoramiSourceClient source;
     private final XvarmBrokerClient broker;
     private final egovframework.voice.collector.sync.PhoneFileProvider phoneFileProvider;
     private final FileArrivalWatcher watcher;
     private final DecryptService decryptService;
     private final SttClient sttClient;
+    private final SttOutputStore outputStore;
     private final LogCollectorClient logCollector;
     private final IdempotencyGuard idempotency;
     private final InmatePidGenerator pidGenerator;
-    private final PiiResidueAuditor residueAuditor;
 
     /**
      * 배치를 1회 실행한다.
@@ -83,77 +94,131 @@ public class VoiceCollectService {
         List<VoiceKind> targets = (kinds == null || kinds.isEmpty())
                 ? List.of(VoiceKind.MEET, VoiceKind.PHONE) : kinds;
 
-        String execId = openBatch(window, triggerBy, testRun);
+        String collectorExecId = openBatch(window, triggerBy, testRun);
+        String execId = collectorExecId != null ? collectorExecId : localExecId(testRun);
         log.info("[Batch] 시작 — execId={} {} kinds={}{}", execId, window, targets,
                 testRun ? "  [시험 실행 — TST 로 채번, 초기화로 삭제 가능]" : "");
         // 트랙별로 따로 찍는다. 두 시나리오는 연동 주체가 달라서 한 줄에 섞으면
         // 어느 모드가 어느 경로에 걸린 것인지 읽히지 않는다.
         if (targets.contains(VoiceKind.MEET)) {
-            log.info("[Batch]   접견 트랙 — 조회={} → 브로커={} → 복호화={} → STT={}",
-                    source.mode(), broker.mode(), decryptService.mode(), sttClient.mode());
+            log.info("[Batch]   접견 트랙 — 조회={} → 브로커={} → 복호화={} → STT={} → 출력={}",
+                    source.mode(), broker.mode(), decryptService.mode(), sttClient.mode(),
+                    dirs.outputDir(VoiceKind.MEET, execId));
         }
         if (targets.contains(VoiceKind.PHONE)) {
-            log.info("[Batch]   전화 트랙 — 조회={} → 파일연계={} → 복호화={} → STT={}  (XVARM 경유 없음)",
-                    source.mode(), phoneFileProvider.mode(), decryptService.mode(), sttClient.mode());
+            log.info("[Batch]   전화 트랙 — 조회={} → 파일연계={} → 복호화={} → STT={} → 출력={}  (XVARM 경유 없음)",
+                    source.mode(), phoneFileProvider.mode(), decryptService.mode(), sttClient.mode(),
+                    dirs.outputDir(VoiceKind.PHONE, execId));
         }
 
-        String collectStep = logCollector.createStep(execId, (short) 1, "COLLECT");
+        // ── T2 ① COLLECT — 파일 확보·복호화. 배치 시작에 연다 ────────────────────
+        RunContext ctx = new RunContext(execId);
+        ctx.collectStepId = logCollector.createStep(execId, (short) 1, FileProcOutcome.STEP_COLLECT);
 
         List<VoiceTarget> found = findTargets(window, targets);
         List<FileProcOutcome> outcomes = new ArrayList<>(found.size());
 
         for (VoiceTarget t : found) {
-            outcomes.add(processOne(t));
+            outcomes.add(processOne(t, ctx));
         }
 
         int success = (int) outcomes.stream().filter(FileProcOutcome::isSuccess).count();
-        int skipped = (int) outcomes.stream().filter(o -> o.status() == egovframework.voice.collector.model.ProcStatus.SKIPPED).count();
+        int skipped = (int) outcomes.stream().filter(o -> o.status() == ProcStatus.SKIPPED).count();
         int fail = outcomes.size() - success - skipped;
 
-        logCollector.finishStep(collectStep, fail == 0 ? "SUCCESS" : "PARTIAL",
-                elapsedSec(startedAt), (long) found.size(), (long) success, (long) fail, null);
+        // ── T2 마감 — COLLECT 는 확보 건수로, ANALYZE 는 STT 건수로 ───────────────
+        List<VoiceBatchResult.StepLog> steps = new ArrayList<>(2);
+        long collectIn = outcomes.size() - skipped;
+        long collectErr = outcomes.stream().filter(o -> o.failedAt(FileProcOutcome.STEP_COLLECT)).count();
+        long collectOut = collectIn - collectErr;
+        steps.add(finishStep(ctx.collectStepId, FileProcOutcome.STEP_COLLECT,
+                collectIn, collectOut, collectErr, ctx.collectMs));
+
+        // STT 가 한 건이라도 시작됐을 때만 ANALYZE 행이 있다 — 전건 확보 실패면 STT 단계는 돌지 않은 것이다.
+        if (ctx.analyzeStarted) {
+            long analyzeErr = outcomes.stream().filter(o -> o.failedAt(FileProcOutcome.STEP_ANALYZE)).count();
+            steps.add(finishStep(ctx.analyzeStepId, FileProcOutcome.STEP_ANALYZE,
+                    collectOut, success, analyzeErr, ctx.analyzeMs));
+        }
 
         // T4 — 파일 1건 = 1행. 정합성 대사(T1.SUCCESS_CNT == Σ T3·T4·T5)의 근거다.
         logCollector.createFileProcs(execId, toFileProcReqs(outcomes));
 
-        // PII 즉시 삭제 정책이 실제로 지켜졌는지 확인해 결과에 싣는다(계획서 5.3-(4)).
-        PiiResidueAuditor.Residue residue = residueAuditor.audit();
+        Map<String, String> outputDirs = new LinkedHashMap<>();
+        for (VoiceKind k : targets) {
+            outputDirs.put(k.name(), dirs.outputDir(k, execId).toString().replace('\\', '/'));
+        }
 
         long elapsedMs = System.currentTimeMillis() - startedAt;
-        VoiceBatchResult result = new VoiceBatchResult(execId, window.toString(), found.size(),
-                success, fail, skipped, elapsedMs, residue, outcomes);
+        VoiceBatchResult result = new VoiceBatchResult(execId, collectorExecId != null, window.toString(),
+                found.size(), success, fail, skipped, elapsedMs, outputDirs, steps, outcomes);
 
         logCollector.finishBatch(execId, result.execStsCd(), elapsedSec(startedAt),
-                (long) found.size(), (long) success, (long) fail, null);
+                (long) found.size(), (long) success, (long) fail,
+                result.errMsg() == null ? null : LogCollectorClient.FileProcReq.errStackOf(result.errMsg()));
         log.info("[Batch] 종료 — {}", result.summary());
         return result;
     }
 
     // ── 단계별 ────────────────────────────────────────────────────────────
 
+    /** 배치 1회 동안 단계 기록이 들고 다니는 상태 — 단계 ID 와 구간별 누적 시간. */
+    private static final class RunContext {
+        final String execId;
+        String collectStepId;
+        String analyzeStepId;
+        boolean analyzeStarted;
+        long collectMs;
+        long analyzeMs;
+
+        RunContext(String execId) {
+            this.execId = execId;
+        }
+    }
+
     /**
-     * T1 을 열어 EXEC_ID 를 받아 온다. 컬렉터가 없으면 로컬 임시 ID 를 만든다.
-     *
-     * <p>임시 ID 에도 작업코드 자리를 지켜 {@code yyyyMMddHHmmss + VOC} 형태로 만든다 —
-     * 로그를 눈으로 볼 때 정식 ID 와 구분되면서도 같은 자리에서 읽히게 하려는 것이다.</p>
+     * T1 을 열어 EXEC_ID 를 받아 온다. 컬렉터가 없으면 null — 호출자가 로컬 임시 ID 를 만든다.
      */
     private String openBatch(BatchWindow window, String triggerBy, boolean testRun) {
         String jobId = testRun ? props.batch().testJobId() : props.batch().jobId();
-        String execId = logCollector.createBatch(jobId,
-                props.batch().dataTypeCd(), window.label(), triggerBy);
-        if (execId != null) {
-            return execId;
-        }
-        // 컬렉터가 없을 때도 같은 자리에 작업코드가 오게 만든다.
-        //   컬렉터 채번 규칙: yyyyMMdd(8) + 작업코드(3) + 회차(3)
-        //   → 9~11번째 자리가 작업코드다. 테스트 데이터 삭제 SQL 이 그 자리를 본다
-        //     (SUBSTRING(exec_id FROM 9 FOR 3) = 'TST'). 로컬 ID 도 자리를 맞춰야
-        //     눈으로 읽을 때 정식 ID 와 같은 위치에서 구분된다.
-        String local = LOCAL_DATE.format(LocalDateTime.now())
-                + (testRun ? "TST" : "VOC")
-                + LOCAL_TIME.format(LocalDateTime.now());
+        return logCollector.createBatch(jobId, props.batch().dataTypeCd(), window.label(), triggerBy);
+    }
+
+    /**
+     * 컬렉터가 없을 때의 임시 EXEC_ID — 같은 자리에 작업코드가 오게 만든다.
+     *
+     * <p>컬렉터 채번 규칙: yyyyMMdd(8) + 작업코드(3) + 회차(3) → 9~11번째 자리가 작업코드다.
+     * 테스트 데이터 삭제가 그 자리(TST)를 보므로 로컬 ID 도 자리를 맞춘다.</p>
+     */
+    private static String localExecId(boolean testRun) {
+        LocalDateTime now = LocalDateTime.now();
+        String local = LOCAL_DATE.format(now) + (testRun ? "TST" : "VOC") + LOCAL_TIME.format(now);
         log.info("[Batch] 로그 컬렉터 미연동 — 로컬 임시 execId 사용: {}", local);
         return local;
+    }
+
+    /** ANALYZE 단계를 연다 — 첫 STT 직전에 한 번. 컬렉터는 같은 단계 재호출을 기존 행으로 돌려보내므로 안전하다. */
+    private void beginAnalyze(RunContext ctx) {
+        if (ctx.analyzeStarted) {
+            return;
+        }
+        ctx.analyzeStarted = true;
+        ctx.analyzeStepId = logCollector.createStep(ctx.execId, (short) 2, FileProcOutcome.STEP_ANALYZE);
+        log.info("[Batch] T2 ANALYZE 시작 — stepLogId={}", ctx.analyzeStepId == null ? "(미연동)" : ctx.analyzeStepId);
+    }
+
+    /** 단계를 마감하고 결과 요약을 돌려준다. 컬렉터 미연동이면 요약만 만든다. */
+    private VoiceBatchResult.StepLog finishStep(String stepLogId, String stepTypeCd,
+                                                long in, long out, long err, long elapsedMs) {
+        String sts = err == 0 ? "SUCCESS" : (out == 0 ? "FAIL" : "PARTIAL");
+        int sec = (int) (elapsedMs / 1000);
+        boolean logged = stepLogId != null;
+        if (logged) {
+            logCollector.finishStep(stepLogId, sts, sec, in, out, err, null);
+        }
+        log.info("[Batch] T2 {} 마감 — {} in={} out={} err={} ({}초){}", stepTypeCd, sts, in, out, err, sec,
+                logged ? "" : "  [컬렉터 미연동 — 적재 안 됨]");
+        return new VoiceBatchResult.StepLog(stepTypeCd, stepLogId, sts, in, out, err, sec, logged);
     }
 
     private List<VoiceTarget> findTargets(BatchWindow window, List<VoiceKind> kinds) {
@@ -179,11 +244,14 @@ public class VoiceCollectService {
     /**
      * 한 건을 끝까지 처리한다. 실패해도 예외를 밖으로 던지지 않는다.
      *
+     * <p>두 구간으로 나눠 잰다 — <b>COLLECT</b>(파일 확보·복호화)와 <b>ANALYZE</b>(STT·출력 저장).
+     * 어느 구간에서 실패했는지가 T2 의 단계별 건수를 가른다.</p>
+     *
      * <p><b>원본 삭제는 {@code finally} 에서 한다.</b> STT 가 실패하면 정상 경로를 타지 않는데,
      * 그 자리에서 지우지 않으면 <b>복호화된 음성이 디스크에 남는다</b>. 정책은 성공·실패를
      * 가리지 않고 즉시 삭제다(계획서 5.3-(4)).</p>
      */
-    private FileProcOutcome processOne(VoiceTarget target) {
+    private FileProcOutcome processOne(VoiceTarget target, RunContext ctx) {
         long t0 = System.currentTimeMillis();
 
         if (idempotency.isProcessed(target)) {
@@ -193,38 +261,60 @@ public class VoiceCollectService {
 
         // 이번 건이 디스크에 만든 것들 — 어떤 경로로 끝나든 전부 지운다.
         List<Path> toClean = new ArrayList<>(2);
+        String step = FileProcOutcome.STEP_COLLECT;
         try {
             SttResult stt;
             long fileSize = 0L;
+            VoiceFile plain = null;
 
             SttResult reused = target.hasSourceStt() ? tryReadSourceStt(target) : null;
-            if (reused != null) {
-                // 보라미가 이미 STT 를 가지고 있는 경우(계획서 Q1). 사실이면 오디오를 만질 필요가 없다.
-                stt = reused;
-            } else {
+            if (reused == null) {
                 VoiceFile file = acquire(target);
                 toClean.add(file.path());
                 fileSize = file.sizeBytes();
 
-                VoiceFile plain = decryptService.decrypt(file);
+                plain = decryptService.decrypt(file);
                 if (!plain.path().equals(file.path())) {
                     toClean.add(plain.path());   // 복호화가 새 파일을 만든 경우
                 }
+            }
+            long tCollected = System.currentTimeMillis();
+            ctx.collectMs += tCollected - t0;
+
+            // ── ANALYZE: STT → 출력 저장 ──────────────────────────────────────
+            step = FileProcOutcome.STEP_ANALYZE;
+            beginAnalyze(ctx);
+            if (reused != null) {
+                // 보라미가 이미 STT 를 가지고 있는 경우(계획서 Q1). 사실이면 오디오를 만질 필요가 없다.
+                stt = reused;
+            } else {
                 stt = sttClient.transcribe(plain);
             }
 
             if (stt.isEmpty()) {
-                return FileProcOutcome.fail(target, "STT 결과가 비어 있음", System.currentTimeMillis() - t0);
+                ctx.analyzeMs += System.currentTimeMillis() - tCollected;
+                return FileProcOutcome.fail(target, step, "STT 결과가 비어 있음", System.currentTimeMillis() - t0);
             }
 
+            // STT 가 끝난 직후 배치 폴더에 남긴다 — 여기까지 되어야 '성공' 이다.
+            SttOutputStore.Saved saved = outputStore.save(ctx.execId, target, stt, fileSize);
+            ctx.analyzeMs += System.currentTimeMillis() - tCollected;
+
             idempotency.markProcessed(target);
-            return FileProcOutcome.success(target, fileSize, stt.charCount(), System.currentTimeMillis() - t0);
+            return FileProcOutcome.success(target, fileSize, stt.charCount(),
+                    saved.textFile().toString().replace('\\', '/'), System.currentTimeMillis() - t0);
 
         } catch (Exception e) {
             // 사유만 남긴다 — 예외 메시지에 파일 경로·업무 값이 섞여 들어가지 않게 요약한다.
             String reason = e.getClass().getSimpleName() + ": " + shorten(e.getMessage());
-            log.warn("[Batch] 처리 실패 — {} ({})", target.shortId(), reason);
-            return FileProcOutcome.fail(target, reason, System.currentTimeMillis() - t0);
+            log.warn("[Batch] 처리 실패 [{}] — {} ({})", step, target.shortId(), reason);
+            long ms = System.currentTimeMillis() - t0;
+            if (FileProcOutcome.STEP_COLLECT.equals(step)) {
+                ctx.collectMs += ms;
+            } else {
+                ctx.analyzeMs += ms;
+            }
+            return FileProcOutcome.fail(target, step, reason, ms);
 
         } finally {
             cleanupAll(toClean);
@@ -247,7 +337,7 @@ public class VoiceCollectService {
             // 브로커가 만든 파일이 우리 쪽에 보이는데 수신 폴더 밖이면 기다려 봐야 타임아웃이다.
             //   브로커를 local 프로파일 없이 띄웠을 때 300초를 날리던 자리 — 지금 끊는다.
             //   운영은 보라미 서버 경로라 우리 쪽에 없어 이 판정에 걸리지 않는다(BrokerOutputCheck).
-            BrokerOutputCheck.mismatch(extracted.filePath(), props.sync().meetDir())
+            BrokerOutputCheck.mismatch(extracted.filePath(), dirs.receiveMeet())
                     .ifPresent(reason -> { throw new IllegalStateException(reason); });
             // 브로커가 알려준 실제 파일명을 그대로 쓴다.
             //   추측한 이름으로 찾으면 브로커가 다른 이름으로 만들었을 때 영영 못 찾고 타임아웃이 난다.
@@ -326,8 +416,7 @@ public class VoiceCollectService {
      * 따로 정해야 한다(계획서 Q5).</p>
      *
      * <p>삭제 실패는 경고만 남기고 넘어간다. 데이터 처리 자체는 이미 끝났고, 여기서 예외를
-     * 올리면 성공한 건이 실패로 뒤집힌다. 대신 배치 끝에서
-     * {@link PiiResidueAuditor} 가 잔여를 세어 결과에 싣는다 — 조용히 남는 일이 없게.</p>
+     * 올리면 성공한 건이 실패로 뒤집힌다.</p>
      */
     private void cleanupAll(List<Path> paths) {
         if (props.batch().retainSourceFile() || paths.isEmpty()) {
@@ -345,7 +434,7 @@ public class VoiceCollectService {
     private List<LogCollectorClient.FileProcReq> toFileProcReqs(List<FileProcOutcome> outcomes) {
         List<LogCollectorClient.FileProcReq> rows = new ArrayList<>(outcomes.size());
         for (FileProcOutcome o : outcomes) {
-            if (o.status() == egovframework.voice.collector.model.ProcStatus.SKIPPED) {
+            if (o.status() == ProcStatus.SKIPPED) {
                 continue;   // 이번 배치가 처리한 건이 아니다 — 집계에 넣으면 대사가 어긋난다
             }
             // 컬렉터 T4 스펙 순서대로: REC_FILE_ID · FILE_PATH · FILE_NM · INMATE_PID · FILE_SIZE · PROC_STS_CD · ERR_STACK

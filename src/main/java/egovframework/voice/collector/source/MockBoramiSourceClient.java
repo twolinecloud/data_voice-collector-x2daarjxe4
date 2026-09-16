@@ -1,6 +1,7 @@
 package egovframework.voice.collector.source;
 
 import egovframework.voice.collector.config.MockDatasetState;
+import egovframework.voice.collector.config.VoiceDirState;
 import egovframework.voice.collector.config.VoiceProperties;
 import egovframework.voice.collector.model.BatchWindow;
 import egovframework.voice.collector.model.VoiceKind;
@@ -32,6 +33,7 @@ public class MockBoramiSourceClient implements BoramiSourceClient {
     private static final int PHONE_WITH_SOURCE_STT = 3;
 
     private final VoiceProperties props;
+    private final VoiceDirState dirs;
     private final MockDatasetState dataset;
 
     @Override
@@ -100,7 +102,7 @@ public class MockBoramiSourceClient implements BoramiSourceClient {
      * @return 생성한 파일 경로. 실패하면 null(해당 건은 일반 경로로 처리된다)
      */
     private String seedSourceStt(String seq) {
-        Path file = Path.of(props.sync().workDir(), "mock_source_stt", "phone_" + seq + ".txt");
+        Path file = Path.of(dirs.work(), "mock_source_stt", "phone_" + seq + ".txt");
         try {
             Files.createDirectories(file.getParent());
             if (!Files.exists(file)) {

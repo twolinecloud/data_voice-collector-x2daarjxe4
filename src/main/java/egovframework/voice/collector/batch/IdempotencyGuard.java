@@ -1,6 +1,6 @@
 package egovframework.voice.collector.batch;
 
-import egovframework.voice.collector.config.VoiceProperties;
+import egovframework.voice.collector.config.VoiceDirState;
 import egovframework.voice.collector.model.VoiceTarget;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -32,7 +32,7 @@ public class IdempotencyGuard {
 
     private static final String MARKER_DIR = ".processed";
 
-    private final VoiceProperties props;
+    private final VoiceDirState dirs;
 
     /** 이미 처리된 대상인가. */
     public boolean isProcessed(VoiceTarget target) {
@@ -86,7 +86,7 @@ public class IdempotencyGuard {
     }
 
     private Path markerDir() {
-        return Path.of(props.sync().workDir(), MARKER_DIR);
+        return Path.of(dirs.work(), MARKER_DIR);
     }
 
     /** 파일명에 쓸 수 없는 문자를 걸러 낸다 — 키에 경로 구분자가 들어오면 엉뚱한 곳에 쓰게 된다. */

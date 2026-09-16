@@ -120,7 +120,13 @@ public class LogCollectorClient {
                 ? null : result.path("execId").asText(null);
     }
 
-    /** T1 배치를 종료 상태로 갱신한다(C04: SUCCESS/FAIL/PARTIAL 등). */
+    /**
+     * T1 배치를 종료 상태로 갱신한다(C04: SUCCESS/FAIL/PARTIAL 등).
+     *
+     * @param errMsg 대표 오류 한 줄 — 컬렉터 표준 {@code [코드] 상세}({@link FileProcReq#errStackOf}).
+     *               앞의 코드(C12: CONNECTION/TIMEOUT/DATA/SYSTEM/RECONCILE)를 {@code ERR_TYPE_CD} 로 쓴다.
+     *               성공이면 null
+     */
     public void finishBatch(String execId, String execStsCd, Integer elapsedSec,
                             Long targetCnt, Long successCnt, Long failCnt, String errMsg) {
         if (!isEnabled() || !StringUtils.hasText(execId)) {
@@ -129,15 +135,38 @@ public class LogCollectorClient {
         exchange(HttpMethod.PATCH, url("/api/v1/logs/batches/" + execId),
                 new BatchFinishReq(execStsCd, LocalDateTime.now().withNano(0), elapsedSec,
                         targetCnt, successCnt, failCnt,
-                        errMsg == null ? null : "DATA", null, errMsg, errMsg));
+                        errMsg == null ? null : errTypeOf(errMsg), null, errMsg, errMsg));
+    }
+
+    /** {@code [CODE] 상세} 의 CODE 가 C12 값이면 그것, 아니면 DATA. */
+    static String errTypeOf(String errStack) {
+        if (errStack == null) {
+            return null;
+        }
+        String s = errStack.strip();
+        if (s.startsWith("[")) {
+            int end = s.indexOf(']');
+            if (end > 1) {
+                String code = s.substring(1, end).trim().toUpperCase();
+                if (List.of("CONNECTION", "TIMEOUT", "DATA", "SYSTEM", "RECONCILE").contains(code)) {
+                    return code;
+                }
+            }
+        }
+        return "DATA";
     }
 
     // ── T2 단계 ────────────────────────────────────────────────────────────
 
     /**
-     * T2 단계를 생성한다(상태 RUNNING).
+     * T2 단계를 생성한다(상태 RUNNING) — {@code POST /api/v1/logs/batches/{execId}/steps}.
      *
-     * @param stepTypeCd 공통코드 C05 — COLLECT / CLEANSE / DEIDENT / STORE / SEND / ANALYZE
+     * <p>순번({@code stepSeq})은 참고값이다. 컬렉터가 유형별 체인(비정형: COLLECT 1 · ANALYZE 2 · DEIDENT 3 · SEND 4)
+     * 위치로 다시 정하고, 같은 단계를 다시 부르면 새 행을 만들지 않고 <b>기존 행의 ID</b> 를 돌려준다.
+     * 그래서 이 서비스는 배치당 COLLECT·ANALYZE 를 각각 한 번씩만 열고 마감한다.</p>
+     *
+     * @param stepTypeCd 공통코드 C05 — COLLECT / CLEANSE / ANALYZE / DEIDENT / STORE / SEND
+     * @return 채번된 STEP_LOG_ID. 미연동·실패 시 null
      */
     public String createStep(String execId, Short stepSeq, String stepTypeCd) {
         if (!isEnabled() || !StringUtils.hasText(execId)) {

@@ -95,15 +95,22 @@ voice:
     mode: ${VOICE_DECRYPT_MODE:SKIP}         # → REAL (복호화 주체 확정 후, Q13)
     rvs-key-path: ${VOICE_RVS_KEY_PATH:}     # 접견 복호화 키(Q8) — Secret 으로 마운트
 
-  # ── PVC 마운트 지점 ────────────────────────────────────────────────────
-  #   /k8s/voice_raw 15Gi · /k8s/voice_work 5Gi (계획서 3.4)
   sync:
-    meet-dir: ${VOICE_MEET_DIR:/k8s/voice_raw/meet}
-    phone-dir: ${VOICE_PHONE_DIR:/k8s/voice_raw/phone}
-    work-dir: ${VOICE_WORK_DIR:/k8s/voice_work}
     stable-check-ms: ${VOICE_STABLE_CHECK_MS:1500}
     wait-timeout-sec: ${VOICE_WAIT_TIMEOUT_SEC:300}
     naming-policy: ${VOICE_NAMING_POLICY:ORIGINAL}   # ORIGINAL | ESB_DAT (Q7)
+
+  # ── PVC 마운트 지점 ────────────────────────────────────────────────────
+  #   /k8s/voice_raw 15Gi · /k8s/voice_work 5Gi (계획서 3.4). base-dir /k8s 아래 표준 배치:
+  #     수신 /k8s/voice_raw/{meet,phone} · 작업 /k8s/voice_work
+  #     STT 출력 /k8s/xenon/voice/{execId}/ (접견) · /k8s/xenon/phone/{execId}/ (전화)
+  dirs:
+    base-dir: ${VOICE_BASE_DIR:/k8s}
+    receive-meet: ${VOICE_MEET_DIR:${voice.dirs.base-dir}/voice_raw/meet}
+    receive-phone: ${VOICE_PHONE_DIR:${voice.dirs.base-dir}/voice_raw/phone}
+    work: ${VOICE_WORK_DIR:${voice.dirs.base-dir}/voice_work}
+    output-meet: ${VOICE_OUTPUT_MEET_DIR:${voice.dirs.base-dir}/xenon/voice}
+    output-phone: ${VOICE_OUTPUT_PHONE_DIR:${voice.dirs.base-dir}/xenon/phone}
 
   batch:
     # 스케줄은 기본으로 꺼 둔다. 개발계에서 예고 없이 배치가 돌면 대상이 소진되어
@@ -114,7 +121,7 @@ voice:
     periodic-lag-min: ${VOICE_PERIODIC_LAG_MIN:20}
     specl-mng-se-cd: ${VOICE_SPECL_CODES:0,1,2,3,5}
     max-files-per-run: ${VOICE_MAX_FILES:2000}
-    job-id: ${VOICE_JOB_ID:VOICE_BATCH}      # 작업코드 VOC 로 채번되는 값 확인 필요(Q4)
+    job-id: ${VOICE_JOB_ID:VOICE_ANALYSIS}   # 컬렉터 JobId enum — VOICE_ANALYSIS → 작업코드 VOC (VOICE_BATCH 는 enum 에 없어 VOI 로 채번됐다)
     retain-source-file: ${VOICE_RETAIN_SOURCE:false}
 
   inmate-pid:

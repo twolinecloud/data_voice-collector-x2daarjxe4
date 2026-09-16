@@ -3,6 +3,7 @@ package egovframework.voice.collector.batch;
 import egovframework.voice.collector.config.FaultInjector;
 import egovframework.voice.collector.config.MockDatasetState;
 import egovframework.voice.collector.model.BatchWindow;
+import egovframework.voice.collector.model.FileProcOutcome;
 import egovframework.voice.collector.model.ProcStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,8 +16,11 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -31,7 +35,8 @@ import static org.assertj.core.api.Assertions.assertThatCode;
  *       나머지를 전부 다시 처리해야 한다.</li>
  *   <li><b>실패해도 원본이 남지 않는다</b> — 정책은 성공·실패를 가리지 않고 즉시 삭제다
  *       (계획서 5.3-(4)). STT 가 실패하는 경로에서도 복호화된 음성이 디스크에 남으면 안 된다.
- *       {@code processOne} 의 {@code finally} 가 그걸 보장한다.</li>
+ *       {@code processOne} 의 {@code finally} 가 그걸 보장한다. 잔여는 이 테스트가 직접 센다
+ *       (수신·작업 디렉터리 바로 아래 파일 수 — 하위 {@code .processed} 표식은 PII 가 아니다).</li>
  * </ol>
  */
 @SpringBootTest
@@ -46,9 +51,12 @@ class ResilienceE2ETest {
         // local 프로파일 기본(DIRECT_JDBC + REST)과 무관하게 전 구간 Mock 으로 고정한다.
         registry.add("voice.source.mode", () -> "MOCK");
         registry.add("voice.broker.mode", () -> "MOCK");
-        registry.add("voice.sync.meet-dir", () -> tmp.resolve("raw/meet").toString());
-        registry.add("voice.sync.phone-dir", () -> tmp.resolve("raw/phone").toString());
-        registry.add("voice.sync.work-dir", () -> tmp.resolve("work").toString());
+        registry.add("voice.dirs.base-dir", () -> tmp.toString());
+        registry.add("voice.dirs.receive-meet", () -> tmp.resolve("raw/meet").toString());
+        registry.add("voice.dirs.receive-phone", () -> tmp.resolve("raw/phone").toString());
+        registry.add("voice.dirs.work", () -> tmp.resolve("work").toString());
+        registry.add("voice.dirs.output-meet", () -> tmp.resolve("xenon/voice").toString());
+        registry.add("voice.dirs.output-phone", () -> tmp.resolve("xenon/phone").toString());
         registry.add("voice.sync.wait-timeout-sec", () -> "15");
         registry.add("voice.sync.stable-check-ms", () -> "30");
         registry.add("log-collector.enabled", () -> "false");
@@ -66,9 +74,6 @@ class ResilienceE2ETest {
     @Autowired
     private MockDatasetState dataset;
 
-    @Autowired
-    private PiiResidueAuditor residueAuditor;
-
     /** Mock 기본 대상 — 접견 5 + 전화 5. */
     private static final int TOTAL = 10;
 
@@ -84,6 +89,23 @@ class ResilienceE2ETest {
     private BatchWindow wide() {
         LocalDateTime now = LocalDateTime.now();
         return BatchWindow.manual(now.minusDays(2), now.plusDays(1));
+    }
+
+    /** 수신(접견·전화)·작업 디렉터리 <b>바로 아래</b> 일반 파일 수 — 0 이어야 PII 즉시 삭제가 지켜진 것이다. */
+    private static int residue() {
+        int n = 0;
+        for (String d : new String[] {"raw/meet", "raw/phone", "work"}) {
+            Path p = tmp.resolve(d);
+            if (!Files.isDirectory(p)) {
+                continue;
+            }
+            try (Stream<Path> s = Files.list(p)) {
+                n += (int) s.filter(Files::isRegularFile).count();
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+        return n;
     }
 
     @BeforeEach
@@ -128,12 +150,14 @@ class ResilienceE2ETest {
         VoiceBatchResult r = service.run(wide(), null, "TEST");
 
         assertThat(r.failCnt()).isEqualTo(STT_DEPENDENT);
-        assertThat(r.residue()).isNotNull();
-        assertThat(r.residue().total())
+        assertThat(residue())
                 .as("실패 경로에서도 복호화 원본이 지워져야 한다")
                 .isZero();
-        assertThat(r.residue().clean()).isTrue();
-        assertThat(r.residue().message()).isEqualTo("작업 폴더 내 잔여 파일: 0건 (삭제 완료)");
+        // 실패한 건은 STT 출력도 남기지 않는다 — 성공 1건(기존 STT)만 전화 출력 폴더에 있다
+        assertThat(r.outcomes()).filteredOn(o -> o.status() == ProcStatus.FAIL)
+                .allSatisfy(o -> assertThat(o.sttPath()).isNull());
+        assertThat(r.outcomes()).filteredOn(FileProcOutcome::isSuccess)
+                .allSatisfy(o -> assertThat(Files.isRegularFile(Path.of(o.sttPath()))).isTrue());
     }
 
     @Test
@@ -142,8 +166,15 @@ class ResilienceE2ETest {
         VoiceBatchResult r = service.run(wide(), null, "TEST");
 
         assertThat(r.successCnt()).isEqualTo(10);
-        assertThat(r.residue().total()).isZero();
-        assertThat(r.residue().clean()).isTrue();
+        assertThat(residue()).isZero();
+        // STT 텍스트는 배치 폴더 {output}/{execId}/ 에 남는다
+        assertThat(r.outputDirs()).containsKeys("MEET", "PHONE");
+        assertThat(r.outputDirs().get("MEET")).endsWith("/xenon/voice/" + r.execId());
+        assertThat(r.outputDirs().get("PHONE")).endsWith("/xenon/phone/" + r.execId());
+        assertThat(r.outcomes()).allSatisfy(o -> {
+            assertThat(o.sttPath()).startsWith(r.outputDirs().get(o.target().kind().name()));
+            assertThat(Files.isRegularFile(Path.of(o.sttPath()))).isTrue();
+        });
     }
 
     @Test
@@ -156,7 +187,7 @@ class ResilienceE2ETest {
 
         assertThat(r.successCnt() + r.failCnt()).isEqualTo(r.targetCnt());
         assertThat(r.outcomes()).hasSize(10);
-        assertThat(r.residue().total()).as("섞여 있어도 잔여는 0").isZero();
+        assertThat(residue()).as("섞여 있어도 잔여는 0").isZero();
     }
 
     @Test
@@ -204,7 +235,7 @@ class ResilienceE2ETest {
 
         assertThat(r.targetCnt()).isEqualTo(100);
         assertThat(r.successCnt()).isEqualTo(100);
-        assertThat(r.residue().total()).isZero();
+        assertThat(residue()).isZero();
         // 대량 모드로 전환되어 Mock WAV 가 짧아진다(디스크 절약)
         assertThat(dataset.isBulk()).isFalse();   // 100건은 임계(200) 미만
     }
@@ -220,13 +251,27 @@ class ResilienceE2ETest {
     }
 
     @Test
-    @DisplayName("PII 감사는 배치 없이도 조회할 수 있다 — 시뮬레이터에서 언제든 확인")
-    void residueCanBeAuditedAnytime() {
-        service.run(wide(), null, "TEST");
+    @DisplayName("T2 단계 요약 — STT 가 전부 실패하면 COLLECT 는 SUCCESS, ANALYZE 는 PARTIAL(기존 STT 1건만 통과)")
+    void stepSummaryReflectsWhereItFailed() {
+        faultInjector.configure(true, 100, 0, 0L);
 
-        PiiResidueAuditor.Residue r = residueAuditor.audit();
+        VoiceBatchResult r = service.run(wide(), null, "TEST");
 
-        assertThat(r.clean()).isTrue();
-        assertThat(r.message()).contains("0건");
+        assertThat(r.steps()).extracting(VoiceBatchResult.StepLog::stepTypeCd)
+                .containsExactly("COLLECT", "ANALYZE");
+        VoiceBatchResult.StepLog collect = r.steps().get(0);
+        VoiceBatchResult.StepLog analyze = r.steps().get(1);
+        assertThat(collect.stepStsCd()).isEqualTo("SUCCESS");
+        assertThat(collect.inCnt()).isEqualTo(TOTAL);
+        assertThat(collect.outCnt()).isEqualTo(TOTAL);
+        assertThat(analyze.inCnt()).isEqualTo(TOTAL);
+        assertThat(analyze.outCnt()).isEqualTo(SOURCE_STT);
+        assertThat(analyze.errCnt()).isEqualTo(STT_DEPENDENT);
+        assertThat(analyze.stepStsCd()).isEqualTo("PARTIAL");
+        assertThat(r.outcomes()).filteredOn(o -> o.status() == ProcStatus.FAIL)
+                .allSatisfy(o -> assertThat(o.failedStep()).isEqualTo(FileProcOutcome.STEP_ANALYZE));
+        // 컬렉터 미연동(log-collector.enabled=false) — 요약은 만들되 적재는 안 된 것으로 표시
+        assertThat(collect.logged()).isFalse();
+        assertThat(r.execIdFromCollector()).isFalse();
     }
 }

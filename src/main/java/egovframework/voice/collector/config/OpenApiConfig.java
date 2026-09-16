@@ -29,10 +29,12 @@ public class OpenApiConfig {
                         서비스입니다.
 
                         ### 이 서비스의 범위
-                        `대상 선별 → 파일 확보 → 복호화 → STT → 처리 이력 적재(T1·T2·T4)` 까지입니다.
+                        `대상 선별 → 파일 확보 → 복호화 → STT → 출력 저장 → 처리 이력 적재(T1·T2·T4)` 까지입니다.
                         STT 텍스트를 외부 서비스로 전송하지 않습니다 — 비식별 커넥터 연동은 아키텍처 변경으로
                         제외됐고, 이 서비스의 역할은 STT 처리와 내부 저장·감시까지입니다.
-                        로그 테이블 적재는 **log-collector** API 로만 합니다.
+                        STT 텍스트는 배치 단위 폴더 `{base-dir}/xenon/voice/{execId}/`(접견) ·
+                        `{base-dir}/xenon/phone/{execId}/`(전화)에 `.txt` + `.json` 으로 남깁니다(base-dir: 로컬 `C:/k8s` · 배포 `/k8s`).
+                        로그 테이블 적재는 **log-collector** API 로만 합니다 — T1(배치) · T2(COLLECT·ANALYZE) · T4(파일별).
 
                         ### 시연 순서
                         1. `GET /api/v1/voice/status` — 5개 스위치(source·broker·phone·decrypt·stt)가 어느 모드인지 확인
@@ -42,8 +44,14 @@ public class OpenApiConfig {
                         5. `POST /api/v1/mock/reset` — 초기화 후 반복
 
                         ### 확인 포인트
-                        배치 결과의 `residue` — 처리 후 수신·작업 폴더에 원본 음성이 **0건** 남아야 \
-                        PII 즉시 삭제 정책이 지켜진 것입니다. 실패한 건도 예외가 아닙니다.
+                        배치 결과의 `outputDirs` — 이 배치의 STT 텍스트가 놓인 폴더. `steps` — 컬렉터에 남긴 T2 단계
+                        (COLLECT·ANALYZE 의 in/out/err). `outcomes[].sttPath` — 파일별 결과 경로.
+                        복호화 원본 음성은 성공·실패를 가리지 않고 STT 직후 지웁니다(계획서 5.3-(4)).
+
+                        ### 재처리 시나리오
+                        브로커 주소를 잘못 주면(`PUT /api/v1/mock/endpoints/broker?value=http://localhost:9999`)
+                        접견 배치가 전건 실패로 T1·T4 에 남고, 주소를 되돌린 뒤 다시 실행하면 실패했던 건만
+                        새 EXEC_ID 로 재처리됩니다(멱등 표식은 성공 건에만 남기 때문).
 
                         > 시뮬레이터 화면: [/voice_collector_simulator.html](/voice_collector_simulator.html)
                         """)

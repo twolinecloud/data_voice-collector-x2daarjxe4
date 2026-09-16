@@ -20,6 +20,7 @@ public record VoiceProperties(
         @DefaultValue Broker broker,
         @DefaultValue Phone phone,
         @DefaultValue Sync sync,
+        @DefaultValue Dirs dirs,
         @DefaultValue Decrypt decrypt,
         @DefaultValue Stt stt,
         @DefaultValue Batch batch
@@ -117,14 +118,8 @@ public record VoiceProperties(
             @DefaultValue("MOCK") PhoneMode mode
     ) {}
 
-    /** ESB 가 떨궈 준 파일을 집어오는 구간. */
+    /** ESB 가 떨궈 준 파일을 집어오는 구간 — <b>대기 정책</b>만 둔다. 경로는 {@link Dirs} 에 있다. */
     public record Sync(
-            /** 접견 파일 수신 디렉터리 */
-            @DefaultValue("./work/voice_raw/meet") String meetDir,
-            /** 전화 파일 수신 디렉터리 */
-            @DefaultValue("./work/voice_raw/phone") String phoneDir,
-            /** 복호화 산출물 등 작업 공간 */
-            @DefaultValue("./work/voice_work") String workDir,
             /**
              * 파일 크기가 이 시간만큼 그대로여야 "쓰기가 끝났다"고 본다.
              * ESB Agent 가 쓰는 중인 파일을 읽으면 깨진 오디오를 STT 에 태우게 된다.
@@ -136,6 +131,35 @@ public record VoiceProperties(
              * ORIGINAL = 업무 파일명 그대로 / ESB_DAT = {@code R_...DAT} 규약
              */
             @DefaultValue("ORIGINAL") egovframework.voice.collector.sync.EsbFileNamingPolicy.Policy namingPolicy
+    ) {}
+
+    /**
+     * 디렉터리 5종 — <b>수신(접견·전화) · 작업 · STT 출력(접견·전화)</b>.
+     *
+     * <p><b>왜 한곳에 모았나</b>: 수신 폴더는 ESB·브로커가 떨궈 주는 곳(상대가 정한다), 작업 폴더는
+     * 복호화 산출물·멱등 표식(우리 내부), 출력 폴더는 STT 결과가 <b>남는</b> 곳(하류가 읽는다)이다.
+     * 셋의 성격이 달라 하나의 값으로 묶을 수 없지만, 어디에 무엇이 쌓이는지는 한 화면에서 보여야
+     * 경로가 어긋났을 때 바로 잡힌다. 기동 초기값은 여기서 오고, 시뮬레이터에서 런타임으로
+     * 바꿀 수 있다({@code VoiceDirState}).</p>
+     *
+     * <p><b>STT 출력은 배치 단위로 격리한다</b> — {@code {output}/{execId}/} 아래에 그 배치가 만든
+     * 텍스트만 놓인다. 배치를 재처리하면 새 EXEC_ID 폴더가 생기고, 시험 배치(TST)는 폴더째 지운다.
+     * 표준 배치는 {@code {base-dir}/xenon/voice/{execId}/}(접견) · {@code {base-dir}/xenon/phone/{execId}/}(전화) 다.
+     * base-dir 는 Windows 로컬 {@code C:/k8s}, 배포(PV) {@code /k8s}.</p>
+     */
+    public record Dirs(
+            /** 표준 배치의 뿌리. 출력 폴더 기본값이 여기서 파생된다(application.yml 의 placeholder). */
+            @DefaultValue("./work") String baseDir,
+            /** 접견 파일 수신 디렉터리 — 브로커·ESB 가 떨궈 주는 곳 */
+            @DefaultValue("./work/voice_raw/meet") String receiveMeet,
+            /** 전화 파일 수신 디렉터리 — ESB 전화 프로바이더가 떨궈 주는 곳 */
+            @DefaultValue("./work/voice_raw/phone") String receivePhone,
+            /** 복호화 산출물·멱등 표식 등 작업 공간 */
+            @DefaultValue("./work/voice_work") String work,
+            /** 접견 STT 결과 출력 뿌리 — 실제 파일은 {@code {outputMeet}/{execId}/} 아래 */
+            @DefaultValue("./work/xenon/voice") String outputMeet,
+            /** 전화 STT 결과 출력 뿌리 — 실제 파일은 {@code {outputPhone}/{execId}/} 아래 */
+            @DefaultValue("./work/xenon/phone") String outputPhone
     ) {}
 
     /** 복호화. 전화 건의 주체가 아직 확정되지 않아 기본은 SKIP 이다(계획서 11장 Q13). */
@@ -184,8 +208,14 @@ public record VoiceProperties(
              * 시연·시험 기록만 안전하게 지울 수 있다.</p>
              */
             @DefaultValue("TEST_BATCH") String testJobId,
-            /** 로그 컬렉터 T1 의 dataTypeCd. 이 배치가 비정형 음성 수집임을 나타낸다. */
-            @DefaultValue("VOICE") String dataTypeCd,
+            /**
+             * 로그 컬렉터 T1 의 {@code DATA_TYPE_CD}(공통코드 C01, 4종 고정) — 음성은 <b>{@code UNSTRUCTURED}(비정형)</b> 다.
+             *
+             * <p>⚠ 예전 값 {@code VOICE} 는 C01 에 없는 코드였다. 컬렉터가 거절하지는 않았지만
+             * 대시보드 4종 필터에 잡히지 않았고, T2 순번을 정하는 유형별 체인
+             * (비정형: COLLECT → ANALYZE → DEIDENT → SEND)도 타지 못해 단계가 체인 밖 순번(11~)으로 밀렸다.</p>
+             */
+            @DefaultValue("UNSTRUCTURED") String dataTypeCd,
             /** STT 후 복호화 원본을 남길지. 기본은 삭제 — PII 보유를 최소화한다. */
             @DefaultValue("false") boolean retainSourceFile
     ) {}

@@ -1,6 +1,7 @@
 package egovframework.voice.collector.sync;
 
 import egovframework.voice.collector.config.MockDatasetState;
+import egovframework.voice.collector.config.VoiceDirState;
 import egovframework.voice.collector.config.VoiceProperties;
 import egovframework.voice.collector.model.VoiceTarget;
 import egovframework.voice.collector.util.SilentWav;
@@ -26,12 +27,13 @@ import java.nio.file.StandardOpenOption;
 public class MockPhoneFileProvider implements PhoneFileProvider {
 
     private final VoiceProperties props;
+    private final VoiceDirState dirs;
     private final EsbFileNamingPolicy namingPolicy;
     private final MockDatasetState dataset;
 
     @Override
     public void request(VoiceTarget target) {
-        Path dir = Path.of(props.sync().phoneDir());
+        Path dir = dirs.receiveDir(target.kind());
         Path file = dir.resolve(namingPolicy.expectedFileName(target, props.sync().namingPolicy()));
         try {
             Files.createDirectories(dir);

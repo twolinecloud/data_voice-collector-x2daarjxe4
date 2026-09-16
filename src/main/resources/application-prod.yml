@@ -22,10 +22,13 @@ voice:
   decrypt:
     mode: ${VOICE_DECRYPT_MODE:REAL}
 
-  sync:
-    meet-dir: ${VOICE_MEET_DIR:/k8s/voice_raw/meet}
-    phone-dir: ${VOICE_PHONE_DIR:/k8s/voice_raw/phone}
-    work-dir: ${VOICE_WORK_DIR:/k8s/voice_work}
+  dirs:
+    base-dir: ${VOICE_BASE_DIR:/k8s}
+    receive-meet: ${VOICE_MEET_DIR:${voice.dirs.base-dir}/voice_raw/meet}
+    receive-phone: ${VOICE_PHONE_DIR:${voice.dirs.base-dir}/voice_raw/phone}
+    work: ${VOICE_WORK_DIR:${voice.dirs.base-dir}/voice_work}
+    output-meet: ${VOICE_OUTPUT_MEET_DIR:${voice.dirs.base-dir}/xenon/voice}
+    output-phone: ${VOICE_OUTPUT_PHONE_DIR:${voice.dirs.base-dir}/xenon/phone}
 
   batch:
     schedule-enabled: ${VOICE_SCHEDULE_ENABLED:true}
