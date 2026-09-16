@@ -5,6 +5,7 @@ import egovframework.voice.collector.batch.VoiceBatchResult;
 import egovframework.voice.collector.batch.VoiceBatchScheduler;
 import egovframework.voice.collector.batch.VoiceCollectService;
 import egovframework.voice.collector.broker.XvarmBrokerClient;
+import egovframework.voice.collector.config.VoiceDirState;
 import egovframework.voice.collector.config.VoiceProperties;
 import egovframework.voice.collector.decrypt.DecryptService;
 import egovframework.voice.collector.logging.LogCollectorClient;
@@ -45,6 +46,7 @@ public class VoiceBatchController {
     private final VoiceBatchScheduler scheduler;
     private final IdempotencyGuard idempotency;
     private final VoiceProperties props;
+    private final VoiceDirState dirs;
     private final BoramiSourceClient source;
     private final XvarmBrokerClient broker;
     private final egovframework.voice.collector.broker.RestXvarmBrokerClient restBroker;
@@ -57,7 +59,14 @@ public class VoiceBatchController {
     private final egovframework.voice.collector.config.MockDatasetState dataset;
 
     @Operation(summary = "일배치 실행",
-            description = "전날 00시 ~ 오늘 00시 구간을 처리한다. 스케줄과 무관하게 즉시 실행한다.")
+            description = """
+                    전날 00시 ~ 오늘 00시 구간을 처리한다. 스케줄과 무관하게 즉시 실행한다.
+
+                    - `kinds` 를 비우면 접견·전화 둘 다. `MEET` / `PHONE` 로 한 트랙만
+                    - `test=true` 면 EXEC_ID 가 `…TST…` 로 채번되어 [테스트 데이터 초기화] 로 지울 수 있다
+                    - 로그 컬렉터에 T1(배치) · T2(COLLECT·ANALYZE) · T4(파일별) 를 남기고,
+                      STT 텍스트는 응답의 `outputDirs` 폴더(`{output}/{execId}/`)에 남긴다
+                    """)
     @PostMapping("/batches/daily")
     public VoiceBatchResult daily(@RequestParam(required = false) List<VoiceKind> kinds,
                                   @RequestParam(defaultValue = "false") boolean test) {
@@ -65,7 +74,13 @@ public class VoiceBatchController {
     }
 
     @Operation(summary = "주기배치 실행",
-            description = "지금으로부터 periodic-lag-min 분 전까지를 처리한다(기본 20분).")
+            description = """
+                    지금으로부터 periodic-lag-min 분 전까지를 처리한다(기본 20분).
+
+                    - `kinds=MEET` 접견만 · `kinds=PHONE` 전화만 · 비우면 둘 다
+                    - `test=true` 면 EXEC_ID 가 `…TST…` 로 채번된다(시뮬레이터 기본)
+                    - 실패한 건은 멱등 표식이 남지 않아 **다음 실행에서 다시 처리된다**(재처리 시나리오)
+                    """)
     @PostMapping("/batches/periodic")
     public VoiceBatchResult periodic(@RequestParam(required = false) List<VoiceKind> kinds,
                                      @RequestParam(defaultValue = "false") boolean test) {
@@ -73,8 +88,13 @@ public class VoiceBatchController {
                 kinds, "MANUAL", test);
     }
 
-    @Operation(summary = "구간 지정 실행",
-            description = "임의 시간창을 처리한다. Mock 모드에서는 시간창과 무관하게 고정 대상이 나온다.")
+    @Operation(summary = "구간 지정 실행 (재처리)",
+            description = """
+                    임의 시간창을 처리한다. Mock 모드에서는 시간창과 무관하게 고정 대상이 나온다.
+
+                    실패 이력이 있는 구간을 다시 돌릴 때 쓴다 — 앞선 배치에서 실패한 건은 멱등 표식이 없어
+                    다시 처리되고, 성공했던 건은 `건너뜀` 으로 잡힌다. 새 EXEC_ID 로 T1·T2·T4 가 따로 남는다.
+                    """)
     @PostMapping("/batches/manual")
     public VoiceBatchResult manual(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
@@ -109,18 +129,22 @@ public class VoiceBatchController {
         batch.put("speclMngSeCd", props.batch().speclMngSeCd());
         batch.put("retainSourceFile", props.batch().retainSourceFile());
 
-        Map<String, Object> dirs = new LinkedHashMap<>();
-        dirs.put("meetDir", props.sync().meetDir());
-        dirs.put("phoneDir", props.sync().phoneDir());
-        dirs.put("workDir", props.sync().workDir());
-        dirs.put("namingPolicy", props.sync().namingPolicy());
+        // 디렉터리 — 런타임 상태(시뮬레이터에서 바꾼 값)와 기동 설정값, 프리셋을 함께 내려준다.
+        //   receiveMeet/receivePhone: 브로커·ESB 가 떨구는 곳 · work: 복호화 산출물·멱등 표식
+        //   outputMeet/outputPhone: STT 결과가 {output}/{execId}/ 로 쌓이는 곳
+        Map<String, Object> dirMap = new LinkedHashMap<>(dirs.snapshot());
+        dirMap.put("namingPolicy", props.sync().namingPolicy());
+        dirMap.put("configured", dirs.configured());
+        dirMap.put("presets", dirs.presets());
+        dirMap.put("suggestedBaseDir", VoiceDirState.suggestedBaseDir());
+        dirMap.put("outputPattern", "{outputMeet|outputPhone}/{execId}/{건ID}.txt (+ .json 메타)");
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("modes", modes);
         out.put("configuredModes", modeState.configured());
         out.put("logCollector", logc);
         out.put("batch", batch);
-        out.put("dirs", dirs);
+        out.put("dirs", dirMap);
         // 두 트랙의 단계·모드·실제 호출 대상을 서버가 직접 내려준다.
         //   화면에 하드코딩하면 설정을 바꿔도 그림이 그대로라 "무엇이 실제로 도는지"를
         //   화면만 보고는 알 수 없게 된다 — 실제로 그래서 전화 트랙이 브로커 스위치에
@@ -155,14 +179,17 @@ public class VoiceBatchController {
                         "TB_IMSC_PTPR_DT → TB_RERD_TFIN_DS → TB_SMSM_CMFI_BS → XVARM.ASYSCONTENTELEMENT (4단 조인)"),
                 brokerStep(),
                 step("ESB 수신", null, props.sync().namingPolicy().name(),
-                        props.sync().meetDir(),
+                        dirs.receiveMeet(),
                         "ESB FILE2FILE(P20) 이 동기화해 준 파일을 감시한다. 크기가 안정되어야 처리한다"),
                 step("복호화", "decrypt", decryptService.mode(),
                         "R플레이어 로직 포팅",
                         "CMMN_FILE_ENC_YN='Y' 인 건만. 키 미수령(계획서 Q8)"),
                 step("STT", "stt", sttClient.mode(),
                         sttEndpoint(),
-                        "STT 텍스트 생성 — 이 서비스의 마지막 단계. T4 에는 처리 상태만 남고 텍스트·글자 수는 배치 결과에만 실린다")));
+                        "STT 텍스트 생성 후 T2 ANALYZE 마감. T4 에는 처리 상태만 남는다"),
+                step("결과 저장", null, "FILE",
+                        dirs.outputMeet() + "/{execId}/",
+                        "STT 텍스트(.txt)와 메타(.json)를 배치 폴더에 남긴다 — 하류(비식별)가 여기서 읽어 간다")));
 
         Map<String, Object> phone = new LinkedHashMap<>();
         phone.put("label", "전화 (PHONE)");
@@ -173,14 +200,17 @@ public class VoiceBatchController {
                         sourceEndpoint(),
                         "TB_IMPH_UCDR_DS 단일 테이블. TELP_PCALL_RECRD_YN='Y' + 특이수용자"),
                 step("전화 파일 연계", "phone", phoneFileProvider.mode(),
-                        props.sync().phoneDir(),
+                        dirs.receivePhone(),
                         "별도 서버의 파일을 ESB 전화 전용 프로바이더가 수신 디렉터리에 떨궈 준다. 우리는 대기만 한다"),
                 step("복호화", "decrypt", decryptService.mode(),
                         "ARIA-128 / AES-256",
                         "KEY = TELP_RECRD_FILE_ID. 복호화 주체 미확정(계획서 Q13)"),
                 step("STT", "stt", sttClient.mode(),
                         sttEndpoint(),
-                        "TELP_STT_FLPTH_NM 에 기존 STT 가 있으면 재수행하지 않는다(계획서 Q1)")));
+                        "TELP_STT_FLPTH_NM 에 기존 STT 가 있으면 재수행하지 않는다(계획서 Q1)"),
+                step("결과 저장", null, "FILE",
+                        dirs.outputPhone() + "/{execId}/",
+                        "STT 텍스트(.txt)와 메타(.json)를 배치 폴더에 남긴다")));
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("meet", meet);
@@ -246,7 +276,7 @@ public class VoiceBatchController {
 
     private String brokerEndpoint() {
         if (modeState.broker() == VoiceProperties.BrokerMode.MOCK) {
-            return "내부 Mock 브로커 — " + props.sync().meetDir() + " 에 직접 생성";
+            return "내부 Mock 브로커 — " + dirs.receiveMeet() + " 에 직접 생성";
         }
         String base = blankToNull(modeState.brokerBaseUrl());
         if (base == null) {
@@ -294,7 +324,7 @@ public class VoiceBatchController {
     @GetMapping("/broker/probe")
     public Map<String, Object> brokerProbe() {
         Map<String, Object> out = new LinkedHashMap<>(restBroker.probe());
-        String meetDir = props.sync().meetDir();
+        String meetDir = dirs.receiveMeet();
         out.put("collectorMeetDir", meetDir);
         out.put("brokerMode", broker.mode());
 

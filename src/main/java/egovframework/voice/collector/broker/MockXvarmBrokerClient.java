@@ -1,6 +1,7 @@
 package egovframework.voice.collector.broker;
 
 import egovframework.voice.collector.config.MockDatasetState;
+import egovframework.voice.collector.config.VoiceDirState;
 import egovframework.voice.collector.config.VoiceProperties;
 import egovframework.voice.collector.model.VoiceTarget;
 import egovframework.voice.collector.sync.EsbFileNamingPolicy;
@@ -32,13 +33,19 @@ import java.nio.file.StandardOpenOption;
 public class MockXvarmBrokerClient implements XvarmBrokerClient {
 
     private final VoiceProperties props;
+    private final VoiceDirState dirs;
     private final EsbFileNamingPolicy namingPolicy;
     private final MockDatasetState dataset;
 
     @Override
     public ExtractResult extract(VoiceTarget target) {
-        String requestId = "MOCKREQ-" + target.idempotencyKey();
-        Path dir = Path.of(props.sync().meetDir());
+        return extract(target, null);
+    }
+
+    @Override
+    public ExtractResult extract(VoiceTarget target, String execId) {
+        String requestId = "MOCKREQ-" + (execId == null ? "" : execId + "-") + target.idempotencyKey();
+        Path dir = dirs.receiveDir(target.kind());
         Path file = dir.resolve(namingPolicy.expectedFileName(target, props.sync().namingPolicy()));
         try {
             Files.createDirectories(dir);

@@ -1,9 +1,9 @@
 package egovframework.voice.collector.controller;
 
 import egovframework.voice.collector.batch.IdempotencyGuard;
-import egovframework.voice.collector.batch.PiiResidueAuditor;
 import egovframework.voice.collector.config.FaultInjector;
 import egovframework.voice.collector.config.MockDatasetState;
+import egovframework.voice.collector.config.VoiceDirState;
 import egovframework.voice.collector.config.VoiceModeState;
 import egovframework.voice.collector.config.VoiceProperties;
 import egovframework.voice.collector.model.BatchWindow;
@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -61,7 +62,8 @@ public class VoiceMockController {
     private final VoiceModeState modeState;
     private final MockDatasetState dataset;
     private final FaultInjector faultInjector;
-    private final PiiResidueAuditor residueAuditor;
+    private final VoiceDirState dirs;
+    private final egovframework.voice.collector.stt.SttOutputStore outputStore;
     private final egovframework.voice.collector.logging.LogCollectorClient logCollector;
 
     @Operation(summary = "Mock 데이터 초기화",
@@ -77,9 +79,9 @@ public class VoiceMockController {
     @PostMapping("/reset")
     public Map<String, Object> reset() {
         int markers = idempotency.clearAll();
-        int meetFiles = deleteFilesIn(props.sync().meetDir());
-        int phoneFiles = deleteFilesIn(props.sync().phoneDir());
-        int workFiles = deleteFilesIn(Path.of(props.sync().workDir(), "mock_source_stt").toString());
+        int meetFiles = deleteFilesIn(dirs.receiveMeet());
+        int phoneFiles = deleteFilesIn(dirs.receivePhone());
+        int workFiles = deleteFilesIn(Path.of(dirs.work(), "mock_source_stt").toString());
 
         List<VoiceTarget> targets = previewTargets();
         log.info("[Mock] 초기화 — 표식 {}건, 접견파일 {}건, 전화파일 {}건, 작업파일 {}건",
@@ -113,6 +115,7 @@ public class VoiceMockController {
                        연쇄 삭제합니다. 삭제 SQL 에 작업코드 조건이 박혀 있어 운영 배치는
                        어떤 경우에도 걸리지 않습니다.
                     2. **로컬 산출물** — 멱등 표식·수신 파일·작업 파일 (Mock 초기화와 동일)
+                    3. **STT 출력 폴더** — `{output}/{execId}/` 중 EXEC_ID 에 `TST` 가 든 폴더째
                     """)
     @DeleteMapping("/test-data")
     public Map<String, Object> deleteTestData() {
@@ -131,9 +134,10 @@ public class VoiceMockController {
         // ② 로컬 산출물
         Map<String, Object> local = new LinkedHashMap<>();
         local.put("idempotencyMarkers", idempotency.clearAll());
-        local.put("meetFiles", deleteFilesIn(props.sync().meetDir()));
-        local.put("phoneFiles", deleteFilesIn(props.sync().phoneDir()));
-        local.put("workFiles", deleteFilesIn(Path.of(props.sync().workDir(), "mock_source_stt").toString()));
+        local.put("meetFiles", deleteFilesIn(dirs.receiveMeet()));
+        local.put("phoneFiles", deleteFilesIn(dirs.receivePhone()));
+        local.put("workFiles", deleteFilesIn(Path.of(dirs.work(), "mock_source_stt").toString()));
+        local.put("sttOutputDirs", outputStore.deleteTestOutputs());
         out.put("local", local);
 
         out.put("testJobId", props.batch().testJobId());
@@ -181,8 +185,127 @@ public class VoiceMockController {
     @GetMapping("/files")
     public Map<String, Object> files() {
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("meet", listFiles(props.sync().meetDir()));
-        out.put("phone", listFiles(props.sync().phoneDir()));
+        out.put("meet", listFiles(dirs.receiveMeet()));
+        out.put("phone", listFiles(dirs.receivePhone()));
+        return out;
+    }
+
+    @Operation(summary = "STT 출력 확인 (배치 폴더)",
+            description = """
+                    한 배치가 남긴 STT 결과를 읽어 옵니다 — `{output}/{execId}/` 의 `.json` 메타와 `.txt` 텍스트.
+
+                    **텍스트를 그대로 싣습니다.** 배치 응답에는 글자 수·경로만 실리므로(외부 전송 금지),
+                    시뮬레이터가 "무엇이 저장됐는지" 를 보여줄 때만 이 API 를 씁니다. 운영에서는 차단됩니다.
+                    """)
+    @GetMapping("/stt-outputs")
+    public Map<String, Object> sttOutputs(@RequestParam String execId,
+                                          @RequestParam(required = false) List<VoiceKind> kinds,
+                                          @RequestParam(defaultValue = "600") int maxTextChars) {
+        List<VoiceKind> want = (kinds == null || kinds.isEmpty())
+                ? List.of(VoiceKind.MEET, VoiceKind.PHONE) : kinds;
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("execId", execId);
+        Map<String, Object> byKind = new LinkedHashMap<>();
+        int total = 0;
+        for (VoiceKind k : want) {
+            List<Map<String, Object>> rows = outputStore.list(k, execId, Math.max(50, maxTextChars));
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("dir", dirs.outputDir(k, execId).toString().replace('\\', '/'));
+            m.put("count", rows.size());
+            m.put("files", rows);
+            byKind.put(k.name(), m);
+            total += rows.size();
+        }
+        out.put("total", total);
+        out.put("outputs", byKind);
+        return out;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  디렉터리 경로 — 재시작 없이 수신·작업·출력 폴더를 바꾼다
+    // ══════════════════════════════════════════════════════════════════════
+
+    @Operation(summary = "디렉터리 경로 조회",
+            description = "현재 경로 5종(수신 접견·전화 / 작업 / 출력 접견·전화)과 기동 설정값, 프리셋을 돌려줍니다.")
+    @GetMapping("/dirs")
+    public Map<String, Object> getDirs() {
+        return dirsView();
+    }
+
+    @Operation(summary = "디렉터리 경로 변경",
+            description = """
+                    경로를 **재시작 없이** 바꿉니다. 본문에 바꿀 키만 넣으면 됩니다.
+
+                    ```json
+                    { "baseDir": "C:/k8s",
+                      "receiveMeet": "C:/k8s/voice_raw/meet", "receivePhone": "C:/k8s/voice_raw/phone",
+                      "work": "C:/k8s/voice_work",
+                      "outputMeet": "C:/k8s/xenon/voice", "outputPhone": "C:/k8s/xenon/phone" }
+                    ```
+
+                    STT 결과는 `{outputMeet|outputPhone}/{execId}/` 에 쌓입니다.
+                    수신 폴더(`receiveMeet`)를 바꾸면 **로컬 브로커의 `BROKER_OUTPUT_DIR` 도 같은 곳**이어야
+                    접견 배치가 파일을 찾습니다 — [브로커 연결 확인] 으로 대조하십시오.
+                    변경은 이 프로세스에만 남고 재기동하면 설정값으로 돌아갑니다.
+                    """)
+    @PutMapping("/dirs")
+    public Map<String, Object> setDirs(@RequestBody Map<String, String> body) {
+        Map<String, String> before = dirs.set(body);
+        Map<String, Object> out = dirsView();
+        out.put("before", before);
+        return out;
+    }
+
+    @Operation(summary = "디렉터리 프리셋 적용",
+            description = """
+                    프리셋 하나로 5종을 한 번에 바꿉니다.
+
+                    - `configured` : 기동 시 설정값(로컬 기본)
+                    - `win`        : Windows 로컬 `C:/k8s` 아래 표준 배치
+                    - `pv`         : 개발계 PV `/k8s` 아래 표준 배치
+                    - `base`       : `baseDir` 파라미터로 준 뿌리 아래 표준 배치 (예 `baseDir=D:/data`)
+
+                    표준 배치: `{base}/voice_raw/meet` · `{base}/voice_raw/phone` · `{base}/voice_work`
+                    · `{base}/xenon/voice` · `{base}/xenon/phone`
+                    """)
+    @PutMapping("/dirs/preset")
+    public Map<String, Object> applyDirPreset(@RequestParam String key,
+                                              @RequestParam(required = false) String baseDir) {
+        Map<String, String> target = switch (key.trim().toLowerCase()) {
+            case "configured" -> dirs.configured();
+            case "win" -> VoiceDirState.layoutOf("C:/k8s");
+            case "pv" -> VoiceDirState.layoutOf("/k8s");
+            case "base" -> {
+                if (baseDir == null || baseDir.isBlank()) {
+                    throw new IllegalArgumentException("key=base 에는 baseDir 이 필요하다");
+                }
+                yield VoiceDirState.layoutOf(baseDir);
+            }
+            default -> throw new IllegalArgumentException("알 수 없는 프리셋: " + key + " (configured/win/pv/base)");
+        };
+        Map<String, String> before = dirs.set(target);
+        Map<String, Object> out = dirsView();
+        out.put("preset", key);
+        out.put("before", before);
+        return out;
+    }
+
+    @Operation(summary = "디렉터리 경로 초기화", description = "기동 시 설정값(application.yml / 환경변수)으로 되돌립니다.")
+    @PostMapping("/dirs/reset")
+    public Map<String, Object> resetDirs() {
+        dirs.resetToConfigured();
+        return dirsView();
+    }
+
+    private Map<String, Object> dirsView() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("current", dirs.snapshot());
+        Map<String, String> abs = new LinkedHashMap<>();
+        dirs.snapshot().forEach((k, v) -> abs.put(k, VoiceDirState.toAbs(v)));
+        out.put("absolute", abs);
+        out.put("configured", dirs.configured());
+        out.put("presets", dirs.presets());
+        out.put("suggestedBaseDir", VoiceDirState.suggestedBaseDir());
         return out;
     }
 
@@ -313,24 +436,6 @@ public class VoiceMockController {
             @RequestParam(required = false) Long delayMs) {
         faultInjector.configure(enabled, failPercent, delayPercent, delayMs);
         return faultInjector.snapshot();
-    }
-
-    @Operation(summary = "PII 잔여 파일 확인",
-            description = """
-                    수신·작업 디렉터리에 원본 음성이 남아 있는지 셉니다.
-                    배치 후 **0건**이어야 정책(계획서 5.3-(4): STT 완료 즉시 삭제)이 지켜진 것입니다.
-                    """)
-    @GetMapping("/pii-residue")
-    public Map<String, Object> piiResidue() {
-        PiiResidueAuditor.Residue r = residueAuditor.audit();
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("meetFiles", r.meetFiles());
-        out.put("phoneFiles", r.phoneFiles());
-        out.put("workFiles", r.workFiles());
-        out.put("total", r.total());
-        out.put("clean", r.clean());
-        out.put("message", r.message());
-        return out;
     }
 
     /**

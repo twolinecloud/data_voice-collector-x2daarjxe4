@@ -12,13 +12,12 @@
   .sw-card.is-mock { border-left-color:#f0ad4e; }
   .sw-card.is-real { border-left-color:#198754; }
   .sw-card .label { font-size:.75rem; color:#6c757d; }
-  .sw-card select { font-family:var(--mono); font-weight:600; }
   .stat { text-align:center; padding:.6rem .25rem; }
   .stat .n { font-size:1.6rem; font-weight:700; line-height:1.1; font-family:var(--mono); }
   .stat .k { font-size:.75rem; color:#6c757d; }
   #log {
     background:#1e1f22; color:#d6d6d6; font-family:var(--mono); font-size:.8rem;
-    height:320px; overflow-y:auto; padding:.75rem .9rem; border-radius:.375rem;
+    height:300px; overflow-y:auto; padding:.75rem .9rem; border-radius:.375rem;
     white-space:pre-wrap; word-break:break-all;
   }
   #log .t  { color:#7f848e; }
@@ -26,16 +25,14 @@
   #log .er { color:#e06c75; }
   #log .wr { color:#e5c07b; }
   #log .hd { color:#61afef; font-weight:600; }
-  #log .pii{ color:#c678dd; font-weight:600; }
   .tgt-table { font-size:.82rem; }
   .tgt-table td, .tgt-table th { padding:.35rem .5rem; }
   .busy { pointer-events:none; }
   .busy .btn:not(.is-running), .busy .form-control, .busy .form-check-input { opacity:.55; }
   .btn.is-running:disabled { opacity:1; }
   .chaos-on { background:#fff4e5; }
-  .pii-clean { color:#198754; font-weight:600; }
-  .pii-dirty { color:#dc3545; font-weight:600; }
   .hint { font-size:.75rem; color:#6c757d; }
+  code { font-size:.78rem; }
 
   /* ── 2트랙 파이프라인 ─────────────────────────────────────────────── */
   .track { border:1px solid #dee2e6; border-radius:.5rem; overflow:hidden; height:100%; }
@@ -65,10 +62,65 @@
   .step-url .form-check { min-height:0; margin-bottom:.15rem; }
   .step-url .form-check-input { margin-top:.2rem; cursor:pointer; }
   .step-url .form-check-label { font-size:.74rem; cursor:pointer; }
-  .step-url .form-check-label code { font-size:.72rem; }
   .step-url .url-tag { font-weight:600; color:#495057; }
   .probe-ok  { color:#198754; font-weight:600; }
   .probe-bad { color:#dc3545; font-weight:600; }
+
+  /* ── 디렉터리 ──────────────────────────────────────────────────────── */
+  .dir-row label { font-size:.72rem; color:#6c757d; margin-bottom:.1rem; }
+  .dir-row input { font-family:var(--mono); font-size:.78rem; }
+  .dir-row .abs { font-size:.68rem; color:#9aa0a6; font-family:var(--mono); }
+  .dir-changed input { border-color:#f0ad4e; background:#fffaf0; }
+
+  /* ── API 호출 · JSON ───────────────────────────────────────────────── */
+  .api-line { font-family:var(--mono); font-size:.8rem; display:flex; flex-wrap:wrap; gap:.45rem; align-items:center; }
+  .api-line .m { font-weight:700; padding:.05rem .4rem; border-radius:.25rem; background:#e7f1ff; color:#0d6efd; }
+  .api-line .m.POST { background:#e6f4ea; color:#198754; }
+  .api-line .m.PUT  { background:#fff3cd; color:#8a6d00; }
+  .api-line .m.DELETE { background:#f8d7da; color:#b02a37; }
+  .api-line .u { word-break:break-all; }
+  .api-line .st { font-weight:700; padding:.05rem .4rem; border-radius:.25rem; }
+  .st-2xx { background:#d1e7dd; color:#0f5132; }
+  .st-4xx, .st-5xx, .st-err { background:#f8d7da; color:#842029; }
+  .api-line .ms { color:#6c757d; }
+  pre.json { background:#1e1f22; color:#d6d6d6; font-family:var(--mono); font-size:.76rem; line-height:1.4;
+             padding:.7rem .85rem; border-radius:.375rem; max-height:420px; overflow:auto; margin:0;
+             white-space:pre; }
+  pre.json.compact { max-height:260px; }
+  .j-key { color:#e5c07b; } .j-str { color:#98c379; } .j-num { color:#d19a66; }
+  .j-bool { color:#56b6c2; } .j-null { color:#c678dd; } .j-hl { background:#3a3f4b; border-radius:2px; }
+  .json-box { position:relative; }
+  .json-box .tools { position:absolute; top:.35rem; right:.5rem; display:flex; gap:.25rem; }
+  .json-box .tools .btn { --bs-btn-padding-y:.05rem; --bs-btn-padding-x:.4rem; --bs-btn-font-size:.68rem; }
+  details > summary { cursor:pointer; font-size:.8rem; font-weight:600; color:#495057; list-style:none; }
+  details > summary::before { content:"▸ "; }
+  details[open] > summary::before { content:"▾ "; }
+  .stt-text { font-family:var(--mono); font-size:.72rem; white-space:pre-wrap; max-height:6.5em; overflow:hidden;
+              color:#495057; cursor:pointer; }
+  .stt-text.open { max-height:none; }
+  .badge-step { font-family:var(--mono); font-size:.68rem; }
+
+  /* ── 재처리 시나리오 ───────────────────────────────────────────────── */
+  .tl { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.6rem; }
+  @media (max-width: 992px) { .tl { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  .tl-card { border:1px solid #dee2e6; border-radius:.5rem; background:#fff; padding:.6rem .7rem; min-height:9rem; }
+  .tl-card.pending { opacity:.55; }
+  .tl-card.running { border-color:#0d6efd; box-shadow:0 0 0 .15rem rgba(13,110,253,.15); }
+  .tl-card.done-ok  { border-color:#198754; }
+  .tl-card.done-fail{ border-color:#dc3545; }
+  .tl-card.expect-fail.done-fail { border-color:#fd7e14; }
+  .tl-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:.35rem; }
+  .tl-no { font-weight:700; font-size:.85rem; }
+  .tl-sum { font-size:.74rem; color:#495057; margin:.3rem 0; }
+  .cmp { display:grid; grid-template-columns:1fr 1fr; gap:.6rem; }
+  @media (max-width: 992px) { .cmp { grid-template-columns:1fr; } }
+  .cmp .head { font-size:.8rem; font-weight:600; padding:.3rem .5rem; border-radius:.3rem .3rem 0 0; color:#fff; }
+  .cmp .fail .head { background:#dc3545; } .cmp .ok .head { background:#198754; }
+  .kv { font-family:var(--mono); font-size:.74rem; }
+  .kv td { padding:.1rem .4rem; border-bottom:1px dashed #eee; }
+  .kv td:first-child { color:#6c757d; white-space:nowrap; }
+  .pulse { animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%{opacity:1} 50%{opacity:.45} 100%{opacity:1} }
 </style>
 </head>
 <body>
@@ -77,12 +129,12 @@
   <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
     <div>
       <h4 class="mb-0">음성 수집 시뮬레이터</h4>
-      <div class="text-secondary small">보라미 음성(접견·통화) → 수집 → 복호화 → STT 파이프라인</div>
+      <div class="text-secondary small">보라미 음성(접견·통화) → 수집 → 복호화 → STT → 출력 저장 · 로그 컬렉터 T1·T2·T4</div>
     </div>
     <div class="d-flex gap-2">
       <a class="btn btn-sm btn-outline-secondary" href="/swagger-ui.html" target="_blank">Swagger</a>
       <button class="btn btn-sm btn-outline-danger" id="btn-test-clear"
-              title="시뮬레이터에서 돌린 배치(EXEC_ID 작업코드 = TST)의 로그 이력과 로컬 산출물을 모두 지웁니다. 운영 배치(VOC/STR/EXT)는 건드리지 않습니다.">
+              title="시뮬레이터에서 돌린 배치(EXEC_ID 작업코드 = TST)의 로그 이력·로컬 산출물·STT 출력 폴더를 모두 지웁니다. 운영 배치(VOC/STR/EXT)는 건드리지 않습니다.">
         테스트 데이터 초기화
       </button>
       <button class="btn btn-sm btn-outline-primary" id="btn-refresh">상태 새로고침</button>
@@ -98,29 +150,62 @@
     <div class="card-body">
       <div class="row g-3 mb-3" id="tracks"></div>
       <div class="row g-2" id="logc"></div>
-      <div class="hint mt-3" id="dirs"></div>
+      <div class="hint mt-3" id="batch-line"></div>
       <div class="mt-2" id="warnings"></div>
       <div class="mt-2" id="probe-line"></div>
     </div>
   </div>
 
-  <!-- ② 제어 -->
+  <!-- ② 디렉터리 -->
   <div class="card shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>② 제어</strong></div>
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>② 디렉터리 경로 — 수신 · 작업 · STT 출력</strong>
+      <span class="hint">STT 결과는 <code>{출력}/{execId}/</code> 에 배치 단위로 쌓입니다 · 변경은 재기동 전까지만</span>
+    </div>
+    <div class="card-body" id="dirs-box">
+      <div class="d-flex flex-wrap gap-2 align-items-end mb-3">
+        <div>
+          <div class="hint mb-1">프리셋</div>
+          <div class="btn-group btn-group-sm" id="dir-presets"></div>
+        </div>
+        <div class="ms-lg-3">
+          <div class="hint mb-1">base-dir 로 표준 배치 채우기</div>
+          <div class="input-group input-group-sm" style="max-width:26rem">
+            <input type="text" class="form-control font-monospace" id="dir-base" placeholder="C:/k8s 또는 /k8s">
+            <button class="btn btn-outline-dark" id="btn-dir-base">채우기</button>
+          </div>
+        </div>
+        <div class="ms-auto d-flex gap-2">
+          <button class="btn btn-sm btn-dark" id="btn-dir-apply">적용</button>
+          <button class="btn btn-sm btn-outline-secondary" id="btn-dir-reset">설정값으로 초기화</button>
+        </div>
+      </div>
+      <div class="row g-2" id="dir-rows"></div>
+      <div class="hint mt-2">
+        표준 배치: <code>{base}/voice_raw/meet</code> · <code>{base}/voice_raw/phone</code> · <code>{base}/voice_work</code>
+        · <code>{base}/xenon/voice</code> · <code>{base}/xenon/phone</code> — base 는 Windows 로컬 <code>C:/k8s</code>, 배포 PV <code>/k8s</code>.<br>
+        수신(접견) 폴더를 바꾸면 <b>로컬 브로커의 <code>BROKER_OUTPUT_DIR</code> 도 같은 곳</b>이어야 합니다 — [브로커 연결 확인] 으로 대조하십시오.
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ 제어 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>③ 제어</strong></div>
     <div class="card-body" id="controls">
 
-      <div class="mb-2 hint">트랙별 실행 — 한 시나리오만 따로 돌려 어디서 막히는지 좁힙니다</div>
+      <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답 JSON 을 아래 ④ 에 그대로 보여줍니다</div>
       <div class="d-flex flex-wrap gap-2 mb-3">
-        <button class="btn btn-primary"    id="btn-meet">접견만 실행 <span class="opacity-75">(kinds=MEET)</span></button>
-        <button class="btn btn-secondary"  id="btn-phone" style="background:#6f42c1;border-color:#6f42c1">전화만 실행 <span class="opacity-75">(kinds=PHONE)</span></button>
-        <button class="btn btn-outline-primary" id="btn-periodic">전체 실행 (10분 주기)</button>
-        <button class="btn btn-outline-primary" id="btn-daily">전체 실행 (일배치)</button>
+        <button class="btn btn-primary"    id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(kinds=MEET)</span></button>
+        <button class="btn btn-secondary"  id="btn-phone" style="background:#6f42c1;border-color:#6f42c1" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(kinds=PHONE)</span></button>
+        <button class="btn btn-outline-primary" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
+        <button class="btn btn-outline-primary" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
       </div>
       <div class="d-flex flex-wrap gap-2 mb-3">
         <button class="btn btn-warning"  id="btn-reset">Mock 데이터 초기화 / 생성</button>
         <button class="btn btn-outline-secondary" id="btn-targets">처리 대상 미리보기</button>
         <button class="btn btn-outline-secondary" id="btn-files">수신 파일 확인</button>
-        <button class="btn btn-outline-secondary" id="btn-pii">PII 잔여 확인</button>
+        <button class="btn btn-outline-secondary" id="btn-outputs">STT 출력 확인 (최근 배치)</button>
         <button class="btn btn-outline-secondary" id="btn-probe">브로커 연결 확인</button>
       </div>
 
@@ -194,17 +279,68 @@
     </div>
   </div>
 
-  <!-- ③ 결과 -->
+  <!-- ④ 결과 -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
-      <strong>③ 최근 배치 결과</strong>
+      <strong>④ 최근 배치 결과 — API · Response JSON · 처리 파일</strong>
       <span class="small text-secondary font-monospace" id="last-exec">—</span>
     </div>
     <div class="card-body py-2">
       <div class="row row-cols-2 row-cols-md-5 g-0" id="stats"></div>
-      <div class="border-top pt-2 mt-2 small" id="pii-line">
-        <span class="text-secondary">PII 원본 삭제 검증:</span> <span class="text-secondary">—</span>
+      <div class="border-top pt-2 mt-2" id="api-box">
+        <div class="hint">아직 실행한 배치가 없습니다. 위 ③ 의 배치 버튼을 누르면 호출한 API 와 응답이 여기에 남습니다.</div>
       </div>
+      <div class="mt-2" id="steps-box"></div>
+      <div class="mt-2" id="outdirs-box"></div>
+      <div class="mt-2" id="resp-box"></div>
+      <div class="mt-3" id="files-box"></div>
+    </div>
+  </div>
+
+  <!-- ⑤ 재처리 시나리오 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <strong>⑤ 재처리(Retry) 시나리오 — 브로커 장애 → 실패 이력 → 복구 → 재처리</strong>
+      <span class="hint">접견 트랙(REST 브로커) 기준 · 실패한 건은 멱등 표식이 없어 다음 배치에서 다시 처리됩니다</span>
+    </div>
+    <div class="card-body" id="retry-box">
+      <div class="row g-2 align-items-end mb-3">
+        <div class="col-12 col-md-3">
+          <label class="hint">① 장애 브로커 주소</label>
+          <input type="text" class="form-control form-control-sm font-monospace" id="rt-fault-url" value="http://localhost:9999">
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="hint">③ 복구 브로커 주소</label>
+          <input type="text" class="form-control form-control-sm font-monospace" id="rt-ok-url" value="http://localhost:8082">
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="hint">④ 재처리 API</label>
+          <select class="form-select form-select-sm font-monospace" id="rt-reproc">
+            <option value="periodic">POST /batches/periodic?kinds=MEET</option>
+            <option value="manual">POST /batches/manual?from&amp;to&amp;kinds=MEET</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="hint">자동 실행 간격(초)</label>
+          <input type="number" class="form-control form-control-sm" id="rt-gap" value="2.5" min="0.5" max="10" step="0.5">
+        </div>
+      </div>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" id="rt-fresh" checked>
+        <label class="form-check-label hint" for="rt-fresh">
+          ① 전에 <b>Mock 데이터 초기화</b>(멱등 표식·수신 파일 삭제) — 이미 처리된 대상은 <code>건너뜀</code>이 되어 실패 이력이 안 남습니다
+        </label>
+      </div>
+      <div class="d-flex flex-wrap gap-2 mb-3">
+        <button class="btn btn-outline-danger btn-sm" id="rt-1">① 브로커 장애 주입</button>
+        <button class="btn btn-outline-primary btn-sm" id="rt-2">② 1차 배치 실행 (실패 이력)</button>
+        <button class="btn btn-outline-success btn-sm" id="rt-3">③ 브로커 복구</button>
+        <button class="btn btn-outline-primary btn-sm" id="rt-4">④ 재처리 배치 실행</button>
+        <button class="btn btn-success btn-sm ms-auto" id="rt-auto">🚀 원클릭 자동 실행 (①→④)</button>
+        <button class="btn btn-outline-secondary btn-sm" id="rt-clear">타임라인 지우기</button>
+      </div>
+      <div class="tl mb-3" id="rt-timeline"></div>
+      <div id="rt-compare"></div>
     </div>
   </div>
 
@@ -228,10 +364,10 @@
     </div>
   </div>
 
-  <!-- ④ 로그 -->
+  <!-- ⑥ 로그 -->
   <div class="card shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
-      <strong>④ 실행 로그</strong>
+      <strong>⑥ 실행 로그</strong>
       <button class="btn btn-sm btn-outline-secondary" id="btn-clear">로그 지우기</button>
     </div>
     <div class="card-body"><div id="log"></div></div>
@@ -255,6 +391,13 @@ const SWITCH_OPTS = {
   stt    : ['MOCK','NPU'],
 };
 const MOCKISH = ['MOCK','SKIP'];
+const DIR_KEYS = [
+  ['receiveMeet',  '수신 · 접견 (브로커·ESB 가 떨구는 곳)'],
+  ['receivePhone', '수신 · 전화 (ESB 전화 프로바이더)'],
+  ['work',         '작업 (복호화 산출물 · 멱등 표식)'],
+  ['outputMeet',   'STT 출력 · 접견  →  {여기}/{execId}/'],
+  ['outputPhone',  'STT 출력 · 전화  →  {여기}/{execId}/'],
+];
 
 // ── 로그 ────────────────────────────────────────────────────────────────
 function log(msg, cls='') {
@@ -272,30 +415,104 @@ function logRaw(html) {
   $('log').scrollTop = $('log').scrollHeight;
 }
 function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ── 호출 ────────────────────────────────────────────────────────────────
-async function call(method, url, label, quiet) {
+// 응답 본문뿐 아니라 method·url·HTTP 상태·소요 시간을 함께 돌려준다 — 화면이 "실제로 무엇을
+// 호출했고 무엇이 왔는지" 를 그대로 보여줘야 시연에서 API 를 신뢰할 수 있다.
+async function callFull(method, url, label, opts={}) {
   const t0 = performance.now();
   $('controls').classList.add('busy');
-  if (!quiet) log(`▶ ${label} — ${method} ${url}`, 'hd');
+  if (!opts.quiet) log(`▶ ${label} — ${method} ${url}`, 'hd');
+  const info = { method, url, label, status:0, ms:0, ok:false, body:null, error:null };
   try {
-    const res = await fetch(url, { method, headers:{ 'Accept':'application/json' } });
-    const took = Math.round(performance.now() - t0);
-    const body = await res.json().catch(() => null);
-    if (!res.ok) {
-      log(`✖ HTTP ${res.status} (${took}ms) — ${body?.message || body?.error || ''}`, 'er');
-      return null;
+    const init = { method, headers:{ 'Accept':'application/json' } };
+    if (opts.json !== undefined) {
+      init.headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(opts.json);
     }
-    if (!quiet) log(`✔ HTTP ${res.status} (${took}ms)`, 'ok');
-    return body;
+    const res = await fetch(url, init);
+    info.ms = Math.round(performance.now() - t0);
+    info.status = res.status;
+    info.body = await res.json().catch(() => null);
+    info.ok = res.ok;
+    if (!res.ok) {
+      log(`✖ HTTP ${res.status} (${info.ms}ms) — ${info.body?.message || info.body?.error || ''}`, 'er');
+    } else if (!opts.quiet) {
+      log(`✔ HTTP ${res.status} (${info.ms}ms)`, 'ok');
+    }
   } catch (e) {
+    info.ms = Math.round(performance.now() - t0);
+    info.error = e.message;
     log(`✖ 요청 실패 — ${e.message}`, 'er');
-    return null;
   } finally {
     $('controls').classList.remove('busy');
   }
+  return info;
+}
+async function call(method, url, label, quiet, json) {
+  const r = await callFull(method, url, label, { quiet, json });
+  return r.ok ? r.body : null;
+}
+
+// ── JSON 표시 ───────────────────────────────────────────────────────────
+// 원문을 먼저 토큰으로 자르고 토큰마다 escape 한다 — escape 를 먼저 하면 따옴표가 &quot; 로 바뀌어
+// 문자열 토큰을 하나도 못 잡는다(실제로 그래서 색이 안 입혀졌다).
+function hlJson(obj, hlKeys=[]) {
+  const s = JSON.stringify(obj, null, 2) ?? 'null';
+  const re = /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(s)) !== null) {
+    out += esc(s.slice(last, m.index));
+    const tok = m[0];
+    let cls = 'j-num', hl = false;
+    if (tok.startsWith('"')) {
+      if (/:$/.test(tok)) {
+        cls = 'j-key';
+        hl = hlKeys.includes(tok.replace(/^"|"\s*:$/g, ''));
+      } else cls = 'j-str';
+    } else if (tok === 'true' || tok === 'false') cls = 'j-bool';
+    else if (tok === 'null') cls = 'j-null';
+    const span = `<span class="${cls}">${esc(tok)}</span>`;
+    out += hl ? `<span class="j-hl">${span}</span>` : span;
+    last = m.index + tok.length;
+  }
+  return out + esc(s.slice(last));
+}
+let jsonSeq = 0;
+function jsonBox(obj, opts={}) {
+  const id = 'json-' + (++jsonSeq);
+  const cls = opts.compact ? 'json compact' : 'json';
+  return `<div class="json-box">
+      <div class="tools">
+        <button class="btn btn-outline-light" data-copy="${id}" title="클립보드에 복사">복사</button>
+        <button class="btn btn-outline-light" data-expand="${id}" title="높이 제한 해제">펼치기</button>
+      </div>
+      <pre class="${cls}" id="${id}">${hlJson(obj, opts.hl || [])}</pre>
+    </div>`;
+}
+document.addEventListener('click', (e) => {
+  const c = e.target.closest('[data-copy]');
+  if (c) {
+    navigator.clipboard?.writeText($(c.dataset.copy).textContent).then(() => { c.textContent = '복사됨'; setTimeout(() => c.textContent = '복사', 1200); });
+  }
+  const x = e.target.closest('[data-expand]');
+  if (x) { const p = $(x.dataset.expand); p.style.maxHeight = p.style.maxHeight ? '' : 'none'; x.textContent = p.style.maxHeight ? '접기' : '펼치기'; }
+  const t = e.target.closest('.stt-text');
+  if (t) t.classList.toggle('open');
+});
+function apiLine(info) {
+  const stCls = info.error ? 'st-err' : info.status >= 500 ? 'st-5xx' : info.status >= 400 ? 'st-4xx' : 'st-2xx';
+  const u = new URL(info.url, location.origin);
+  return `<div class="api-line">
+      <span class="m ${info.method}">${info.method}</span>
+      <span class="u">${esc(u.pathname)}<span class="text-secondary">${esc(u.search)}</span></span>
+      <span class="st ${stCls}">${info.error ? '요청 실패' : 'HTTP ' + info.status}</span>
+      <span class="ms">${info.ms}ms</span>
+      ${info.error ? `<span class="text-danger">${esc(info.error)}</span>` : ''}
+    </div>`;
 }
 
 // ── ① 2트랙 파이프라인 ──────────────────────────────────────────────────
@@ -303,29 +520,25 @@ function renderTracks(tracks) {
   if (!tracks) return;
   $('tracks').innerHTML = ['meet','phone'].map(k => trackCard(k, tracks[k])).join('');
 
-  // 주소 변경 — 라디오를 고르는 즉시 서버에 반영한다. 별도 [적용] 버튼이 없다.
   async function applyUrl(key, value) {
     const d = await call('PUT', `/api/v1/mock/endpoints/${key}?value=${encodeURIComponent(value)}`,
                          `브로커 주소 변경 → ${value || '(비움)'}`);
     if (d) log(`  └ ${d.before || '(없음)'} → ${d.after || '(없음)'}`, 'ok');
-    await loadStatus(true);   // 단계 라벨(호출 주소)까지 서버 기준으로 다시 그린다
+    await loadStatus(true);
   }
   document.querySelectorAll('input[data-url-radio]').forEach(r => {
     r.onchange = () => { if (r.checked) applyUrl(r.dataset.urlRadio, r.value); };
   });
-
-  // 단계에 붙은 스위치 바인딩
   document.querySelectorAll('select[data-switch]').forEach(sel => {
     sel.onchange = async () => {
       const key = sel.dataset.switch, val = sel.value;
       const d = await call('PUT', `/api/v1/mock/modes/${key}?value=${encodeURIComponent(val)}`,
                            `모드 변경 ${key} → ${val}`);
       if (d) log(`  └ ${key}: ${d.before} → ${d.after}`, 'ok');
-      await loadStatus(true);   // 엔드포인트 라벨까지 서버 기준으로 다시 받는다
+      await loadStatus(true);
     };
   });
 }
-
 function trackCard(kind, tr) {
   if (!tr) return '';
   const steps = (tr.steps||[]).map((s,i) => stepRow(s, i+1)).join('');
@@ -337,28 +550,17 @@ function trackCard(kind, tr) {
       </div>
     </div>`;
 }
-
 function stepRow(s, no) {
   const mock = MOCKISH.includes(s.mode);
-  // switchKey 가 null 이면 드롭다운이 아니라 고정 단계다(예: ESB 수신)
   const ctrl = s.switchKey
     ? `<div class="step-sel">
          <select class="form-select form-select-sm" data-switch="${s.switchKey}">
-           ${(SWITCH_OPTS[s.switchKey]||[s.mode]).map(o =>
-              `<option ${o===s.mode?'selected':''}>${o}</option>`).join('')}
+           ${(SWITCH_OPTS[s.switchKey]||[s.mode]).map(o => `<option ${o===s.mode?'selected':''}>${o}</option>`).join('')}
          </select>
        </div>`
     : `<div class="step-fixed">${esc(s.mode||'')}</div>`;
-
-  // 툴팁에 근거·주의사항을 넣는다. 화면이 좁아 한 줄로는 다 못 보여준다.
   const tip = esc([s.note, s.endpoint ? '호출: ' + s.endpoint : ''].filter(Boolean).join(String.fromCharCode(10)));
-
-  // 주소를 바꿀 수 있는 단계(브로커)면 프리셋을 라디오로 붙인다 — 고르는 즉시 반영된다.
-  // 모드만 REST 로 올리고 주소를 못 바꾸면 배치가 전건 실패한다.
-  //   · 현재 주소(s.url)와 같은 항목이 선택 상태
-  //   · 기동 설정값(s.urlConfigured)과 같은 항목에 (Default) — 재기동·모드 초기화 시 돌아가는 값
   const urlUi = s.urlKey ? stepUrlRadios(s) : '';
-
   return `<div class="step ${mock?'is-mock':'is-real'}" title="${tip}">
       <div class="step-no">${no}</div>
       <div class="step-main">
@@ -369,7 +571,6 @@ function stepRow(s, no) {
       ${ctrl}
     </div>`;
 }
-
 function stepUrlRadios(s) {
   const presets = s.urlPresets || [];
   const matched = presets.some(p => p.url === s.url);
@@ -384,13 +585,11 @@ function stepUrlRadios(s) {
         </label>
       </div>`;
   }).join('');
-  // 프리셋 밖의 값(API 로 직접 바꾼 경우)이나 빈 값은 라디오가 하나도 안 켜진다 — 그 이유를 적어 준다.
   const note = matched ? ''
-    : s.url ? `<div class="hint">현재 주소 <code>${esc(s.url)}</code> 는 프리셋에 없는 값입니다</div>`
+    : s.url ? `<div class="hint">현재 주소 <code>${esc(s.url)}</code> 는 프리셋에 없는 값입니다 (재처리 시나리오의 장애 주소일 수 있습니다)</div>`
             : `<div class="hint text-danger">주소가 비어 있습니다 — 프리셋을 고르십시오</div>`;
   return `<div class="step-url">${radios}${note}</div>`;
 }
-
 function flagCard(label, on, detail) {
   return `<div class="col-12 col-md-6">
       <div class="card sw-card ${on?'is-real':'is-mock'} h-100">
@@ -403,22 +602,22 @@ function flagCard(label, on, detail) {
     </div>`;
 }
 
+let STATUS = null;
 async function loadStatus(quiet) {
   const s = await call('GET', '/api/v1/voice/status', '현재 구성 조회', quiet);
   if (!s) return;
-
+  STATUS = s;
   renderTracks(s.tracks);
-
   $('logc').innerHTML =
-      flagCard('로그 컬렉터 (T1·T2·T4)', s.logCollector.enabled, s.logCollector.baseUrl || '주소 미설정');
-
-  $('dirs').innerHTML =
-      `수신 접견 <code>${esc(s.dirs.meetDir)}</code> · 수신 전화 <code>${esc(s.dirs.phoneDir)}</code> · `
-    + `작업 <code>${esc(s.dirs.workDir)}</code> · 파일명 <code>${esc(s.dirs.namingPolicy)}</code><br>`
-    + `스케줄 ${s.batch.scheduleEnabled?'켜짐':'꺼짐'} · 대상코드 <code>${(s.batch.speclMngSeCd||[]).join(',')}</code>`
+      flagCard('로그 컬렉터 (T1 · T2 COLLECT/ANALYZE · T4)', s.logCollector.enabled, s.logCollector.baseUrl || '주소 미설정');
+  $('batch-line').innerHTML =
+      `파일명 정책 <code>${esc(s.dirs.namingPolicy)}</code> · 스케줄 ${s.batch.scheduleEnabled?'켜짐':'꺼짐'} · 대상코드 <code>${(s.batch.speclMngSeCd||[]).join(',')}</code>`
     + ` · 1회 상한 ${s.batch.maxFilesPerRun}건`;
-
-  // 대용량 설정 동기화
+  renderDirs(s.dirs);
+  // 재처리 복구 주소는 기동 설정값을 기본으로 — 환경마다 브로커가 사는 곳이 다르다
+  if (s.endpoints?.brokerBaseUrlConfigured && !$('rt-ok-url').dataset.touched) {
+    $('rt-ok-url').value = s.endpoints.brokerBaseUrlConfigured;
+  }
   if (s.dataset) {
     $('ds-meet').value = s.dataset.meetCount;
     $('ds-phone').value = s.dataset.phoneCount;
@@ -426,7 +625,6 @@ async function loadStatus(quiet) {
       ? `현재 <b>${s.dataset.total.toLocaleString()}건</b> · 대량 모드(Mock WAV ${s.dataset.wavSeconds}초로 축소)`
       : `현재 <b>${s.dataset.total.toLocaleString()}건</b> · 건당 안정성 검사가 곱해집니다 (1,000건 ≈ 2분)`;
   }
-  // 장애 주입 동기화
   if (s.chaos) {
     $('chaos-on').checked   = s.chaos.enabled;
     $('chaos-fail').value   = s.chaos.failPercent;
@@ -437,7 +635,6 @@ async function loadStatus(quiet) {
       log(`⚠ 장애 주입이 켜져 있습니다 — 실패 ${s.chaos.failPercent}% · 지연 ${s.chaos.delayPercent}%(${s.chaos.delayMs}ms)`, 'wr');
     }
   }
-  // "이 조합으로는 배치가 반드시 실패한다" 를 돌리기 전에 보여준다.
   const ws = s.warnings || [];
   $('warnings').innerHTML = ws.length
     ? `<div class="alert alert-danger py-2 px-3 mb-0" style="font-size:.8rem">
@@ -447,24 +644,90 @@ async function loadStatus(quiet) {
   if (!quiet) ws.forEach(w => log(`⚠ ${w}`, 'er'));
 }
 
-// ── ③ 결과 ──────────────────────────────────────────────────────────────
+// ── ② 디렉터리 ──────────────────────────────────────────────────────────
+let DIRS = null;
+function renderDirs(d) {
+  DIRS = d;
+  const cfg = d.configured || {};
+  $('dir-presets').innerHTML = (d.presets||[]).map(p =>
+      `<button class="btn btn-outline-dark" data-preset="${esc(p.key)}" title="${esc(Object.values(p.dirs||{}).join(String.fromCharCode(10)))}">${esc(p.label)}</button>`).join('');
+  document.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => applyDirPreset(b.dataset.preset));
+  if (!$('dir-base').value) $('dir-base').value = d.baseDir || d.suggestedBaseDir || '';
+  $('dir-rows').innerHTML = DIR_KEYS.map(([k, label]) => {
+    const changed = cfg[k] !== undefined && cfg[k] !== d[k];
+    return `<div class="col-12 col-lg-6 dir-row ${changed?'dir-changed':''}">
+        <label for="dir-${k}">${esc(label)}${changed ? ' <span class="text-warning">· 설정값과 다름</span>' : ''}</label>
+        <input type="text" class="form-control form-control-sm" id="dir-${k}" data-dir="${k}" value="${esc(d[k]||'')}">
+        <div class="abs">설정값 ${esc(cfg[k]||'—')}</div>
+      </div>`;
+  }).join('');
+}
+async function applyDirPreset(key, baseDir) {
+  const q = `key=${encodeURIComponent(key)}` + (baseDir ? `&baseDir=${encodeURIComponent(baseDir)}` : '');
+  const d = await call('PUT', `/api/v1/mock/dirs/preset?${q}`, `디렉터리 프리셋 적용 (${key}${baseDir ? ' · ' + baseDir : ''})`);
+  if (!d) return;
+  log(`  └ 출력(접견) ${d.current.outputMeet} · 출력(전화) ${d.current.outputPhone} · 수신(접견) ${d.current.receiveMeet}`, 'ok');
+  if (d.current.receiveMeet !== (d.configured||{}).receiveMeet) {
+    log(`  └ ⚠ 수신(접견) 폴더가 설정값과 다릅니다 — 로컬 브로커에 BROKER_OUTPUT_DIR=${d.current.receiveMeet} 를 주지 않으면 접견 배치가 파일을 못 찾습니다`, 'wr');
+  }
+  $('dir-base').value = d.current.baseDir || $('dir-base').value;
+  await loadStatus(true);
+}
+$('btn-dir-base').onclick = () => {
+  const b = $('dir-base').value.trim();
+  if (!b) { log('base-dir 를 입력하십시오 (예: C:/k8s, /k8s)', 'er'); return; }
+  applyDirPreset('base', b);
+};
+$('btn-dir-apply').onclick = async () => {
+  const body = {};
+  document.querySelectorAll('[data-dir]').forEach(i => body[i.dataset.dir] = i.value.trim());
+  const d = await call('PUT', '/api/v1/mock/dirs', '디렉터리 경로 적용', false, body);
+  if (!d) return;
+  log(`  └ ${Object.entries(d.current).map(([k,v]) => `${k}=${v}`).join(' · ')}`, 'ok');
+  await loadStatus(true);
+};
+$('btn-dir-reset').onclick = async () => {
+  const d = await call('POST', '/api/v1/mock/dirs/reset', '디렉터리 경로 초기화 (설정값)');
+  if (!d) return;
+  $('dir-base').value = d.current.baseDir || '';
+  await loadStatus(true);
+};
+
+// ── ④ 결과 ──────────────────────────────────────────────────────────────
+let LAST = null;   // 최근 배치 { info, result }
 function stat(n, k, cls) {
   return `<div class="col"><div class="stat"><div class="n ${cls||''}">${n}</div><div class="k">${k}</div></div></div>`;
 }
-function renderResult(r, kind) {
-  $('last-exec').textContent = `${r.execId} · ${r.window} · ${(r.elapsedMs/1000).toFixed(1)}초`
-                             + (kind ? ` · ${kind} 전용` : '');
+function stepBadges(steps) {
+  if (!steps || !steps.length) return '<span class="hint">T2 단계 기록 없음</span>';
+  return steps.map(s => {
+    const cls = s.stepStsCd === 'SUCCESS' ? 'text-bg-success' : s.stepStsCd === 'PARTIAL' ? 'text-bg-warning' : 'text-bg-danger';
+    return `<span class="badge ${cls} badge-step me-1" title="stepLogId=${esc(s.stepLogId||'(미적재)')} · ${s.elapsedSec}초">
+        T2 ${esc(s.stepTypeCd)} ${esc(s.stepStsCd)} · in ${s.inCnt} / out ${s.outCnt} / err ${s.errCnt}${s.logged ? '' : ' · 미적재'}</span>`;
+  }).join('');
+}
+function renderResult(info, r, kind) {
+  LAST = { info, result: r, kind };
+  $('last-exec').textContent = `${r.execId} · ${r.window} · ${(r.elapsedMs/1000).toFixed(1)}초` + (kind ? ` · ${kind} 전용` : '');
   $('stats').innerHTML =
       stat(r.targetCnt.toLocaleString(),  '대상')
     + stat(r.successCnt.toLocaleString(), '성공',   r.successCnt>0?'text-success':'')
     + stat(r.failCnt.toLocaleString(),    '실패',   r.failCnt>0?'text-danger':'')
     + stat(r.skippedCnt.toLocaleString(), '건너뜀', r.skippedCnt>0?'text-warning':'')
-    + stat(r.execStsCd ?? '-', '상태');
+    + stat(r.execStsCd ?? '-', '상태', r.execStsCd==='SUCCESS'?'text-success':r.execStsCd==='FAIL'?'text-danger':'text-warning');
 
-  log(`  └ 대상 ${r.targetCnt} · 성공 ${r.successCnt} · 실패 ${r.failCnt} · 건너뜀 ${r.skippedCnt}  (execId=${r.execId})`,
+  $('api-box').innerHTML = apiLine(info)
+    + `<div class="hint mt-1">EXEC_ID <code>${esc(r.execId)}</code> ${r.execIdFromCollector
+         ? '— 로그 컬렉터가 채번 (T1 적재됨)' : '— <span class="text-danger">로컬 임시 ID (컬렉터 미연동 · T1/T2/T4 적재 안 됨)</span>'}
+       ${r.errMsg ? ` · 대표 오류 <span class="text-danger">${esc(r.errMsg)}</span>` : ''}</div>`;
+  $('steps-box').innerHTML = stepBadges(r.steps);
+  $('outdirs-box').innerHTML = Object.entries(r.outputDirs||{}).map(([k,v]) =>
+      `<div class="hint">STT 출력(${k==='MEET'?'접견':'전화'}) <code>${esc(v)}</code></div>`).join('');
+  $('resp-box').innerHTML = `<details open><summary>Response JSON</summary>${jsonBox(r, { hl:['execId','execStsCd','successCnt','failCnt','errMsg','outputDirs','steps','sttPath'] })}</details>`;
+
+  log(`  └ 대상 ${r.targetCnt} · 성공 ${r.successCnt} · 실패 ${r.failCnt} · 건너뜀 ${r.skippedCnt}  (execId=${r.execId}, ${r.execStsCd})`,
       r.failCnt>0 ? 'wr' : 'ok');
-
-  // 트랙별로 나눠 보여준다 — 전체 실행 시 어느 시나리오가 막혔는지 한 줄로 드러나게.
+  (r.steps||[]).forEach(s => log(`  └ T2 ${s.stepTypeCd} ${s.stepStsCd} — in ${s.inCnt} / out ${s.outCnt} / err ${s.errCnt}${s.stepLogId ? ' · ' + s.stepLogId : ' · 미적재'}`, s.errCnt>0?'wr':'ok'));
   const byKind = { MEET:{s:0,f:0,k:0}, PHONE:{s:0,f:0,k:0} };
   (r.outcomes||[]).forEach(o => {
     const b = byKind[o.target?.kind]; if (!b) return;
@@ -475,33 +738,56 @@ function renderResult(r, kind) {
     if (b.s + b.f + b.k === 0) return;
     log(`  └ [${ko}] 성공 ${b.s} · 실패 ${b.f} · 건너뜀 ${b.k}`, b.f>0 ? 'er' : 'ok');
   });
-
-  renderPii(r.residue);
-
   const failed = (r.outcomes||[]).filter(o => o.status === 'FAIL');
   if (failed.length) {
     log(`  └ 실패 ${failed.length}건 (배치는 중단되지 않고 완주):`, 'er');
-    failed.slice(0,5).forEach(o =>
-      log(`      · ${o.target?.kind}/${o.target?.idempotencyKey} — ${o.errMsg}`, 'er'));
+    failed.slice(0,5).forEach(o => log(`      · ${o.target?.kind}/${o.target?.idempotencyKey} [${o.failedStep}] — ${o.errMsg}`, 'er'));
     if (failed.length > 5) log(`      · … 외 ${failed.length-5}건`, 'er');
   }
+  renderFilesTable(r, null);
+  loadOutputs(r);   // STT 텍스트는 mock API 로 따로 읽는다(배치 응답에는 싣지 않는다)
 }
-
-function renderPii(residue) {
-  if (!residue) {
-    $('pii-line').innerHTML = '<span class="text-secondary">PII 원본 삭제 검증:</span> <span class="text-secondary">—</span>';
-    return;
-  }
-  const cls = residue.clean ? 'pii-clean' : 'pii-dirty';
-  $('pii-line').innerHTML =
-      `<span class="text-secondary">PII 원본 삭제 검증:</span> <span class="${cls}">${esc(residue.message)}</span>`
-    + `<span class="hint ms-2">(접견 ${residue.meetFiles} · 전화 ${residue.phoneFiles} · 작업 ${residue.workFiles})</span>`;
-  // 로그에도 명시적으로 남긴다 — 정책이 지켜졌음을 눈으로 확인할 수 있어야 한다
-  logRaw(`<span class="pii">🔒 ${esc(residue.message)}</span>`);
+async function loadOutputs(r) {
+  if (!r || !r.execId) return;
+  const kinds = Object.keys(r.outputDirs||{});
+  const d = await call('GET', `/api/v1/mock/stt-outputs?execId=${encodeURIComponent(r.execId)}${kinds.length ? '&kinds=' + kinds.join(',') : ''}`,
+                       `STT 출력 확인 (${r.execId})`, true);
+  if (!d) return;
+  const byKey = {};
+  Object.values(d.outputs||{}).forEach(o => (o.files||[]).forEach(f => byKey[f.kind + '|' + f.key] = f));
+  renderFilesTable(r, byKey);
+  log(`  └ STT 출력 ${d.total}개 — ${Object.entries(d.outputs||{}).map(([k,o]) => `${k==='MEET'?'접견':'전화'} ${o.count}개 (${o.dir})`).join(' · ')}`, d.total>0?'ok':'wr');
+}
+function renderFilesTable(r, byKey) {
+  const rows = (r.outcomes||[]);
+  if (!rows.length) { $('files-box').innerHTML = '<div class="hint">처리한 파일이 없습니다.</div>'; return; }
+  const tr = rows.map(o => {
+    const st = o.status === 'SUCCESS' ? '<span class="badge text-bg-success">SUCCESS</span>'
+             : o.status === 'SKIPPED' ? '<span class="badge text-bg-secondary">SKIPPED</span>'
+             : `<span class="badge text-bg-danger">FAIL</span> <span class="badge text-bg-light text-danger border">${esc(o.failedStep||'')}</span>`;
+    const f = byKey ? byKey[(o.target?.kind||'') + '|' + (o.target?.idempotencyKey||'')] : null;
+    const text = f ? `<div class="stt-text" title="클릭하면 펼칩니다">${esc(f.text||'')}</div>`
+               : o.status === 'SUCCESS' ? '<span class="hint">읽는 중…</span>' : `<span class="hint text-danger">${esc(o.errMsg||'')}</span>`;
+    return `<tr>
+        <td>${o.target?.kind==='MEET'?'접견':'전화'}</td>
+        <td class="small">${esc(o.target?.srcFileName||'')}<div class="hint">${esc(o.target?.idempotencyKey||'')}</div></td>
+        <td>${st}</td>
+        <td class="text-end small">${(o.fileSize||0).toLocaleString()}</td>
+        <td class="text-end small">${(o.sttChars||0).toLocaleString()}</td>
+        <td class="small font-monospace" style="max-width:18rem;word-break:break-all">${esc(o.sttPath||'—')}</td>
+        <td style="min-width:18rem">${text}</td>
+      </tr>`;
+  }).join('');
+  $('files-box').innerHTML = `<details open><summary>처리 파일 · STT 텍스트 (${rows.length}건)</summary>
+      <div class="table-responsive mt-1" style="max-height:420px">
+        <table class="table table-sm table-hover tgt-table mb-0">
+          <thead class="table-light sticky-top"><tr>
+            <th>종류</th><th>원본 파일명 / 키</th><th>상태</th><th class="text-end">크기</th><th class="text-end">글자수</th><th>저장 경로</th><th>STT 텍스트</th>
+          </tr></thead><tbody>${tr}</tbody></table>
+      </div></details>`;
 }
 
 // 배치 버튼 4개 — 실행 중에는 전부 disabled, 누른 버튼에는 스피너를 돌린다.
-// 실행이 수 분 걸릴 수 있어 "눌렸는지" 가 화면에 보여야 두 번 누르지 않는다.
 const BATCH_BTNS = ['btn-meet', 'btn-phone', 'btn-periodic', 'btn-daily'];
 function setBatchRunning(activeId, on) {
   BATCH_BTNS.forEach(id => {
@@ -518,49 +804,40 @@ function setBatchRunning(activeId, on) {
     }
   });
 }
-
 async function runBatch(path, label, kind, btnId) {
   setBatchRunning(btnId, true);
   try {
-    await runBatchInner(path, label, kind);
+    return await runBatchInner(path, label, kind);
   } finally {
-    setBatchRunning(btnId, false);   // 실패·예외 경로에서도 버튼을 원복한다
+    setBatchRunning(btnId, false);
   }
 }
-
-async function runBatchInner(path, label, kind) {
+async function runBatchInner(path, label, kind, extraQuery) {
   const total = kind === 'MEET'  ? Number($('ds-meet').value||0)
               : kind === 'PHONE' ? Number($('ds-phone').value||0)
               : Number($('ds-meet').value||0) + Number($('ds-phone').value||0);
-  if (total > 200) {
-    log(`⏳ 대상 ${total.toLocaleString()}건 — 완료까지 수 분 걸립니다. 창을 닫지 마세요.`, 'wr');
-  }
+  if (total > 200) log(`⏳ 대상 ${total.toLocaleString()}건 — 완료까지 수 분 걸립니다. 창을 닫지 마세요.`, 'wr');
 
-  // 어떤 트랙을 어떤 모드로 돌리는지 실행 직전에 남긴다.
-  // 서버 콘솔의 [Track:MEET]/[Track:PHONE] 로그와 짝이 맞는다.
-  const s = await call('GET', '/api/v1/voice/status', '', true);
+  const s = STATUS || await call('GET', '/api/v1/voice/status', '', true);
   if (s && s.tracks) {
     const ks = kind ? [kind.toLowerCase()] : ['meet','phone'];
     ks.forEach(k => {
-      const tr = s.tracks[k];
-      if (!tr) return;
+      const tr = s.tracks[k]; if (!tr) return;
       logRaw(`<span class="hd">▷ ${esc(tr.label)} 트랙</span> ` +
              (tr.steps||[]).map(st => `${esc(st.label)}=<b>${esc(st.mode)}</b>`).join(' → '));
     });
   }
-
-  // 시뮬레이터에서 돌리는 배치는 전부 시험이다 → EXEC_ID 가 ...TST... 로 채번되어
-  // 나중에 [테스트 데이터 초기화] 로 통째로 지울 수 있다. 스케줄러 배치는 VOC 그대로다.
-  const url = `${path}?test=true` + (kind ? `&kinds=${kind}` : '');
-  const r = await call('POST', url, label);
-  if (r) renderResult(r, kind);
+  // 시뮬레이터에서 돌리는 배치는 전부 시험이다 → EXEC_ID 가 ...TST... 로 채번된다.
+  const url = `${path}?test=true` + (kind ? `&kinds=${kind}` : '') + (extraQuery ? '&' + extraQuery : '');
+  const info = await callFull('POST', url, label);
+  if (info.ok && info.body) renderResult(info, info.body, kind);
   await loadStatus(true);
+  return info;
 }
 
 // ── 대상 미리보기 ───────────────────────────────────────────────────────
 function badge(b, yes, no) {
-  return b ? `<span class="badge text-bg-secondary">${yes}</span>`
-           : `<span class="badge text-bg-light text-secondary">${no}</span>`;
+  return b ? `<span class="badge text-bg-secondary">${yes}</span>` : `<span class="badge text-bg-light text-secondary">${no}</span>`;
 }
 async function showTargets() {
   const d = await call('GET', '/api/v1/mock/targets', '처리 대상 미리보기');
@@ -574,15 +851,156 @@ async function showTargets() {
         <td class="small">${esc(t.fileName ?? '')}</td>
         <td class="text-center">${badge(t.encrypted,'암호화','평문')}</td>
         <td class="text-center">${badge(t.hasSourceStt,'있음','없음')}</td>
-        <td class="text-center">${t.processed
-            ? '<span class="badge text-bg-warning">처리됨</span>'
-            : '<span class="badge text-bg-success">대기</span>'}</td>
+        <td class="text-center">${t.processed ? '<span class="badge text-bg-warning">처리됨</span>' : '<span class="badge text-bg-success">대기</span>'}</td>
       </tr>`).join('');
-  if ((d.targets||[]).length > 200) {
-    log(`  └ 표에는 200건만 표시합니다 (전체 ${d.total}건)`, 'wr');
-  }
+  if ((d.targets||[]).length > 200) log(`  └ 표에는 200건만 표시합니다 (전체 ${d.total}건)`, 'wr');
   $('targets-card').classList.remove('d-none');
 }
+
+// ── ⑤ 재처리 시나리오 ──────────────────────────────────────────────────
+const RT = { steps: [null, null, null, null], running:false };
+const RT_DEF = [
+  { no:'①', title:'브로커 장애 주입', expectFail:false, desc:'접견 브로커 주소를 닿지 않는 곳으로 바꾼다 (모드 REST 유지)' },
+  { no:'②', title:'1차 배치 실행 (실패 이력)', expectFail:true, desc:'접견 배치가 전건 실패 → T1 FAIL · T2 COLLECT FAIL · T4 FAIL 행이 남는다' },
+  { no:'③', title:'브로커 복구', expectFail:false, desc:'주소를 정상 브로커로 되돌린다' },
+  { no:'④', title:'재처리 배치 실행', expectFail:false, desc:'실패했던 건은 멱등 표식이 없어 다시 처리된다 → 새 EXEC_ID 로 SUCCESS' },
+];
+function renderTimeline() {
+  $('rt-timeline').innerHTML = RT_DEF.map((d, i) => {
+    const s = RT.steps[i];
+    const state = !s ? 'pending' : s.running ? 'running' : (s.ok ? 'done-ok' : 'done-fail');
+    const badgeHtml = !s ? '<span class="badge text-bg-light text-secondary">대기</span>'
+      : s.running ? '<span class="badge text-bg-primary pulse">실행 중</span>'
+      : s.ok ? '<span class="badge text-bg-success">완료</span>'
+      : d.expectFail ? '<span class="badge text-bg-warning">의도된 실패</span>' : '<span class="badge text-bg-danger">실패</span>';
+    const body = !s || s.running ? `<div class="tl-sum">${esc(d.desc)}</div>`
+      : `${apiLine(s.info)}<div class="tl-sum">${s.summary||''}</div>
+         <details><summary>Response JSON</summary>${jsonBox(s.info.body ?? { error: s.info.error }, { compact:true, hl:['execId','execStsCd','successCnt','failCnt','errMsg','after','before'] })}</details>`;
+    return `<div class="tl-card ${state} ${d.expectFail?'expect-fail':''}">
+        <div class="tl-head"><span class="tl-no">${d.no} ${esc(d.title)}</span>${badgeHtml}</div>
+        ${body}
+      </div>`;
+  }).join('');
+  renderCompare();
+}
+function kvTable(r) {
+  const rows = [
+    ['execId', r.execId], ['execStsCd', r.execStsCd], ['targetCnt', r.targetCnt], ['successCnt', r.successCnt],
+    ['failCnt', r.failCnt], ['skippedCnt', r.skippedCnt], ['errMsg', r.errMsg ?? 'null'],
+    ['steps', (r.steps||[]).map(s => `${s.stepTypeCd}:${s.stepStsCd}(${s.inCnt}/${s.outCnt}/${s.errCnt})`).join(', ') || '—'],
+    ['outputDirs.MEET', r.outputDirs?.MEET ?? '—'],
+    ['outcomes[0]', r.outcomes?.[0] ? `${r.outcomes[0].status}${r.outcomes[0].failedStep ? ' @' + r.outcomes[0].failedStep : ''} — ${r.outcomes[0].errMsg || r.outcomes[0].sttPath || ''}` : '—'],
+  ];
+  return `<table class="kv w-100">${rows.map(([k,v]) => `<tr><td>${k}</td><td>${esc(v)}</td></tr>`).join('')}</table>`;
+}
+function renderCompare() {
+  const a = RT.steps[1], b = RT.steps[3];
+  if (!a?.info?.body?.execId && !b?.info?.body?.execId) { $('rt-compare').innerHTML = ''; return; }
+  const side = (s, cls, title) => `<div class="${cls}"><div class="head">${title}</div>
+      <div class="border border-top-0 rounded-bottom p-2 bg-white">${s?.info?.body?.execId
+        ? kvTable(s.info.body) + `<details class="mt-2"><summary>전체 JSON</summary>${jsonBox(s.info.body, { compact:true, hl:['execStsCd','successCnt','failCnt','errMsg','failedStep','sttPath'] })}</details>`
+        : '<div class="hint">아직 실행 전</div>'}</div></div>`;
+  $('rt-compare').innerHTML = `<div class="hint mb-1">② 실패 응답 vs ④ 성공 응답 — 같은 대상이 다른 EXEC_ID 로 다시 처리된 것을 대조합니다</div>
+    <div class="cmp">${side(a, 'fail', '② 1차 배치 — 실패 JSON')}${side(b, 'ok', '④ 재처리 배치 — 성공 JSON')}</div>`;
+}
+function rtMark(i, patch) { RT.steps[i] = Object.assign(RT.steps[i] || {}, patch); renderTimeline(); }
+function rtLock(on) {
+  RT.running = on;
+  ['rt-1','rt-2','rt-3','rt-4','rt-auto'].forEach(id => $(id).disabled = on);
+  $('rt-auto').innerHTML = on ? '<span class="spinner-border spinner-border-sm me-1"></span>자동 실행 중…' : '🚀 원클릭 자동 실행 (①→④)';
+}
+async function rtStep1() {
+  rtMark(0, { running:true });
+  // 브로커가 MOCK 이면 주소가 쓰이지 않아 장애가 재현되지 않는다 — REST 로 올린다.
+  if (STATUS?.modes?.broker !== 'REST') {
+    const m = await call('PUT', '/api/v1/mock/modes/broker?value=REST', '브로커 모드 → REST (장애 재현을 위해)');
+    if (m) log(`  └ broker: ${m.before} → ${m.after}`, 'ok');
+  }
+  const url = $('rt-fault-url').value.trim();
+  const info = await callFull('PUT', `/api/v1/mock/endpoints/broker?value=${encodeURIComponent(url)}`, `① 브로커 장애 주입 → ${url}`);
+  rtMark(0, { running:false, ok:info.ok, info,
+    summary: info.ok ? `브로커 주소 <code>${esc(info.body?.before||'(없음)')}</code> → <code>${esc(info.body?.after)}</code>` : '주소 변경 실패' });
+  await loadStatus(true);
+  return info.ok;
+}
+async function rtStep2() {
+  rtMark(1, { running:true });
+  const info = await runBatchInner('/api/v1/voice/batches/periodic', '② 1차 배치 실행 — 접견 (브로커 장애 상태)', 'MEET');
+  const r = info.body;
+  const failedAll = info.ok && r && r.failCnt > 0 && r.successCnt === 0;
+  rtMark(1, { running:false, ok:failedAll, info,
+    summary: !info.ok ? '배치 호출 자체가 실패' : r.failCnt > 0
+      ? `<b class="text-danger">${esc(r.execStsCd)}</b> · 대상 ${r.targetCnt} · 실패 ${r.failCnt}${r.successCnt ? ' · 성공 ' + r.successCnt : ''} · EXEC_ID <code>${esc(r.execId)}</code><br>${esc(r.errMsg||'')}`
+      : `<span class="text-warning">실패가 나지 않았습니다 (대상 ${r.targetCnt} · 건너뜀 ${r.skippedCnt}) — [Mock 데이터 초기화] 로 멱등 표식을 지우고 다시 시도하십시오</span>` });
+  if (info.ok && r && r.failCnt === 0) log('⚠ ② 단계에서 실패가 나지 않았습니다 — 대상이 이미 처리됐거나(건너뜀) 브로커가 MOCK 입니다', 'wr');
+  return failedAll;
+}
+async function rtStep3() {
+  rtMark(2, { running:true });
+  const url = $('rt-ok-url').value.trim();
+  const info = await callFull('PUT', `/api/v1/mock/endpoints/broker?value=${encodeURIComponent(url)}`, `③ 브로커 복구 → ${url}`);
+  let probeNote = '';
+  if (info.ok) {
+    const p = await call('GET', '/api/v1/voice/broker/probe', '브로커 연결 확인', true);
+    if (p) {
+      probeNote = p.reachable ? `<br><span class="probe-${p.pathMatched?'ok':'bad'}">${esc(p.verdict||'')}</span>`
+                              : `<br><span class="probe-bad">브로커에 붙지 못했습니다 — ${esc(p.error||'')}</span>`;
+      log(`  └ ${p.verdict || p.error}`, p.reachable && p.pathMatched ? 'ok' : 'er');
+    }
+  }
+  rtMark(2, { running:false, ok:info.ok, info,
+    summary: (info.ok ? `브로커 주소 <code>${esc(info.body?.before)}</code> → <code>${esc(info.body?.after)}</code>` : '주소 변경 실패') + probeNote });
+  await loadStatus(true);
+  return info.ok;
+}
+async function rtStep4() {
+  rtMark(3, { running:true });
+  let info;
+  if ($('rt-reproc').value === 'manual') {
+    const now = new Date();
+    const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,19);
+    const from = new Date(now.getTime() - 2*24*3600*1000), to = new Date(now.getTime() + 24*3600*1000);
+    info = await runBatchInner('/api/v1/voice/batches/manual', '④ 재처리 배치 실행 — 접견 (구간 지정)', 'MEET',
+                               `from=${encodeURIComponent(iso(from))}&to=${encodeURIComponent(iso(to))}`);
+  } else {
+    info = await runBatchInner('/api/v1/voice/batches/periodic', '④ 재처리 배치 실행 — 접견 (10분 주기)', 'MEET');
+  }
+  const r = info.body;
+  const ok = info.ok && r && r.failCnt === 0 && r.successCnt > 0;
+  rtMark(3, { running:false, ok, info,
+    summary: !info.ok ? '배치 호출 실패' : `<b class="${ok?'text-success':'text-danger'}">${esc(r.execStsCd)}</b> · 대상 ${r.targetCnt} · 성공 ${r.successCnt} · 실패 ${r.failCnt} · 건너뜀 ${r.skippedCnt} · EXEC_ID <code>${esc(r.execId)}</code>`
+      + (r.steps?.length ? `<br>${(r.steps||[]).map(s => `T2 ${s.stepTypeCd} ${s.stepStsCd}`).join(' · ')}` : '') });
+  return ok;
+}
+$('rt-1').onclick = () => { if (!RT.running) rtStep1(); };
+$('rt-2').onclick = () => { if (!RT.running) rtStep2(); };
+$('rt-3').onclick = () => { if (!RT.running) rtStep3(); };
+$('rt-4').onclick = () => { if (!RT.running) rtStep4(); };
+$('rt-ok-url').oninput = () => $('rt-ok-url').dataset.touched = '1';
+$('rt-clear').onclick = () => { RT.steps = [null,null,null,null]; renderTimeline(); };
+$('rt-auto').onclick = async () => {
+  if (RT.running) return;
+  const gap = Math.max(500, Number($('rt-gap').value || 2.5) * 1000);
+  RT.steps = [null,null,null,null]; renderTimeline();
+  rtLock(true);
+  log(`🚀 재처리 시나리오 자동 실행 — 단계 간 ${gap/1000}초`, 'hd');
+  try {
+    if ($('rt-fresh').checked) {
+      const d = await call('POST', '/api/v1/mock/reset', 'Mock 데이터 초기화 (재처리 시나리오 준비)');
+      if (d) log(`  └ ${d.message}`, 'ok');
+      await sleep(Math.min(gap, 1000));
+    }
+    const s1 = await rtStep1();               await sleep(gap);
+    const s2 = await rtStep2();               await sleep(gap);
+    const s3 = await rtStep3();               await sleep(gap);
+    const s4 = await rtStep4();
+    const all = s1 && s2 && s3 && s4;
+    log(all ? '✔ 재처리 시나리오 완료 — ② 실패 이력 → ④ 재처리 성공' : '⚠ 재처리 시나리오가 기대대로 끝나지 않았습니다 — 타임라인 카드의 응답을 확인하십시오', all ? 'ok' : 'wr');
+  } finally {
+    rtLock(false);
+  }
+};
+renderTimeline();
 
 // ── 바인딩 ──────────────────────────────────────────────────────────────
 $('btn-meet').onclick     = () => runBatch('/api/v1/voice/batches/periodic', '접견 트랙만 실행 (10분 창)',  'MEET',  'btn-meet');
@@ -590,8 +1008,6 @@ $('btn-phone').onclick    = () => runBatch('/api/v1/voice/batches/periodic', '�
 $('btn-periodic').onclick = () => runBatch('/api/v1/voice/batches/periodic', '전체 실행 (10분 창)',          null,    'btn-periodic');
 $('btn-daily').onclick    = () => runBatch('/api/v1/voice/batches/daily',    '전체 실행 (전날 하루치)',      null,    'btn-daily');
 
-// 브로커 출력 경로와 우리 수신 폴더가 어긋나면 "추출 완료"인데 파일이 안 보인다.
-// 배치를 돌리기 전에 눈으로 대조할 수 있게 한다.
 $('btn-probe').onclick = async () => {
   const d = await call('GET', '/api/v1/voice/broker/probe', '브로커 연결 확인');
   if (!d) return;
@@ -611,9 +1027,6 @@ $('btn-reset').onclick = async () => {
   const c = d.cleared || {};
   log(`  └ 표식 ${c.idempotencyMarkers} · 접견파일 ${c.meetFiles} · 전화파일 ${c.phoneFiles} · 작업파일 ${c.workFiles} 삭제`, 'ok');
   log(`  └ ${d.message}`, 'ok');
-  $('stats').innerHTML = '';
-  $('last-exec').textContent = '—';
-  renderPii(null);
   $('targets-card').classList.add('d-none');
 };
 
@@ -624,29 +1037,24 @@ $('btn-dataset').onclick = async () => {
   log(`  └ ${d.message}${d.bulk ? ` · 대량 모드(WAV ${d.wavSeconds}초)` : ''}`, 'ok');
   await loadStatus(true);
 };
-
 document.querySelectorAll('.preset').forEach(b => {
   b.onclick = () => { $('ds-meet').value = b.dataset.m; $('ds-phone').value = b.dataset.p; $('btn-dataset').click(); };
 });
 
 $('btn-chaos').onclick = async () => {
   const on = $('chaos-on').checked;
-  const q = `enabled=${on}&failPercent=${$('chaos-fail').value}`
-          + `&delayPercent=${$('chaos-delay').value}&delayMs=${$('chaos-ms').value}`;
+  const q = `enabled=${on}&failPercent=${$('chaos-fail').value}&delayPercent=${$('chaos-delay').value}&delayMs=${$('chaos-ms').value}`;
   const d = await call('PUT', `/api/v1/mock/chaos?${q}`, `장애 주입 ${on?'활성':'해제'}`);
   if (!d) return;
-  log(`  └ 실패 ${d.failPercent}% · 지연 ${d.delayPercent}%(${d.delayMs}ms) · 누적 주입 실패 ${d.injectedFailures} / 지연 ${d.injectedDelays}`,
-      d.enabled ? 'wr' : 'ok');
+  log(`  └ 실패 ${d.failPercent}% · 지연 ${d.delayPercent}%(${d.delayMs}ms) · 누적 주입 실패 ${d.injectedFailures} / 지연 ${d.injectedDelays}`, d.enabled ? 'wr' : 'ok');
   $('chaos-box').classList.toggle('chaos-on', d.enabled);
 };
 $('chaos-on').onchange = () => $('btn-chaos').click();
 
-$('btn-pii').onclick = async () => {
-  const d = await call('GET', '/api/v1/mock/pii-residue', 'PII 잔여 확인');
-  if (!d) return;
-  renderPii(d);
+$('btn-outputs').onclick = () => {
+  if (!LAST?.result) { log('먼저 배치를 실행하십시오 — 최근 배치의 출력 폴더를 읽습니다', 'wr'); return; }
+  loadOutputs(LAST.result);
 };
-
 $('btn-targets').onclick = showTargets;
 $('btn-close-targets').onclick = () => $('targets-card').classList.add('d-none');
 
@@ -658,20 +1066,20 @@ $('btn-files').onclick = async () => {
 };
 
 $('btn-test-clear').onclick = async () => {
-  if (!confirm('시뮬레이터에서 돌린 시험 기록(EXEC_ID 작업코드 = TST)을 모두 지웁니다. 운영 배치(VOC·STR·EXT)는 지워지지 않습니다. 계속할까요?')) return;
+  if (!confirm('시뮬레이터에서 돌린 시험 기록(EXEC_ID 작업코드 = TST)의 로그 이력·로컬 산출물·STT 출력 폴더를 모두 지웁니다. 운영 배치(VOC·STR·EXT)는 지워지지 않습니다. 계속할까요?')) return;
   const d = await call('DELETE', '/api/v1/mock/test-data', '테스트 데이터 초기화 (TST)');
   if (!d) return;
   const lc = d.logCollector;
-  if (lc && typeof lc === 'object') {
-    log(`  └ 로그 이력 삭제 — ${Object.entries(lc).map(([k,v]) => `${k} ${v}`).join(' · ')}`, 'ok');
-  } else {
-    log(`  └ 로그 이력 — ${lc}`, 'wr');
-  }
+  if (lc && typeof lc === 'object') log(`  └ 로그 이력 삭제 — ${Object.entries(lc).map(([k,v]) => `${k} ${v}`).join(' · ')}`, 'ok');
+  else log(`  └ 로그 이력 — ${lc}`, 'wr');
   const l = d.local || {};
-  log(`  └ 로컬 — 표식 ${l.idempotencyMarkers} · 접견파일 ${l.meetFiles} · 전화파일 ${l.phoneFiles} · 작업파일 ${l.workFiles}`, 'ok');
+  log(`  └ 로컬 — 표식 ${l.idempotencyMarkers} · 접견파일 ${l.meetFiles} · 전화파일 ${l.phoneFiles} · 작업파일 ${l.workFiles} · STT 출력 폴더 ${l.sttOutputDirs}`, 'ok');
   log(`  └ ${d.message}`, 'ok');
   $('stats').innerHTML = ''; $('last-exec').textContent = '—';
-  renderPii(null); $('targets-card').classList.add('d-none');
+  $('api-box').innerHTML = '<div class="hint">테스트 데이터를 초기화했습니다.</div>';
+  $('steps-box').innerHTML = ''; $('outdirs-box').innerHTML = ''; $('resp-box').innerHTML = ''; $('files-box').innerHTML = '';
+  LAST = null;
+  $('targets-card').classList.add('d-none');
   await loadStatus(true);
 };
 
@@ -679,7 +1087,7 @@ $('btn-refresh').onclick = () => loadStatus(false);
 $('btn-clear').onclick   = () => { $('log').innerHTML = ''; };
 
 log('시뮬레이터 준비 완료. [Mock 데이터 초기화] → [처리 대상 미리보기] → [접견만/전화만 실행] 순서를 권합니다.', 'hd');
-log('접견과 전화는 연동 경로가 완전히 다릅니다 — 전화는 XVARM·브로커를 타지 않습니다.', 'hd');
+log('접견과 전화는 연동 경로가 완전히 다릅니다 — 전화는 XVARM·브로커를 타지 않습니다. STT 결과는 {출력}/{execId}/ 폴더에 남습니다.', 'hd');
 loadStatus(false);
 </script>
 </body>

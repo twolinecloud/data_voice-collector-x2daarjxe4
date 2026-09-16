@@ -122,12 +122,23 @@ voice:
   phone:
     mode: ${VOICE_PHONE_MODE:MOCK}          # MOCK | ESB
   sync:
-    meet-dir: ${VOICE_MEET_DIR:./work/voice_raw/meet}
-    phone-dir: ${VOICE_PHONE_DIR:./work/voice_raw/phone}
-    work-dir: ${VOICE_WORK_DIR:./work/voice_work}
     stable-check-ms: 1500
     wait-timeout-sec: ${VOICE_WAIT_TIMEOUT_SEC:300}
     naming-policy: ${VOICE_NAMING_POLICY:ORIGINAL}   # ORIGINAL | ESB_DAT (Q7)
+
+  # ── 디렉터리 5종 ─────────────────────────────────────────────────────────
+  #   receive-* : 브로커·ESB 가 파일을 떨구는 수신 폴더(상대가 정한다)
+  #   work      : 복호화 산출물·멱등 표식(우리 내부)
+  #   output-*  : STT 결과가 남는 곳 — 실제 파일은 {output}/{execId}/{건ID}.txt (+ .json)
+  #   base-dir  : 표준 배치의 뿌리. Windows 로컬 C:/k8s · 배포(PV) /k8s.
+  #               output-* 기본값이 여기서 파생된다. 시뮬레이터에서 런타임으로 바꿀 수 있다.
+  dirs:
+    base-dir: ${VOICE_BASE_DIR:./work}
+    receive-meet: ${VOICE_MEET_DIR:${voice.dirs.base-dir}/voice_raw/meet}
+    receive-phone: ${VOICE_PHONE_DIR:${voice.dirs.base-dir}/voice_raw/phone}
+    work: ${VOICE_WORK_DIR:${voice.dirs.base-dir}/voice_work}
+    output-meet: ${VOICE_OUTPUT_MEET_DIR:${voice.dirs.base-dir}/xenon/voice}
+    output-phone: ${VOICE_OUTPUT_PHONE_DIR:${voice.dirs.base-dir}/xenon/phone}
 
   decrypt:
     mode: ${VOICE_DECRYPT_MODE:SKIP}         # SKIP | REAL — 전화 복호화 주체 미확정(Q13)
@@ -145,8 +156,8 @@ voice:
     periodic-lag-min: 20
     specl-mng-se-cd: ${VOICE_SPECL_CODES:0,1,2,3,5}
     max-files-per-run: ${VOICE_MAX_FILES:500}
-    job-id: ${VOICE_JOB_ID:VOICE_BATCH}      # 작업코드 VOC 로 채번되는 값 확인 필요(Q4)
-    data-type-cd: VOICE
+    job-id: ${VOICE_JOB_ID:VOICE_ANALYSIS}   # 컬렉터 JobId enum — VOICE_ANALYSIS → 작업코드 VOC
+    data-type-cd: UNSTRUCTURED               # 컬렉터 C01 4종 중 비정형(음성). VOICE 는 C01 에 없는 코드였다
     retain-source-file: ${VOICE_RETAIN_SOURCE:false}
 
   inmate-pid:

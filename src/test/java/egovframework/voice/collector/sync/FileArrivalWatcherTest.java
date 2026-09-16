@@ -35,12 +35,13 @@ class FileArrivalWatcherTest {
                         new VoiceProperties.Flag("Y", "Y", "N", "Y")),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.MOCK, "", java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
-                new VoiceProperties.Sync(meet.toString(), phone.toString(), tmp.resolve("w").toString(),
-                        20, 3, EsbFileNamingPolicy.Policy.ORIGINAL),
+                new VoiceProperties.Sync(20, 3, EsbFileNamingPolicy.Policy.ORIGINAL),
+                new VoiceProperties.Dirs(tmp.toString(), meet.toString(), phone.toString(), tmp.resolve("w").toString(),
+                        tmp.resolve("out/meet").toString(), tmp.resolve("out/phone").toString()),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),
                 new VoiceProperties.Stt(VoiceProperties.SttMode.MOCK, "", 30),
                 new VoiceProperties.Batch("0 0 2 * * *", "0 */10 * * * *", 20, false,
-                        List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "VOICE", false));
+                        List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "UNSTRUCTURED", false));
     }
 
     private VoiceTarget meetTarget() {
@@ -52,7 +53,10 @@ class FileArrivalWatcherTest {
         Path phone = tmp.resolve("phone");
         Files.createDirectories(meet);
         Files.createDirectories(phone);
-        return new FileArrivalWatcher(props(meet, phone), new EsbFileNamingPolicy());
+        VoiceProperties p = props(meet, phone);
+        egovframework.voice.collector.config.VoiceDirState dirs = new egovframework.voice.collector.config.VoiceDirState(p);
+        dirs.resetToConfigured();
+        return new FileArrivalWatcher(p, dirs, new EsbFileNamingPolicy());
     }
 
     @Test

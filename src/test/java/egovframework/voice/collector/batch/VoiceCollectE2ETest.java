@@ -43,9 +43,12 @@ class VoiceCollectE2ETest {
         registry.add("voice.source.mode", () -> "MOCK");
         registry.add("voice.broker.mode", () -> "MOCK");
         // 테스트가 ./work 를 오염시키지 않게 임시 디렉터리로 돌린다.
-        registry.add("voice.sync.meet-dir", () -> tmp.resolve("raw/meet").toString());
-        registry.add("voice.sync.phone-dir", () -> tmp.resolve("raw/phone").toString());
-        registry.add("voice.sync.work-dir", () -> tmp.resolve("work").toString());
+        registry.add("voice.dirs.base-dir", () -> tmp.toString());
+        registry.add("voice.dirs.receive-meet", () -> tmp.resolve("raw/meet").toString());
+        registry.add("voice.dirs.receive-phone", () -> tmp.resolve("raw/phone").toString());
+        registry.add("voice.dirs.work", () -> tmp.resolve("work").toString());
+        registry.add("voice.dirs.output-meet", () -> tmp.resolve("xenon/voice").toString());
+        registry.add("voice.dirs.output-phone", () -> tmp.resolve("xenon/phone").toString());
         registry.add("voice.sync.wait-timeout-sec", () -> "15");
         registry.add("voice.sync.stable-check-ms", () -> "50");
     }
@@ -87,6 +90,43 @@ class VoiceCollectE2ETest {
         assertThat(result.outcomes())
                 .filteredOn(FileProcOutcome::isSuccess)
                 .allSatisfy(o -> assertThat(o.sttChars()).isPositive());
+    }
+
+    @Test
+    @DisplayName("STT 텍스트가 배치 폴더 {output}/{execId}/ 에 .txt + .json 으로 남는다 — 접견은 xenon/voice, 전화는 xenon/phone")
+    void writesSttOutputsPerBatch() throws Exception {
+        VoiceBatchResult result = service.run(wideWindow(), null, "TEST");
+
+        assertThat(result.outputDirs().get("MEET")).isEqualTo(
+                tmp.resolve("xenon/voice").resolve(result.execId()).toString().replace('\\', '/'));
+        assertThat(result.outputDirs().get("PHONE")).isEqualTo(
+                tmp.resolve("xenon/phone").resolve(result.execId()).toString().replace('\\', '/'));
+        for (FileProcOutcome o : result.outcomes()) {
+            java.nio.file.Path text = java.nio.file.Path.of(o.sttPath());
+            assertThat(text).exists();
+            assertThat(text.getParent().toString().replace('\\', '/'))
+                    .isEqualTo(result.outputDirs().get(o.target().kind().name()));
+            assertThat(java.nio.file.Files.readString(text)).hasSize(o.sttChars());
+            java.nio.file.Path meta = text.resolveSibling(
+                    text.getFileName().toString().replace(".txt", ".json"));
+            assertThat(meta).exists();
+            assertThat(java.nio.file.Files.readString(meta)).contains("\"execId\"").contains(o.target().idempotencyKey());
+        }
+    }
+
+    @Test
+    @DisplayName("T2 단계 요약 — COLLECT · ANALYZE 두 행, 전부 성공")
+    void recordsCollectAndAnalyzeSteps() {
+        VoiceBatchResult result = service.run(wideWindow(), null, "TEST");
+
+        assertThat(result.steps()).extracting(VoiceBatchResult.StepLog::stepTypeCd)
+                .containsExactly("COLLECT", "ANALYZE");
+        assertThat(result.steps()).allSatisfy(st -> {
+            assertThat(st.stepStsCd()).isEqualTo("SUCCESS");
+            assertThat(st.inCnt()).isEqualTo(10);
+            assertThat(st.outCnt()).isEqualTo(10);
+            assertThat(st.errCnt()).isZero();
+        });
     }
 
     @Test

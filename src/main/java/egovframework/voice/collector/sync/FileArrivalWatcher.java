@@ -1,5 +1,6 @@
 package egovframework.voice.collector.sync;
 
+import egovframework.voice.collector.config.VoiceDirState;
 import egovframework.voice.collector.config.VoiceProperties;
 import egovframework.voice.collector.model.VoiceFile;
 import egovframework.voice.collector.model.VoiceKind;
@@ -29,6 +30,7 @@ import java.nio.file.Path;
 public class FileArrivalWatcher {
 
     private final VoiceProperties props;
+    private final VoiceDirState dirs;
     private final EsbFileNamingPolicy namingPolicy;
 
     /** 파일명을 정책으로 추측해 기다린다. 공급자가 이름을 알려주지 않는 경우(전화)에 쓴다. */
@@ -73,7 +75,7 @@ public class FileArrivalWatcher {
     }
 
     private Path dirFor(VoiceKind kind) {
-        return Path.of(kind == VoiceKind.MEET ? props.sync().meetDir() : props.sync().phoneDir());
+        return dirs.receiveDir(kind);
     }
 
     /** 크기가 {@code stableCheckMs} 동안 변하지 않으면 쓰기가 끝난 것으로 본다. */

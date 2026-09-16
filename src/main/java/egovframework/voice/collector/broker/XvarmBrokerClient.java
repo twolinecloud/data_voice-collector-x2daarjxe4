@@ -22,7 +22,29 @@ public interface XvarmBrokerClient {
      */
     ExtractResult extract(VoiceTarget target);
 
+    /**
+     * 배치(EXEC_ID) 단위로 추출을 요청한다 — <b>재처리 배치가 새로 추출받게</b> 하기 위해서다.
+     *
+     * <p>브로커는 {@code requestId} 로 멱등 처리한다(같은 키면 기존 작업 상태를 돌려주고 다시 추출하지
+     * 않는다). 키를 대상만으로 만들면, 앞선 배치가 파일을 받아 STT 후 지운 뒤에 재처리 배치가 같은 대상을
+     * 요청했을 때 브로커가 "이미 DONE" 을 돌려주고 파일은 없어 수신 대기 타임아웃이 난다(실제로 그랬다).
+     * 그래서 키에 EXEC_ID 를 넣어 배치마다 별도 요청이 되게 한다 — 한 배치 안에서는 멱등 표식이
+     * 같은 대상을 두 번 요청하지 않게 막으므로 중복 추출은 여전히 없다.</p>
+     *
+     * @param execId 이번 배치의 EXEC_ID. 비면 대상만으로 키를 만든다(구 동작)
+     */
+    default ExtractResult extract(VoiceTarget target, String execId) {
+        return extract(target);
+    }
+
     String mode();
+
+    /** 브로커 요청 키 — {@code VOC-{execId}-{대상키}}. execId 가 없으면 {@code VOC-{대상키}}. */
+    static String requestIdOf(VoiceTarget target, String execId) {
+        return (execId == null || execId.isBlank())
+                ? "VOC-" + target.idempotencyKey()
+                : "VOC-" + execId + "-" + target.idempotencyKey();
+    }
 
     /**
      * @param requestId 멱등 키 — 같은 값으로 재요청하면 중복 추출하지 않는다

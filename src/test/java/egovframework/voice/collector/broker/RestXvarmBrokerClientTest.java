@@ -21,6 +21,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
@@ -65,11 +66,12 @@ class RestXvarmBrokerClientTest {
                 // 폴링 간격을 짧게 — 테스트가 몇 초씩 잡고 있을 이유가 없다
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, BASE, java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
-                new VoiceProperties.Sync("m", "p", "w", 10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
+                new VoiceProperties.Sync(10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
+                new VoiceProperties.Dirs("b", "m", "p", "w", "om", "op"),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),
                 new VoiceProperties.Stt(VoiceProperties.SttMode.MOCK, "", 30),
                 new VoiceProperties.Batch("0 0 2 * * *", "0 */10 * * * *", 20, false,
-                        List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "VOICE", false));
+                        List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "UNSTRUCTURED", false));
     }
 
     private VoiceTarget meet() {
@@ -147,6 +149,22 @@ class RestXvarmBrokerClientTest {
     }
 
     @Test
+    @DisplayName("EXEC_ID 를 주면 요청 키에 들어간다 — 재처리 배치가 브로커 멱등 캐시에 걸리지 않게")
+    void requestIdCarriesExecId() {
+        server.expect(requestTo(BASE + "/api/v1/xvarm/extract"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.requestId").value("VOC-20260916TST003-TARE-0001"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.ACCEPTED)
+                        .contentType(MediaType.APPLICATION_JSON).body("{\"status\":\"ACCEPTED\"}"));
+        server.expect(requestTo(BASE + "/api/v1/xvarm/extract/VOC-20260916TST003-TARE-0001"))
+                .andRespond(withSuccess("{\"status\":\"DONE\",\"filePath\":\"/x/f.m4a\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThat(client.extract(meet(), "20260916TST003").requestId()).isEqualTo("VOC-20260916TST003-TARE-0001");
+        server.verify();
+    }
+
+    @Test
     @DisplayName("FAILED 면 예외를 던진다 — 없는 파일을 기다리지 않는다")
     void failsFast() {
         server.expect(requestTo(BASE + "/api/v1/xvarm/extract"))
@@ -185,7 +203,7 @@ class RestXvarmBrokerClientTest {
                 props().source(),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, "", java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
-                props().sync(), props().decrypt(), props().stt(), props().batch());
+                props().sync(), props().dirs(), props().decrypt(), props().stt(), props().batch());
 
         assertThatThrownBy(() ->
                 new RestXvarmBrokerClient(noUrl, modeState(noUrl), rt, new EsbFileNamingPolicy()).extract(meet()))

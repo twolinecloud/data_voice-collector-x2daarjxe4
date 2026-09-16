@@ -11,10 +11,12 @@
 ## 1. 이 서비스가 하는 일 / 하지 않는 일
 
 ```
-보라미 조회 → XVARM 브로커 → 파일 수신 → 복호화 → STT → 처리 이력(T1·T2·T4) ┃
-                         (이 서비스의 범위)                                  ┃
-                                                                            ▼
-                                                    log-collector : T1 · T2 · T4 적재 (API)
+보라미 조회 → XVARM 브로커 → 파일 수신 → 복호화 → STT → 출력 저장 → 처리 이력(T1·T2·T4) ┃
+                              (이 서비스의 범위)                                          ┃
+                                          │                                              ▼
+                                          ▼                          log-collector : T1 · T2(COLLECT·ANALYZE) · T4 적재 (API)
+                    {base-dir}/xenon/voice/{execId}/  (접견)  ·  {base-dir}/xenon/phone/{execId}/  (전화)
+                    — STT 텍스트(.txt) + 메타(.json) 를 배치 단위 폴더에 남긴다. 하류(비식별)가 여기서 읽어 간다
 ```
 
 | 하는 일 | 하지 않는 일 (다른 서비스 책임) |
@@ -23,7 +25,7 @@
 | XVARM 추출 요청 | 재식별 매핑 → `data-collector` |
 | 파일 수신·포맷 판별 | STT 엔진 자체 → NPU 서버 |
 | 복호화 | STT 텍스트 외부 전송 → **하지 않는다** (커넥터 연동 제외) |
-| STT 호출 · 원본 즉시 삭제 · 처리 이력 적재 | |
+| STT 호출 · 원본 즉시 삭제 · **STT 결과 파일 저장** · 처리 이력 적재 | T2 의 DEIDENT·SEND 단계 → 하류 |
 
 **R&R 은 2026-08-19 에 확정된 것이다.** 로그 테이블(T1~T11)의 단일 writer 는 로그 컬렉터다.
 이 서비스도 자체 로그 테이블을 만들지 않는다.
@@ -78,7 +80,7 @@ mvn spring-boot:run
 접견 배치가 바로 실패한다(Fail-fast, 의도된 동작). 전화·복호화·STT 는 MOCK 이라 외부 의존이 없다.
 
 ```bash
-# 브로커 (다른 레포) — local 프로파일이 출력 폴더를 이 레포의 work/voice_raw/meet 로 맞춘다
+# 브로커 (다른 레포) — local 프로파일이 출력 폴더를 이 레포의 work/voice_raw/meet(= voice.dirs.receive-meet) 로 맞춘다
 cd ../data_borami-xvarm-broker-1joiuorqhl
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
@@ -132,15 +134,23 @@ log-collector:
   MOCK/SKIP 은 주황, 실물은 초록. 로그 컬렉터 연결 여부도 함께 본다.
   브로커가 `REST` 면 단계 아래에 **주소 라디오**(`개발계 K8s` / `로컬 PC`)가 뜨고 고르는 즉시 반영된다 —
   기동 설정값과 같은 항목에 `(Default)` 가 붙는다(`voice.broker.presets` 에서 내려준다)
-- **② 제어**
-  - 배치: `접견만` · `전화만` · `10분 주기` · `일배치` — 실행 중에는 버튼이 잠기고 누른 버튼에 스피너가 돈다
-  - 보조: `Mock 초기화/생성` · `대상 미리보기` · `수신 파일` · `PII 잔여` · `브로커 연결 확인`
+- **② 디렉터리 경로** — 수신(접견·전화) · 작업 · STT 출력(접견·전화) 5종을 **재시작 없이** 바꾼다.
+  프리셋 `로컬 기본(설정값)` / `Windows C:/k8s` / `PV /k8s`, 또는 base-dir 하나로 표준 배치 채우기.
+  수신(접견)을 바꾸면 로컬 브로커의 `BROKER_OUTPUT_DIR` 도 맞춰야 한다 — [브로커 연결 확인] 으로 대조
+- **③ 제어**
+  - 배치 4종: `접견만`(`POST /api/v1/voice/batches/periodic?kinds=MEET`) · `전화만`(`?kinds=PHONE`) ·
+    `10분 주기`(`/periodic`) · `일배치`(`/daily`) — 실행 중에는 버튼이 잠기고 누른 버튼에 스피너가 돈다
+  - 보조: `Mock 초기화/생성` · `대상 미리보기` · `수신 파일` · `STT 출력 확인` · `브로커 연결 확인`
   - **대용량 Mock**: 접견·전화 건수 입력 + 프리셋(10 / 1,000 / 5,000 / 10,000건)
   - **장애 주입**: 활성 토글 + 실패 % · 지연 % · 지연 ms
-- **③ 최근 배치 결과** — 대상 / 성공 / 실패 / 건너뜀 / 상태 +
-  **PII 원본 삭제 검증** 한 줄
-- **④ 실행 로그** — 호출 API·응답 시간·결과 요약·실패 사유, 그리고
-  `🔒 작업 폴더 내 잔여 파일: 0건 (삭제 완료)` 를 배치마다 명시적으로 출력
+- **④ 최근 배치 결과** — 대상 / 성공 / 실패 / 건너뜀 / 상태 +
+  **실제 호출한 REST API**(메서드 · URL · 쿼리 · HTTP 상태 · 소요) + **Response JSON**(구문 강조 · 복사 · 펼치기) +
+  T2 단계 배지(COLLECT · ANALYZE 의 in/out/err · STEP_LOG_ID) + STT 출력 폴더 +
+  **처리 파일 표**(원본 파일명 · 상태 · 실패 단계 · 크기 · 글자 수 · 저장 경로 · STT 텍스트)
+- **⑤ 재처리(Retry) 시나리오** — ① 브로커 장애 주입(`http://localhost:9999`) → ② 1차 배치(실패 이력) →
+  ③ 브로커 복구(`http://localhost:8082`) → ④ 재처리 배치. 버튼 4개로 하나씩, 또는 **🚀 원클릭 자동 실행**
+  (2~3초 간격). 단계마다 타임라인 카드에 API·응답 JSON 이 남고, 아래에 **② 실패 JSON vs ④ 성공 JSON** 을 나란히 대조한다
+- **⑥ 실행 로그** — 호출 API·응답 시간·결과 요약·T2 단계·실패 사유
 
 **시연 순서**: `Mock 데이터 초기화` → `처리 대상 미리보기` → `배치 실행` → **한 번 더 배치 실행**
 (두 번째는 `건너뜀`으로 잡혀 멱등 동작이 드러난다) 
@@ -227,20 +237,65 @@ STT 구간에 의도적으로 실패와 지연을 섞는다. **확인하려는 �
 - 실패·지연은 **독립 판정** — 지연되면서 실패할 수도 있다
 - 주입된 예외는 `InjectedFaultException` 이라 진짜 버그와 로그에서 구분된다
 
-### PII 원본 즉시 삭제 검증
+### PII 원본 즉시 삭제
 
 정책은 "복호화된 원본 음성은 STT 완료 즉시 삭제"다(계획서 5.3-(4)).
-그런데 삭제는 `Files.deleteIfExists` 한 줄이라 실패해도 경고만 남고 지나간다.
-**정책이 지켜졌다고 말하는 것과 지켜졌음을 보이는 것은 다르므로**, 배치 결과에 잔여 건수를 싣는다.
-
-```
-🔒 작업 폴더 내 잔여 파일: 0건 (삭제 완료)
-```
 
 - 삭제는 `processOne` 의 **`finally`** 에서 한다 — STT 가 실패하는 경로에서도 지워야 한다.
   성공 경로에서만 지우면 실패한 건의 음성이 디스크에 남는다
-- `ResilienceE2ETest` 가 **전부 실패한 배치에서도 잔여 0** 임을 검증한다
-- 언제든 확인: `GET /api/v1/mock/pii-residue`
+- `ResilienceE2ETest` 가 수신·작업 디렉터리를 직접 세어 **전부 실패한 배치에서도 잔여 0** 임을 검증한다
+  (예전의 `PiiResidueAuditor` · `GET /api/v1/mock/pii-residue` · 결과의 `residue` 는 제거했다)
+
+### STT 결과 저장 — 배치 단위 폴더
+
+STT 텍스트는 외부로 보내지 않고 **배치(EXEC_ID) 단위 폴더**에 남긴다. 하류(비식별)가 여기서 읽어 간다.
+
+```
+{base-dir}/xenon/voice/{execId}/{건ID}.txt + .json     접견
+{base-dir}/xenon/phone/{execId}/{건ID}.txt + .json     전화
+```
+
+| 설정 (`voice.dirs.*`) | 환경변수 | local | dev/prod (PV) |
+|---|---|---|---|
+| `base-dir` | `VOICE_BASE_DIR` | `C:/k8s` | `/k8s` |
+| `receive-meet` / `receive-phone` | `VOICE_MEET_DIR` / `VOICE_PHONE_DIR` | `./work/voice_raw/{meet,phone}` | `{base}/voice_raw/{meet,phone}` |
+| `work` | `VOICE_WORK_DIR` | `./work/voice_work` | `{base}/voice_work` |
+| `output-meet` / `output-phone` | `VOICE_OUTPUT_MEET_DIR` / `VOICE_OUTPUT_PHONE_DIR` | `{base}/xenon/{voice,phone}` | `{base}/xenon/{voice,phone}` |
+
+- 로컬은 수신·작업 폴더만 레포 상대경로에 둔다 — 로컬 브로커(local 프로파일)가 기본으로 그곳에 떨구기 때문이다.
+  전부 `C:/k8s` 로 옮기려면 시뮬레이터 ② 프리셋 "Windows C:/k8s" + 브로커 `BROKER_OUTPUT_DIR=C:/k8s/voice_raw/meet`
+- 런타임 변경: `GET/PUT /api/v1/mock/dirs` · `PUT /api/v1/mock/dirs/preset?key=configured|win|pv|base&baseDir=` ·
+  `POST /api/v1/mock/dirs/reset` (재기동하면 설정값으로 돌아간다)
+- 배치 응답의 `outputDirs` 가 이 배치의 폴더, `outcomes[].sttPath` 가 파일별 경로다.
+  텍스트 자체는 `GET /api/v1/mock/stt-outputs?execId=` 로만 본다(시뮬레이터용 · 운영 차단)
+- **테스트 데이터 초기화**(`DELETE /api/v1/mock/test-data`)가 EXEC_ID 에 `TST` 가 든 출력 폴더도 통째로 지운다
+
+### T2 단계 로그 — COLLECT · ANALYZE
+
+로그 컬렉터의 비정형 체인은 `COLLECT → ANALYZE → DEIDENT → SEND` 다. 이 서비스는 앞의 두 단계를 남긴다
+(`POST /api/v1/logs/batches/{execId}/steps` → `PATCH /api/v1/logs/steps/{stepLogId}`).
+
+| 단계 | 여는 시점 | 마감 시점 | in / out / err |
+|---|---|---|---|
+| `COLLECT` | 배치 시작 | 전 건 처리 후 | 대상(건너뜀 제외) / 파일 확보·복호화 성공 / 확보 실패 |
+| `ANALYZE` | 첫 STT 직전 | **STT 처리가 끝난 직후** | 확보 성공 / STT·출력 저장 성공 / STT 실패 |
+
+- `data-type-cd` 는 **`UNSTRUCTURED`**(C01 4종) — 예전 `VOICE` 는 C01 에 없어 대시보드 필터·체인 순번을 타지 못했다
+- 파일별 실패 단계는 `outcomes[].failedStep` 에 남는다. T1 마감에는 대표 오류 `[코드] 상세` 와 `ERR_TYPE_CD`(CONNECTION/TIMEOUT/DATA)가 실린다
+
+### 재처리(Retry) 시나리오
+
+실패한 건은 멱등 표식이 남지 않으므로 **다음 배치가 자동으로 다시 처리**한다. 시뮬레이터 ⑤ 가 이것을 4단계로 보여준다.
+
+```bash
+curl -X PUT  "http://localhost:8085/api/v1/mock/endpoints/broker?value=http://localhost:9999"   # ① 장애
+curl -X POST "http://localhost:8085/api/v1/voice/batches/periodic?kinds=MEET&test=true"          # ② FAIL — T1 FAIL · T2 COLLECT FAIL · T4 FAIL
+curl -X PUT  "http://localhost:8085/api/v1/mock/endpoints/broker?value=http://localhost:8082"   # ③ 복구
+curl -X POST "http://localhost:8085/api/v1/voice/batches/periodic?kinds=MEET&test=true"          # ④ SUCCESS — 새 EXEC_ID · COLLECT·ANALYZE SUCCESS
+```
+
+> 브로커 요청 키는 `VOC-{execId}-{대상키}` 다. 대상만으로 키를 만들면 브로커의 멱등 캐시가 "이미 DONE" 을 돌려주고
+> 파일은 이미 지워진 뒤라 재처리 배치가 수신 대기 타임아웃으로 실패한다(실제로 그랬다).
 
 ---
 
@@ -383,10 +438,10 @@ egovframework.voice.collector
 ├─ broker/     XVARM 브로커 — Mock / Rest
 ├─ sync/       파일 수신 — FileArrivalWatcher · EsbFileNamingPolicy · PhoneFileProvider
 ├─ decrypt/    복호화 — DecryptService · Noop / PhoneAria / MeetRvs
-├─ stt/        STT — Mock / Npu  ★ 마지막 처리 단계 (텍스트를 외부로 보내지 않는다)
-├─ logging/    LogCollectorClient (T1·T2·T4)
+├─ stt/        STT — Mock / Npu · SttOutputStore(배치 폴더에 .txt/.json 저장)  ★ 텍스트를 외부로 보내지 않는다
+├─ logging/    LogCollectorClient (T1 · T2 COLLECT/ANALYZE · T4)
 ├─ mapper/     BoramiVoiceMapper (MyBatis)
 ├─ model/      VoiceTarget · VoiceFile · SttResult · FileProcOutcome …
 ├─ util/       InmatePidGenerator · AudioFormatDetector · SilentWav
-└─ config/     VoiceProperties · RestTemplateConfig · EgovConfigDataAccess
+└─ config/     VoiceProperties · VoiceModeState(모드) · VoiceDirState(디렉터리) · RestTemplateConfig · EgovConfigDataAccess
 ```
