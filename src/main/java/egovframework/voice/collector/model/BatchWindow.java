@@ -28,6 +28,11 @@ public record BatchWindow(LocalDateTime from, LocalDateTime to, String label) {
         return new BatchWindow(from, to, "MANUAL");
     }
 
+    /** 시각이 창 [from, to) 안에 있는가 — 조회 SQL 의 {@code CRT_DT >= from AND CRT_DT < to} 와 같은 판정. */
+    public boolean contains(LocalDateTime at) {
+        return at != null && !at.isBefore(from) && at.isBefore(to);
+    }
+
     @Override
     public String toString() {
         return "%s[%s ~ %s)".formatted(label, from, to);

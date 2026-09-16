@@ -46,6 +46,9 @@ class BoramiSourceJdbcTest {
     @Autowired
     private JdbcBoramiSourceClient jdbc;
 
+    @Autowired
+    private MockBoramiSeeder seeder;
+
     private BatchWindow wide() {
         LocalDateTime now = LocalDateTime.now();
         return BatchWindow.manual(now.minusDays(2), now.plusDays(1));
@@ -59,13 +62,15 @@ class BoramiSourceJdbcTest {
     }
 
     @Test
-    @DisplayName("접견 4단 조인 — 삭제·해제·대상외 코드를 걸러 2건만 나온다")
+    @DisplayName("접견 4단 조인 — 삭제·해제·대상외 코드를 걸러 6건(일배치 5 + 주기 1)만 나온다")
     void meetQueryFiltersProperly() {
         List<VoiceTarget> targets = source.findMeetTargets(wide(), SPECL, 100);
 
-        assertThat(targets).hasSize(2);
+        assertThat(targets).hasSize(6);
         assertThat(targets).extracting(VoiceTarget::idempotencyKey)
-                .containsExactlyInAnyOrder("MEET-001-0000000000000000", "MEET-002-0000000000000000");
+                .containsExactlyInAnyOrder("MEET-001-0000000000000000", "MEET-002-0000000000000000",
+                        "MEET-003-0000000000000000", "MEET-004-0000000000000000",
+                        "MEET-005-0000000000000000", "MEET-006-0000000000000000");
         assertThat(targets).allSatisfy(t -> assertThat(t.kind()).isEqualTo(VoiceKind.MEET));
     }
 
@@ -96,13 +101,41 @@ class BoramiSourceJdbcTest {
     }
 
     @Test
-    @DisplayName("전화 조회 — 녹음 안 됨·삭제된 건을 걸러 3건만 나온다")
+    @DisplayName("전화 조회 — 녹음 안 됨·삭제된 건을 걸러 6건(일배치 5 + 주기 1)만 나온다")
     void phoneQueryFiltersProperly() {
         List<VoiceTarget> targets = source.findPhoneTargets(wide(), SPECL, 100);
 
-        assertThat(targets).hasSize(3);
+        assertThat(targets).hasSize(6);
         assertThat(targets).extracting(VoiceTarget::idempotencyKey)
-                .containsExactlyInAnyOrder("TUID-PHONE-001", "TUID-PHONE-002", "TUID-PHONE-003");
+                .containsExactlyInAnyOrder("TUID-PHONE-001", "TUID-PHONE-002", "TUID-PHONE-003",
+                        "TUID-PHONE-004", "TUID-PHONE-005", "TUID-PHONE-006");
+    }
+
+    @Test
+    @DisplayName("시간창별 대상 — 일배치 창은 접견 5·전화 5, 10분 주기 창은 접견 1·전화 1")
+    void seedMatchesBatchWindows() {
+        LocalDateTime now = LocalDateTime.now();
+        BatchWindow daily = BatchWindow.daily(now);
+        BatchWindow periodic = BatchWindow.periodic(now, 20);
+
+        assertThat(source.findMeetTargets(daily, SPECL, 100)).hasSize(5);
+        assertThat(source.findPhoneTargets(daily, SPECL, 100)).hasSize(5);
+        assertThat(source.findMeetTargets(periodic, SPECL, 100)).extracting(VoiceTarget::idempotencyKey)
+                .containsExactly("MEET-006-0000000000000000");
+        assertThat(source.findPhoneTargets(periodic, SPECL, 100)).extracting(VoiceTarget::idempotencyKey)
+                .containsExactly("TUID-PHONE-006");
+    }
+
+    @Test
+    @DisplayName("재적재하면 시각이 지금 기준으로 다시 깔린다 — 기동 후 시간이 지나도 주기배치 창에 1·1 이 남는다")
+    void reseedRefreshesTimestamps() {
+        java.util.Map<String, Object> r = seeder.reseed();
+
+        assertThat(r.get("reseeded")).isEqualTo(true);
+        BatchWindow periodic = BatchWindow.periodic(LocalDateTime.now(), 20);
+        assertThat(source.findMeetTargets(periodic, SPECL, 100)).hasSize(1);
+        assertThat(source.findPhoneTargets(periodic, SPECL, 100)).hasSize(1);
+        assertThat(source.findMeetTargets(wide(), SPECL, 100)).hasSize(6);
     }
 
     @Test

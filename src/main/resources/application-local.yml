@@ -91,7 +91,8 @@ voice:
         url: "http://borami-xvarm-broker-1joiuorqhl:8080"
       - label: "로컬 PC"
         url: "http://localhost:8082"
-    poll-interval-ms: ${VOICE_BROKER_POLL_MS:500}
+    # 로컬 브로커는 추출 지연을 1.5초로 흉내 낸다(BROKER_DELAY_MS). 폴링을 촘촘히 해야 접견 5건이 10초 안에 끝난다.
+    poll-interval-ms: ${VOICE_BROKER_POLL_MS:250}
     poll-timeout-sec: ${VOICE_BROKER_TIMEOUT_SEC:30}
   # ── 전화 파일 연계 ──────────────────────────────────────────────────────
   #   ⚠ 브로커(XVARM)와 <b>별개 스위치</b>다. 전화는 XVARM 을 타지 않는다 —

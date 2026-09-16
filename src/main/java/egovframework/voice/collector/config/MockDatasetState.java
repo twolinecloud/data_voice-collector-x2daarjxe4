@@ -7,19 +7,21 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Mock 데이터셋 규모 — 대용량 부하 시험용.
+ * Mock 데이터셋 규모 — 시연 기본은 <b>12건</b>, 대용량 부하 시험 때만 올린다.
  *
- * <p><b>왜 필요한가</b>: 실데이터 규모는 접견 약 1,300건(6.5GB) · 전화 약 1,300건이다
- * (2026-08-07 메타빌드 협의). 10건짜리 Mock 으로는 스트리밍·청크 처리가 실제로 메모리를
- * 지키는지 알 수 없다. 건수를 올려 놓고 힙이 버티는지 보려고 런타임 조절을 연다.</p>
+ * <p><b>시연 기본 배치</b> (H2 Mock 보라미 {@code data-borami-mock.sql} 과 같은 구성)</p>
+ * <pre>
+ *   일배치(DAILY)      — 접견 5 · 전화 5   (어제 09시대 시각)
+ *   주기배치(PERIODIC) — 접견 1 · 전화 1   (5분 전 시각)
+ * </pre>
+ * <p>MOCK 소스는 이 두 묶음을 만들어 두고 <b>배치 시간창에 걸리는 것만</b> 돌려준다. 예전에는 창과 무관하게
+ * 건수만큼 만들어 매 배치가 같은 대상을 다시 훑었고, 규모를 올려 두면 10분 주기 배치까지 수백 건을 돌았다.
+ * 전체 배치가 10초 안에 끝나야 시연이 산다.</p>
  *
- * <p><b>파일 길이를 함께 줄인다</b>: 10,000건 × 2초 WAV 는 640MB 다. 디스크와 시간을 잡아먹는데
- * OOM 검증에 기여하지 않는다 — 우리가 보려는 것은 <b>건수에 비례해 메모리가 늘지 않는가</b>이지
- * 파일 크기가 아니다. 그래서 대량 모드에서는 0.5초짜리(16KB)로 만든다.</p>
- *
- * <p><b>처리 시간 주의</b>: 건당 파일 안정성 검사(<code>voice.sync.stable-check-ms</code>)가
- * 그대로 곱해진다. local 프로파일은 100ms 라 1,000건 ≈ 2분, 10,000건 ≈ 20분이 든다.
- * 시연에서는 1,000건을 권한다.</p>
+ * <p><b>대용량(OOM 방어) 시험</b>: {@link #set(int, int)} 로 <b>일배치용</b> 건수를 올린다. 실데이터 규모는
+ * 접견 약 1,300건(6.5GB) · 전화 약 1,300건이다(2026-08-07 메타빌드 협의). 200건을 넘으면 대량 모드로 보고
+ * Mock WAV 를 짧게 만든다 — 우리가 보려는 것은 건수에 비례해 메모리가 늘지 않는가이지 파일 크기가 아니다.
+ * 건당 파일 안정성 검사({@code voice.sync.stable-check-ms}, local 100ms)가 그대로 곱해진다.</p>
  */
 @Log4j2
 @Component
@@ -28,23 +30,40 @@ public class MockDatasetState {
     /** 이 건수를 넘으면 대량 모드로 보고 파일을 짧게 만든다. */
     private static final int BULK_THRESHOLD = 200;
 
-    private static final int DEFAULT_MEET = 5;
-    private static final int DEFAULT_PHONE = 5;
+    public static final int DEFAULT_DAILY_MEET = 5;
+    public static final int DEFAULT_DAILY_PHONE = 5;
+    public static final int DEFAULT_PERIODIC_MEET = 1;
+    public static final int DEFAULT_PERIODIC_PHONE = 1;
     private static final int MAX_PER_KIND = 50_000;
 
-    private volatile int meetCount = DEFAULT_MEET;
-    private volatile int phoneCount = DEFAULT_PHONE;
+    /** 일배치용 — 대용량 시험 때 올리는 값. */
+    private volatile int meetCount = DEFAULT_DAILY_MEET;
+    private volatile int phoneCount = DEFAULT_DAILY_PHONE;
+    /** 주기배치용 — 고정 1·1. 시연에서 "접견만/전화만 실행" 이 이 건을 집는다. */
+    private volatile int periodicMeet = DEFAULT_PERIODIC_MEET;
+    private volatile int periodicPhone = DEFAULT_PERIODIC_PHONE;
 
+    /** 일배치용 접견 건수. */
     public int meetCount() {
         return meetCount;
     }
 
+    /** 일배치용 전화 건수. */
     public int phoneCount() {
         return phoneCount;
     }
 
+    public int periodicMeet() {
+        return periodicMeet;
+    }
+
+    public int periodicPhone() {
+        return periodicPhone;
+    }
+
+    /** 일배치 + 주기배치 전체 건수. */
     public int total() {
-        return meetCount + phoneCount;
+        return meetCount + phoneCount + periodicMeet + periodicPhone;
     }
 
     /** 대량 모드인가 — Mock 파일 길이를 줄일지 판단한다. */
@@ -58,7 +77,7 @@ public class MockDatasetState {
     }
 
     /**
-     * 규모를 바꾼다.
+     * 일배치용 규모를 바꾼다(대용량 시험). 주기배치용 1·1 은 그대로다.
      *
      * @throws IllegalArgumentException 음수이거나 상한을 넘는 경우
      */
@@ -67,18 +86,23 @@ public class MockDatasetState {
         validate("phone", phone);
         this.meetCount = meet;
         this.phoneCount = phone;
-        log.info("[MockDataset] 규모 변경 — 접견 {}건 · 전화 {}건 (대량모드={}, wav={}초)",
-                meet, phone, isBulk(), wavSeconds());
+        log.info("[MockDataset] 규모 변경 — 일배치 접견 {}건 · 전화 {}건 (+주기 {}·{}) (대량모드={}, wav={}초)",
+                meet, phone, periodicMeet, periodicPhone, isBulk(), wavSeconds());
     }
 
+    /** 시연 기본(일배치 5·5 + 주기 1·1)으로 되돌린다. */
     public void reset() {
-        set(DEFAULT_MEET, DEFAULT_PHONE);
+        this.periodicMeet = DEFAULT_PERIODIC_MEET;
+        this.periodicPhone = DEFAULT_PERIODIC_PHONE;
+        set(DEFAULT_DAILY_MEET, DEFAULT_DAILY_PHONE);
     }
 
     public Map<String, Object> snapshot() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("meetCount", meetCount);
         m.put("phoneCount", phoneCount);
+        m.put("periodicMeet", periodicMeet);
+        m.put("periodicPhone", periodicPhone);
         m.put("total", total());
         m.put("bulk", isBulk());
         m.put("wavSeconds", wavSeconds());
