@@ -64,15 +64,21 @@ public class VoiceMockController {
     private final FaultInjector faultInjector;
     private final VoiceDirState dirs;
     private final egovframework.voice.collector.stt.SttOutputStore outputStore;
+    private final egovframework.voice.collector.source.MockBoramiSeeder boramiSeeder;
     private final egovframework.voice.collector.logging.LogCollectorClient logCollector;
 
-    @Operation(summary = "Mock 데이터 초기화",
+    @Operation(summary = "Mock 데이터 초기화 / 생성",
             description = """
-                    시연을 처음부터 다시 하기 위한 초기화입니다. 세 가지를 지웁니다.
+                    시연을 처음부터 다시 하기 위한 초기화입니다.
 
                     1. **멱등 표식** — 이걸 지워야 같은 대상을 다시 처리할 수 있습니다
                     2. **수신 디렉터리의 파일** — 접견·전화 수신 폴더
                     3. **작업 디렉터리의 산출물** — 복호화 결과·Mock 기존 STT 텍스트
+                    4. **H2 Mock 보라미 재적재** — `data-borami-mock.sql` 을 **지금 시각 기준**으로 다시 깝니다
+                       (일배치용 접견 5·전화 5 = 어제 09시대, 주기배치용 접견 1·전화 1 = 5분 전. 총 12건).
+                       실DB(realdb)에 붙어 있으면 건너뜁니다
+                    5. **Mock 규모** 를 시연 기본(12건)으로 되돌립니다 — 대용량 시험으로 올려 둔 값이 남아
+                       10분 주기 배치가 수백 건을 돌던 문제를 막습니다
 
                     지운 뒤 현재 조회되는 대상 수를 함께 돌려줍니다.
                     """)
@@ -82,10 +88,13 @@ public class VoiceMockController {
         int meetFiles = deleteFilesIn(dirs.receiveMeet());
         int phoneFiles = deleteFilesIn(dirs.receivePhone());
         int workFiles = deleteFilesIn(Path.of(dirs.work(), "mock_source_stt").toString());
+        dataset.reset();
+        Map<String, Object> seed = boramiSeeder.reseed();
 
         List<VoiceTarget> targets = previewTargets();
-        log.info("[Mock] 초기화 — 표식 {}건, 접견파일 {}건, 전화파일 {}건, 작업파일 {}건",
-                markers, meetFiles, phoneFiles, workFiles);
+        long meet = targets.stream().filter(t -> t.kind() == VoiceKind.MEET).count();
+        log.info("[Mock] 초기화 — 표식 {}건, 접견파일 {}건, 전화파일 {}건, 작업파일 {}건, 재적재={}",
+                markers, meetFiles, phoneFiles, workFiles, seed.get("reseeded"));
 
         Map<String, Object> cleared = new LinkedHashMap<>();
         cleared.put("idempotencyMarkers", markers);
@@ -95,8 +104,13 @@ public class VoiceMockController {
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("cleared", cleared);
+        out.put("boramiMock", seed);
+        out.put("dataset", dataset.snapshot());
         out.put("targetCount", targets.size());
-        out.put("message", "초기화 완료 — 대상 %d건이 다시 처리 가능한 상태입니다".formatted(targets.size()));
+        out.put("targetMeet", meet);
+        out.put("targetPhone", targets.size() - meet);
+        out.put("message", "초기화 완료 — 대상 %d건(접견 %d · 전화 %d)이 다시 처리 가능한 상태입니다"
+                .formatted(targets.size(), meet, targets.size() - meet));
         return out;
     }
 
@@ -139,6 +153,8 @@ public class VoiceMockController {
         local.put("workFiles", deleteFilesIn(Path.of(dirs.work(), "mock_source_stt").toString()));
         local.put("sttOutputDirs", outputStore.deleteTestOutputs());
         out.put("local", local);
+        dataset.reset();
+        out.put("boramiMock", boramiSeeder.reseed());
 
         out.put("testJobId", props.batch().testJobId());
         out.put("message", "테스트(TST) 데이터 초기화 완료 — 운영 배치(VOC/STR/EXT)는 건드리지 않았습니다");
@@ -166,6 +182,7 @@ public class VoiceMockController {
             r.put("fileName", t.srcFileName());
             r.put("encrypted", t.encrypted());
             r.put("hasSourceStt", t.hasSourceStt());
+            r.put("occurredAt", t.occurredAt());
             r.put("processed", idempotency.isProcessed(t));
             rows.add(r);
         }
@@ -391,13 +408,17 @@ public class VoiceMockController {
     //  대용량 부하 — 스트리밍·청크 처리가 메모리를 지키는지 본다
     // ══════════════════════════════════════════════════════════════════════
 
-    @Operation(summary = "Mock 데이터 규모 설정",
+    @Operation(summary = "Mock 데이터 규모 설정 (대용량 시험)",
             description = """
-                    생성할 Mock 대상 건수를 바꿉니다. **OOM 방어 검증용**입니다.
+                    **일배치용** Mock 대상 건수를 바꿉니다(MOCK 소스 전용). **OOM 방어 검증용**입니다 —
+                    시연 기본은 일배치 접견 5·전화 5 + 주기배치 접견 1·전화 1(총 12건)이고,
+                    [Mock 데이터 초기화/생성] 이 이 값으로 되돌립니다.
 
                     실데이터 규모는 접견 약 1,300건(6.5GB) · 전화 약 1,300건입니다.
                     건수를 올려도 힙이 늘지 않아야 합니다 — 파일을 통째로 메모리에 올리지 않고
                     스트리밍으로 다루며, 건별로 처리한 뒤 바로 지우기 때문입니다.
+                    올린 건수는 **일배치(daily) 창**에 놓이므로 `POST /api/v1/voice/batches/daily` 로 돌립니다.
+                    10분 주기 배치는 여전히 접견 1·전화 1 만 집습니다.
 
                     **처리 시간 주의**: 건당 파일 안정성 검사(`voice.sync.stable-check-ms`)가
                     그대로 곱해집니다. local 기준 1,000건 ≈ 2분, 10,000건 ≈ 20분입니다.
@@ -409,8 +430,8 @@ public class VoiceMockController {
             @RequestParam(defaultValue = "5") int phone) {
         dataset.set(meet, phone);
         Map<String, Object> out = new LinkedHashMap<>(dataset.snapshot());
-        out.put("message", "대상 %d건으로 설정했습니다. [Mock 데이터 초기화] 후 배치를 실행하세요"
-                .formatted(dataset.total()));
+        out.put("message", "일배치용 접견 %d · 전화 %d (+주기 1·1) 로 설정했습니다. 멱등 표식을 지운 뒤 일배치를 실행하세요"
+                .formatted(meet, phone));
         return out;
     }
 
