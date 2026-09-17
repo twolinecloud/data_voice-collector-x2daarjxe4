@@ -53,7 +53,7 @@ class RestXvarmBrokerClientTest {
     /** 런타임 상태는 설정에서 초기화된다 — @PostConstruct 를 직접 불러 준다. */
     private static egovframework.voice.collector.config.VoiceModeState modeState(VoiceProperties p) {
         egovframework.voice.collector.config.VoiceModeState s =
-                new egovframework.voice.collector.config.VoiceModeState(p);
+                new egovframework.voice.collector.config.VoiceModeState(p, new egovframework.voice.collector.config.DeployEnvPreset(new org.springframework.mock.env.MockEnvironment(), p, ""));
         s.resetToConfigured();
         return s;
     }
@@ -201,16 +201,19 @@ class RestXvarmBrokerClientTest {
     }
 
     @Test
-    @DisplayName("base-url 이 비어 있으면 즉시 실패한다 — REST 모드에서는 필수")
+    @DisplayName("주소를 지우면 즉시 실패한다 — REST 모드에서는 필수 (설정이 비면 환경 프리셋이 채우므로 런타임에 비운 경우)")
     void requiresBaseUrl() {
         VoiceProperties noUrl = new VoiceProperties(
                 props().source(),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, "", java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 props().sync(), props().dirs(), props().decrypt(), props().stt(), props().batch(), props().sim());
+        egovframework.voice.collector.config.VoiceModeState state = modeState(noUrl);
+        // 설정이 비면 DeployEnvPreset 이 로컬 기본(localhost:8082)을 채운다 — 화면에서 일부러 지운 상황을 만든다
+        state.setBrokerBaseUrl("");
 
         assertThatThrownBy(() ->
-                new RestXvarmBrokerClient(noUrl, modeState(noUrl), rt, new EsbFileNamingPolicy()).extract(meet()))
+                new RestXvarmBrokerClient(noUrl, state, rt, new EsbFileNamingPolicy()).extract(meet()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("주소가 비어 있다");
     }

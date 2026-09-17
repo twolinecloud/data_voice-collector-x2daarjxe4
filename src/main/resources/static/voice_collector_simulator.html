@@ -151,12 +151,17 @@
     <div>
       <h4 class="mb-0">음성 수집 시뮬레이터</h4>
       <div class="text-secondary small">보라미 음성(접견·통화) → 수집 → 복호화 → STT → 출력 저장 · 로그 컬렉터 T1·T2·T4</div>
+      <div class="hint font-monospace" id="env-line">환경 감지 중…</div>
     </div>
-    <div class="d-flex gap-2">
-      <a class="btn btn-sm btn-outline-secondary" href="/swagger-ui.html" target="_blank">Swagger</a>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-sm btn-outline-secondary" id="lnk-swagger" href="/swagger-ui.html" target="_blank">Swagger</a>
+      <button class="btn btn-sm btn-warning" id="btn-reset"
+              title="Complete Clean &amp; Seed — 멱등 표식·수신 파일 삭제 + DB 메타(접견 7·전화 7: 트랙별 일배치 5·주기 2) + XVARM 원본 더미 파일 생성">
+        시뮬레이션 데이터 생성
+      </button>
       <button class="btn btn-sm btn-outline-danger" id="btn-test-clear"
-              title="시뮬레이터에서 돌린 배치(EXEC_ID 작업코드 = TST)의 로그 이력·로컬 산출물·STT 출력 폴더를 모두 지웁니다. 운영 배치(VOC/STR/EXT)는 건드리지 않습니다.">
-        테스트 데이터 초기화
+              title="테스트 데이터(EXEC_ID 작업코드 TST 의 로그 이력·STT 출력)와 시뮬레이션 데이터(DB 메타 SIM 행·더미 파일·멱등 표식)를 모두 지웁니다. 운영 배치(VOC/STR/EXT)는 건드리지 않습니다.">
+        시뮬레이션 데이터 초기화
       </button>
       <button class="btn btn-sm btn-outline-primary" id="btn-refresh">상태 새로고침</button>
     </div>
@@ -174,9 +179,9 @@
       <div class="row g-2 mb-2" id="dir-rows"></div>
       <div class="d-flex flex-wrap gap-2 align-items-end">
         <div class="input-group input-group-sm" style="max-width:24rem">
-          <span class="input-group-text">base-dir</span>
-          <input type="text" class="form-control font-monospace" id="dir-base" placeholder="C:/k8s 또는 /k8s">
-          <button class="btn btn-outline-dark" id="btn-dir-base" title="base-dir 아래 표준 배치(voice_raw/meet · voice_raw/phone · voice_work · xenon/voice · xenon/phone)로 5종을 채웁니다">표준 배치로 채우기</button>
+          <span class="input-group-text">ROOT_DIR</span>
+          <input type="text" class="form-control font-monospace" id="dir-base" placeholder="C:/k8s/voice_collector 또는 /k8s/voice_collector">
+          <button class="btn btn-outline-dark" id="btn-dir-base" title="ROOT_DIR 아래 표준 배치(xvram/original_voice_files · esb/meet · esb/phone · xvram/decoding · xenon/meet · xenon/phone)로 6종을 채웁니다">표준 배치로 채우기</button>
         </div>
         <div class="ms-auto d-flex gap-2">
           <button class="btn btn-sm btn-dark" id="btn-dir-apply">적용</button>
@@ -184,8 +189,9 @@
         </div>
       </div>
       <div class="hint mt-2">
-        STT 결과는 <code>{출력}/{execId}/{건ID}.txt + .json</code> — base 는 Windows 로컬 <code>C:/k8s</code>, 배포 PV <code>/k8s</code>.
-        수신(접견) 폴더를 바꾸면 <b>로컬 브로커의 <code>BROKER_OUTPUT_DIR</code> 도 같은 곳</b>이어야 합니다 — [브로커 연결 확인] 으로 대조.
+        ROOT_DIR 은 OS 로 자동 감지 — Windows <code>C:/k8s/voice_collector</code>, Linux/K8s <code>/k8s/voice_collector</code>. 표준 배치:
+        <code>xvram/original_voice_files</code> · <code>esb/meet</code> · <code>esb/phone</code> · <code>xvram/decoding</code> · <code>xenon/meet/{execId}</code> · <code>xenon/phone/{execId}</code> (없으면 자동 생성).
+        ESB 수신(접견) 폴더는 <b>로컬 브로커의 <code>BROKER_OUTPUT_DIR</code> 과 같아야</b> 합니다 — [브로커 연결 확인] 으로 대조.
       </div>
     </div></div></div>
   </div>
@@ -213,16 +219,14 @@
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white py-2"><strong>② 제어</strong></div>
     <div class="card-body py-2" id="controls">
-      <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 5·전화 5 = 10건(트랙별 일배치 3 · 10분 주기 2)</div>
+      <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 7·전화 7 = 14건(트랙별 일배치 5 · 10분 주기 2)</div>
       <div class="d-flex flex-wrap gap-2 mb-2">
-        <button class="btn btn-primary btn-sm"    id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
-        <button class="btn btn-sm"  id="btn-phone" style="background:#6f42c1;border-color:#6f42c1;color:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
-        <button class="btn btn-outline-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
-        <button class="btn btn-outline-primary btn-sm" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
+        <button class="btn btn-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
+        <button class="btn btn-primary btn-sm" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
+        <button class="btn btn-outline-primary btn-sm" id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
+        <button class="btn btn-sm" id="btn-phone" style="color:#6f42c1;border-color:#6f42c1;background:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
       </div>
       <div class="d-flex flex-wrap gap-2 mb-2">
-        <button class="btn btn-warning btn-sm"  id="btn-reset" title="Complete Clean &amp; Seed — 멱등 표식·수신 파일 삭제 + DB 메타(접견 5·전화 5, 트랙별 일배치 3·주기 2) + XVARM 원본 더미 파일 생성">시뮬레이션 데이터 생성</button>
-        <button class="btn btn-outline-warning btn-sm" id="btn-sim-clean" title="Complete Clean — DB 의 시뮬레이션 메타 행(SIM 접두)과 더미 파일·멱등 표식을 전부 삭제">시뮬레이션 데이터 초기화</button>
         <button class="btn btn-outline-secondary btn-sm" id="btn-targets">처리 대상 미리보기</button>
         <button class="btn btn-outline-secondary btn-sm" id="btn-files">수신 파일 확인</button>
         <button class="btn btn-outline-secondary btn-sm" id="btn-outputs">STT 출력 확인 (최근 배치)</button>
@@ -249,7 +253,7 @@
                   <div class="col-4"><button class="btn btn-sm btn-dark w-100" id="btn-dataset">규모 적용</button></div>
                 </div>
                 <div class="d-flex flex-wrap gap-1 mt-2">
-                  <button class="btn btn-sm btn-outline-secondary preset" data-m="3"    data-p="3">기본 (일배치 3·3 + 주기 2·2)</button>
+                  <button class="btn btn-sm btn-outline-secondary preset" data-m="5"    data-p="5">기본 (일배치 5·5 + 주기 2·2)</button>
                   <button class="btn btn-sm btn-outline-secondary preset" data-m="500"  data-p="500">1,000건</button>
                   <button class="btn btn-sm btn-outline-secondary preset" data-m="2500" data-p="2500">5,000건</button>
                   <button class="btn btn-sm btn-outline-secondary preset" data-m="5000" data-p="5000">10,000건</button>
@@ -383,14 +387,31 @@ const SWITCH_OPTS = {
   stt    : ['MOCK','NPU'],
 };
 const MOCKISH = ['MOCK','SKIP'];
-const DIR_KEYS = [
-  ['receiveMeet',  '수신 · 접견', '브로커·ESB 가 떨구는 곳'],
-  ['receivePhone', '수신 · 전화', 'ESB 전화 프로바이더가 떨구는 곳'],
-  ['work',         '작업',        '복호화 산출물 · 멱등 표식'],
-  ['outputMeet',   '출력 · 접견', 'STT 결과 {여기}/{execId}/'],
-  ['outputPhone',  '출력 · 전화', 'STT 결과 {여기}/{execId}/'],
-  ['xvarmOriginalBase', 'XVARM 원본', '더미 음성 파일 {여기}/meet · /phone (시뮬레이션 데이터 생성이 쓴다)'],
+// 디렉터리 6종 — 라벨·순서는 서버(/status 의 dirs.labels)가 내려준다. 없을 때의 기본값.
+let DIR_KEYS = [
+  ['xvarmOriginal', 'XVARM 접견 원본', '더미 음성 파일이 놓이는 곳'],
+  ['receiveMeet',   'ESB 수신 (접견)', '브로커·ESB 가 떨구는 곳'],
+  ['receivePhone',  'ESB 수신 (전화)', 'ESB 전화 프로바이더가 떨구는 곳'],
+  ['work',          'XVARM 복호화',    '복호화 산출물 · 멱등 표식'],
+  ['outputMeet',    '최종 저장 (접견)', 'STT 결과 {여기}/{execId}/'],
+  ['outputPhone',   '최종 저장 (전화)', 'STT 결과 {여기}/{execId}/'],
 ];
+// ── API base ──
+//   이 화면은 수집기(8085)가 직접 서빙할 수도, 배포 환경의 admin-fe(nginx)가 정적으로 서빙할 수도 있다.
+//   admin-fe 에서는 /api/v1/mock 이 커넥터로 가므로 수집기 API 는 /voice 프리픽스로 프록시된다.
+//   ?api=http://host:port 로 강제할 수 있고, 아니면 '' → '/voice' 순으로 살아 있는 쪽을 찾는다.
+let API_BASE = new URLSearchParams(location.search).get('api') || '';
+async function detectApiBase() {
+  if (new URLSearchParams(location.search).get('api')) return API_BASE;
+  for (const base of ['', '/voice']) {
+    try {
+      const r = await fetch(base + '/api/v1/voice/status', { headers:{ 'Accept':'application/json' } });
+      if (r.ok) { API_BASE = base; break; }
+    } catch (e) { /* 다음 후보 */ }
+  }
+  $('lnk-swagger').href = API_BASE + '/swagger-ui.html';
+  return API_BASE;
+}
 // 드롭다운 라벨 — 서버(/status 의 switchLabels)가 내려주고, 없으면 코드 그대로
 let SWITCH_LABELS = {};
 const lbl = (key, v) => (SWITCH_LABELS[key] && SWITCH_LABELS[key][v]) || v;
@@ -449,7 +470,7 @@ async function callFull(method, url, label, opts={}) {
   try {
     const init = { method, headers:{ 'Accept':'application/json' } };
     if (opts.json !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(opts.json); }
-    const res = await fetch(url, init);
+    const res = await fetch(url.startsWith('/') ? API_BASE + url : url, init);
     info.ms = Math.round(performance.now() - t0);
     info.status = res.status; info.statusText = res.statusText || (res.ok ? 'OK' : '');
     info.body = await res.json().catch(() => null);
@@ -692,6 +713,7 @@ let DIRS = null;
 function shortPath(p) { return (p||'').length > 34 ? '…' + p.slice(-33) : (p||''); }
 function renderDirs(d) {
   DIRS = d;
+  if (Array.isArray(d.labels) && d.labels.length) DIR_KEYS = d.labels;
   const cfg = d.configured || {};
   $('dir-paths').innerHTML = DIR_KEYS.map(([k, label]) => {
     const changed = cfg[k] !== undefined && cfg[k] !== d[k];
@@ -703,6 +725,7 @@ function renderDirs(d) {
   }).join('');
   document.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => applyDirPreset(b.dataset.preset));
   if (!$('dir-base').value) $('dir-base').value = d.baseDir || d.suggestedBaseDir || '';
+  $('dir-paths').insertAdjacentHTML('afterbegin', `<span title="ROOT_DIR (OS 자동 감지)"><span class="k">ROOT</span> <span class="v">${esc(d.baseDir||'')}</span></span>`);
   $('dir-rows').innerHTML = DIR_KEYS.map(([k, label, note]) => {
     if (k === 'xvarmOriginalBase') note += ` → ${esc(d.xvarmOriginalMeet||'')} · ${esc(d.xvarmOriginalPhone||'')}`;
     const changed = cfg[k] !== undefined && cfg[k] !== d[k];
@@ -726,7 +749,7 @@ async function applyDirPreset(key, baseDir) {
 $('btn-dir-toggle').onclick = () => { accToggle('dirs-acc'); $('btn-dir-toggle').textContent = $('dirs-acc').classList.contains('open') ? '접기 ▴' : '편집 ▾'; };
 $('btn-dir-base').onclick = () => {
   const b = $('dir-base').value.trim();
-  if (!b) { log('base-dir 를 입력하십시오 (예: C:/k8s, /k8s)', 'er'); return; }
+  if (!b) { log('ROOT_DIR 을 입력하십시오 (예: C:/k8s/voice_collector, /k8s/voice_collector)', 'er'); return; }
   applyDirPreset('base', b);
 };
 $('btn-dir-apply').onclick = async () => {
@@ -1129,19 +1152,6 @@ $('btn-reset').onclick = async () => {
   $('targets-card').classList.add('d-none');
   await loadStatus(true);
 };
-$('btn-sim-clean').onclick = async () => {
-  if (!confirm('DB 의 시뮬레이션 메타(SIM 접두 행)와 XVARM 원본 더미 파일, 멱등 표식을 전부 지웁니다. 계속할까요?')) return;
-  const info = await callFull('DELETE', '/api/v1/mock/sim-data', '시뮬레이션 데이터 초기화 (Complete Clean)');
-  const d = info.ok ? info.body : null;
-  if (!d) return;
-  const sim = d.sim || {};
-  log(`  └ DB 삭제 — ${Object.entries(sim.cleaned||{}).map(([k,v]) => `${k} ${v}`).join(' · ')} · 더미 파일 접견 ${sim.filesDeleted?.MEET ?? 0} · 전화 ${sim.filesDeleted?.PHONE ?? 0}`, 'ok');
-  log(`  └ ${d.message}`, 'ok');
-  renderSimResult('시뮬레이션 데이터 초기화', d, false);
-  $('targets-card').classList.add('d-none');
-  await loadStatus(true);
-};
-
 $('btn-dataset').onclick = async () => {
   const m = Number($('ds-meet').value||0), p = Number($('ds-phone').value||0);
   const d = await call('PUT', `/api/v1/mock/dataset?meet=${m}&phone=${p}`, `Mock 규모 일배치 ${m}·${p} 적용`);
@@ -1179,17 +1189,21 @@ $('btn-files').onclick = async () => {
 };
 
 $('btn-test-clear').onclick = async () => {
-  if (!confirm('시뮬레이터에서 돌린 시험 기록(EXEC_ID 작업코드 = TST)의 로그 이력·로컬 산출물·STT 출력 폴더를 모두 지웁니다. 운영 배치(VOC·STR·EXT)는 지워지지 않습니다. 계속할까요?')) return;
-  const d = await call('DELETE', '/api/v1/mock/test-data', '테스트 데이터 초기화 (TST)');
+  if (!confirm('테스트 이력(EXEC_ID 작업코드 TST 의 로그·STT 출력)과 시뮬레이션 데이터(DB 메타 SIM 행·XVARM 원본 더미 파일·멱등 표식)를 모두 지웁니다. 운영 배치(VOC·STR·EXT)는 지워지지 않습니다. 계속할까요?')) return;
+  const info = await callFull('DELETE', '/api/v1/mock/test-data', '시뮬레이션 데이터 초기화 (테스트 이력 + DB 메타 + 더미 파일)');
+  const d = info.ok ? info.body : null;
   if (!d) return;
   const lc = d.logCollector;
   if (lc && typeof lc === 'object') log(`  └ 로그 이력 삭제 — ${Object.entries(lc).map(([k,v]) => `${k} ${v}`).join(' · ')}`, 'ok');
   else log(`  └ 로그 이력 — ${lc}`, 'wr');
   const l = d.local || {};
   log(`  └ 로컬 — 표식 ${l.idempotencyMarkers} · 접견파일 ${l.meetFiles} · 전화파일 ${l.phoneFiles} · 작업파일 ${l.workFiles} · STT 출력 폴더 ${l.sttOutputDirs}`, 'ok');
+  const sim = d.sim || {};
+  log(`  └ DB 메타 삭제 — ${Object.entries(sim.cleaned||{}).map(([k,v]) => `${k} ${v}`).join(' · ')} · 더미 파일 접견 ${sim.filesDeleted?.MEET ?? 0} · 전화 ${sim.filesDeleted?.PHONE ?? 0}`, 'ok');
   log(`  └ ${d.message}`, 'ok');
+  renderSimResult('시뮬레이션 데이터 초기화', d, false);
   $('stats').innerHTML = ''; $('last-exec').textContent = '—';
-  $('result-acc-wrap').innerHTML = '<div class="hint">테스트 데이터를 초기화했습니다.</div>';
+  $('result-acc-wrap').innerHTML = '<div class="hint">시뮬레이션 데이터를 초기화했습니다. 다시 돌리려면 [시뮬레이션 데이터 생성] 을 누르십시오.</div>';
   $('files-acc-wrap').innerHTML = '';
   LAST = null;
   $('targets-card').classList.add('d-none');
@@ -1199,9 +1213,24 @@ $('btn-test-clear').onclick = async () => {
 $('btn-refresh').onclick = () => loadStatus(false);
 $('btn-clear').onclick   = () => { $('log').innerHTML = ''; };
 
-log('시뮬레이터 준비 완료. [시뮬레이션 데이터 생성] → [처리 대상 미리보기] → [접견만/전화만 실행] 순서를 권합니다. (접견 5·전화 5 = 10건: 트랙별 일배치 3 / 10분 주기 2)', 'hd');
-log('접견과 전화는 연동 경로가 완전히 다릅니다 — 전화는 XVARM·브로커를 타지 않습니다. STT 결과는 {출력}/{execId}/ 폴더에 남습니다.', 'hd');
-loadStatus(false);
+// 환경 자동 프리셋(GET /api/v1/voice/config) — 서버가 OS·profile 로 정한 ROOT_DIR·브로커·로그 컬렉터·DB 를 받아 화면을 맞춘다.
+//   경로 input 은 renderDirs, 브로커 라디오는 renderTracks(현재 주소와 같은 프리셋이 선택), 로그 컬렉터 카드·DB 줄은 loadStatus 가 그린다.
+async function loadConfig() {
+  const c = await call('GET', '/api/v1/voice/config', '환경 설정 조회 (자동 프리셋)', true);
+  if (!c || !c.env) { $('env-line').textContent = '환경 정보를 받지 못했습니다'; return; }
+  const e = c.env;
+  $('env-line').innerHTML = `환경 <b>${esc(e.kindLabel)}</b> · ${esc(e.os)} · profile ${esc((e.profiles||[]).join(','))}`
+    + ` · ROOT_DIR <code>${esc(e.rootDir)}</code> <span class="text-secondary">(${esc(e.rootDirSource)})</span>`
+    + ` · 브로커 <code>${esc(e.brokerBaseUrl)}</code> <span class="text-secondary">(${esc(e.brokerBaseUrlSource)})</span>`
+    + ` · 로그 컬렉터 <code>${esc(e.logCollectorBaseUrl)}</code> <span class="text-secondary">(${esc(e.logCollectorBaseUrlSource)})</span>`
+    + (API_BASE ? ` · API <code>${esc(API_BASE)}</code>` : '');
+  if (!$('rt-ok-url').dataset.touched) $('rt-ok-url').value = c.broker?.baseUrlConfigured || e.brokerBaseUrl;
+  log(`환경 자동 프리셋 — ${e.kindLabel} · ROOT_DIR ${e.rootDir} · 브로커 ${e.brokerBaseUrl} · 로그 컬렉터 ${e.logCollectorBaseUrl} · DB ${c.db?.label||''}`, 'hd');
+}
+
+log('시뮬레이터 준비 완료. [시뮬레이션 데이터 생성] → [처리 대상 미리보기] → [전체 실행] 순서를 권합니다. (접견 7·전화 7 = 14건: 트랙별 일배치 5 / 10분 주기 2)', 'hd');
+log('접견과 전화는 연동 경로가 완전히 다릅니다 — 전화는 XVARM·브로커를 타지 않습니다. STT 결과는 {최종 저장}/{execId}/ 폴더에 남습니다.', 'hd');
+(async () => { await detectApiBase(); await loadConfig(); await loadStatus(false); })();
 </script>
 </body>
 </html>

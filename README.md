@@ -89,27 +89,27 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 브로커 없이 돌리려면 시뮬레이터의 [XVARM 브로커] 드롭다운을 `MOCK` 으로 내리면 된다
 (또는 `VOICE_BROKER_MODE=MOCK`).
 
-### 시뮬레이션 데이터 — DB 메타 10건 + 물리 더미 파일 (Complete Clean & Seed)
+### 시뮬레이션 데이터 — DB 메타 14건 + 물리 더미 파일 (Complete Clean & Seed)
 
-**접견 5 · 전화 5 = 10건**을 `SimulationDataService` 가 만든다. DB 메타(접견 re·im·sm·xvarm 4단 1:1:1:1, 전화 im 통화내역 + im 특이수용자 1:1)와
+**접견 7 · 전화 7 = 14건**을 `SimulationDataService` 가 만든다. DB 메타(접견 re·im·sm·xvarm 4단 1:1:1:1, 전화 im 통화내역 + im 특이수용자 1:1)와
 DB 파일명과 1:1 인 **경량 더미 음성 파일**(수십 byte)을 한 번에 쓴다. 로컬(H2)은 기동 시 자동 생성하고(`voice.sim.seed-on-startup=true`),
 개발계(PostgreSQL)는 시뮬레이터 버튼으로만 만든다.
 
 | 배치 | 시간창 | 접견 | 전화 | 시각 |
 |---|---|---:|---:|---|
-| 일배치 `POST /batches/daily` | [어제 00:00, 오늘 00:00) | 3 | 3 | 어제 09:10 / 09:20 / 09:30 |
+| 일배치 `POST /batches/daily` | [어제 00:00, 오늘 00:00) | 5 | 5 | 어제 09:10 ~ 09:50 (10분 간격) |
 | 10분 주기 `POST /batches/periodic` (접견만·전화만 포함) | [지금-20분, 지금) | 2 | 2 | 지금-6분 / 지금-3분 |
 
 | 버튼 / API | 하는 일 |
 |---|---|
-| **시뮬레이션 데이터 생성** `POST /api/v1/mock/sim-data` (= `/reset`) | 멱등 표식·수신 파일 삭제 → SIM 행 삭제 → (개발계) 누락 테이블 생성 → 10건 INSERT → 더미 파일 11개 write(전화 기존 STT 텍스트 1개 포함) |
-| **시뮬레이션 데이터 초기화** `DELETE /api/v1/mock/sim-data` | SIM 접두 행 일괄 DELETE(수용자·녹취·통화·공통파일·XVARM) + 더미 파일(`mock_*`) 삭제 + 멱등 표식 삭제 |
+| **시뮬레이션 데이터 생성** (상단) `POST /api/v1/mock/sim-data` (= `/reset`) | 표준 폴더 확인/생성 → 멱등 표식·수신 파일 삭제 → SIM 행 삭제 → (개발계) 누락 테이블 생성 → 14건 INSERT → 더미 파일 15개 write(전화 기존 STT 텍스트 1개 포함) |
+| **시뮬레이션 데이터 초기화** (상단) `DELETE /api/v1/mock/test-data` | 테스트 이력(TST 로그·STT 출력 폴더) + SIM 접두 행 일괄 DELETE(수용자·녹취·통화·공통파일·XVARM) + 더미 파일(`mock_*`) + 멱등 표식 — 시뮬레이터가 만든 것 전부 |
+| 시뮬레이션 데이터만 초기화 `DELETE /api/v1/mock/sim-data` | 위에서 테스트 이력을 뺀 것(API 전용) |
 | 현황 `GET /api/v1/mock/sim-data` | DB 종류 · 조립된 테이블명 · SIM 행 수 · 더미 파일 목록 |
 
 - 우리가 넣은 행은 전부 **`SIM` 접두**(교정번호 `SIM…`, 녹취 `SIM-MEET-nnn`, 통화 `SIM-PHONE-nnn`, 공통파일 `SIMCMFInnnn`, 문서 `SIMDOCnnnn`)라
   초기화가 운영·다른 사람 행을 건드리지 않는다. INSERT 는 테이블 정의서의 NOT NULL 컬럼을 전부 채운다(개발계 실제 테이블 기준)
-- 더미 파일 위치(`voice.dirs.xvarm-original-base`, 비우면 OS 로 결정 · 자동 생성): Windows `C:/XVARM_ORIGINAL_VOICE_FILES/{meet,phone}` ·
-  Linux/K8s `/k8s/XVARM_ORIGINAL_VOICE_FILES/{meet,phone}`. `TARE_FLPTH_NM`/`TELP_RECRD_FLPTH_NM` 이 이 폴더, XVARM `FILEKEY` 가 파일 절대경로다
+- 더미 파일 위치: `{ROOT_DIR}/xvram/original_voice_files` (아래 "표준 디렉터리" 참조). `TARE_FLPTH_NM`/`TELP_RECRD_FLPTH_NM` 이 이 폴더, XVARM `FILEKEY` 가 파일 절대경로다
 - 시각은 **생성 시점 기준**이라 기동 후 20분이 지나면 주기배치 창이 비니, 시연 직전에 [시뮬레이션 데이터 생성] 을 한 번 누른다.
   전체 배치는 10초 안에 끝난다(접견은 로컬 브로커 추출 지연 `BROKER_DELAY_MS`=1500ms 가 대부분 — 더 빠르게는 브로커에 `BROKER_DELAY_MS=0`)
 
@@ -152,6 +152,19 @@ DBeaver 에서 손으로 만들려면 [`ref/borami_missing_tables.sql`](ref/bora
 |---|---|
 | **`http://localhost:8085/voice_collector_simulator.html`** | **시뮬레이터** — 시연용 조작 화면 |
 | `http://localhost:8085/swagger-ui.html` | Swagger — API 개별 호출·스펙 확인 |
+| `https://<admin-fe>/voice_collector_simulator.html` | **배포 환경** — admin-fe(nginx)가 같은 HTML 을 정적으로 서빙하고 `/voice/` 를 수집기로 프록시 |
+
+**배포 환경은 admin-fe 를 통해서만 화면이 뜬다.** 같은 HTML 이 `service_admin-fe-iqgor1oiru/public/voice_collector_simulator.html` 에도 있고,
+화면 JS 가 API base 를 `''` → `/voice` 순으로 자동 감지한다(수집기가 직접 서빙하면 `''`, admin-fe 면 `/voice`; `?api=http://host:port` 로 강제 가능).
+admin-fe 의 `custom-nginx.conf` 에 `location = /voice_collector_simulator.html`(정적)과 `location /voice/`(→ `voice-collector-x2daarjxe4:8080`) 가 있다.
+
+백엔드 빌드·push 때 admin-fe 도 같이 올린다 — **`scripts/sync-admin-fe.ps1`**(`.sh`)이 HTML 을 복사하고 admin-fe 의
+`public/voice_collector_simulator.html` · `custom-nginx.conf` 를 add · commit · push 한다:
+
+```powershell
+.\scripts\sync-admin-fe.ps1            # 복사 → 변경 있으면 commit · push (admin-fe 현재 브랜치)
+.\scripts\sync-admin-fe.ps1 -NoPush    # commit 까지만
+```
 
 ### 로그 컬렉터 연동 (로컬)
 
@@ -169,10 +182,12 @@ log-collector:
 
 시뮬레이터 화면 구성 (상세 정보는 전부 **아코디언**이라 접힌 채 얇게 보이고, 클릭하면 스르륵 펼쳐진다):
 
-- **상단 서브헤더 — 디렉터리** — 수신(접견·전화) · 작업 · STT 출력(접견·전화) 5종 경로를 한 줄로 보여주고,
-  프리셋 버튼 `로컬 기본(설정값)` / `Windows C:/k8s` / `PV /k8s` 을 고르는 즉시 반영한다(현재 값과 같은 프리셋이 진하게).
-  [편집 ▾] 을 누르면 5종 입력칸과 base-dir 로 표준 배치 채우기가 펼쳐진다.
-  수신(접견)을 바꾸면 로컬 브로커의 `BROKER_OUTPUT_DIR` 도 맞춰야 한다 — [브로커 연결 확인] 으로 대조
+- **헤더** — [Swagger] · **[시뮬레이션 데이터 생성]**(`POST /api/v1/mock/sim-data`) · **[시뮬레이션 데이터 초기화]**(`DELETE /api/v1/mock/test-data` — 테스트 이력 + 시뮬레이션 데이터 전부) · [상태 새로고침].
+  그 아래 "환경" 줄에 자동 감지 결과(LOCAL/K8S · OS · ROOT_DIR · 브로커 · 로그 컬렉터 주소와 출처)가 뜬다
+- **상단 서브헤더 — 디렉터리** — ROOT_DIR 과 표준 6종(XVARM 접견 원본 · ESB 수신 접견/전화 · XVARM 복호화(작업) · 최종 저장 접견/전화) 경로를 한 줄로 보여주고,
+  프리셋 버튼 `기본(자동 감지)` / `Windows C:/k8s/voice_collector` / `PV /k8s/voice_collector` 을 고르는 즉시 반영한다(현재 값과 같은 프리셋이 진하게).
+  [편집 ▾] 을 누르면 6종 입력칸과 ROOT_DIR 로 표준 배치 채우기가 펼쳐진다 — 로드될 때 OS 감지값으로 채워져 있다.
+  ESB 수신(접견)을 바꾸면 로컬 브로커의 `BROKER_OUTPUT_DIR` 도 맞춰야 한다 — [브로커 연결 확인] 으로 대조
 - **① 처리 구간 모드** — 접견·전화 2트랙의 스위치를 **드롭다운으로 즉시 전환**(서버 재시작 불필요).
   데이터 조회는 `MOCK (로컬 H2)` / `개발계 DB` / `메타빌드 (ESB)` 로 표기하고, `개발계 DB` 를 고르면 그 아래
   **XVARM 연동 라디오**(`XVARM DB MOCK (개발계)` 기본 / `실 XVARM DB`)가 뜬다. 지금 붙어 있는 DB 와 조립된 테이블명도 한 줄로 보인다.
@@ -180,9 +195,9 @@ log-collector:
   브로커가 `REST` 면 단계 아래에 **주소 라디오**(`개발계 K8s` / `로컬 PC`)가 뜨고 고르는 즉시 반영된다 —
   기동 설정값과 같은 항목에 `(Default)` 가 붙는다(`voice.broker.presets` 에서 내려준다)
 - **② 제어**
-  - 배치 4종: `접견만`(`POST /api/v1/voice/batches/periodic?kinds=MEET`) · `전화만`(`?kinds=PHONE`) ·
-    `10분 주기`(`/periodic`) · `일배치`(`/daily`) — 실행 중에는 버튼이 잠기고 누른 버튼에 스피너가 돈다
-  - 보조: `시뮬레이션 데이터 생성`(Clean & Seed — DB 메타 10건 + 더미 파일) · `시뮬레이션 데이터 초기화`(Complete Clean) · `대상 미리보기` · `수신 파일` · `STT 출력 확인` · `브로커 연결 확인`
+  - 배치 4종(왼쪽부터): **`전체 실행(10분 주기)`**(`POST /api/v1/voice/batches/periodic`) · **`전체 실행(일배치)`**(`/daily`) — 기본색 ·
+    `접견만`(`/periodic?kinds=MEET`) · `전화만`(`?kinds=PHONE`) — 옅은 색. 실행 중에는 버튼이 잠기고 누른 버튼에 스피너가 돈다
+  - 보조: `대상 미리보기` · `수신 파일` · `STT 출력 확인` · `브로커 연결 확인` (시뮬레이션 데이터 생성/초기화는 헤더로 옮겼다)
   - **고급 (접힘)**: 대용량 Mock(일배치용 건수 + 프리셋 1,000 / 5,000 / 10,000건) · 장애 주입(활성 토글 + 실패 % · 지연 % · 지연 ms).
     규모를 올리거나 장애 주입이 켜져 있으면 접힌 상태에서도 노란 요약이 뜬다
 - **③ 최근 배치 결과** — 대상 / 성공 / 실패 / 건너뜀 / 상태 숫자 +
@@ -216,7 +231,7 @@ curl      "http://localhost:8085/api/v1/voice/status"           # 현재 구성
 
 | 드롭다운 | 붙는 DB | 설정 |
 |---|---|---|
-| `MOCK (로컬 H2)` | 인메모리 H2 Mock 보라미 — 기동 시 스키마·필터 검증 행 + 시뮬레이션 10건 자동 | `voice.source.local-h2` |
+| `MOCK (로컬 H2)` | 인메모리 H2 Mock 보라미 — 기동 시 스키마·필터 검증 행 + 시뮬레이션 14건 자동 | `voice.source.local-h2` |
 | `개발계 DB` | 개발계 borami-db(PostgreSQL). 로컬은 포트포워딩(15433) 전제 | `voice.source.direct-db` (`BORAMI_DB_URL` / `BORAMI_DB_USER` / `BORAMI_DB_PASSWORD`) |
 | `메타빌드 (ESB)` | DB 를 쓰지 않는다 — ESB HTTP2DB | `voice.source.esb-base-url` |
 
@@ -232,7 +247,7 @@ curl      "http://localhost:8085/api/v1/voice/status"           # 현재 구성
 H2 에 보라미 Mock 스키마가 올라간다. `MOCK (로컬 H2)` 모드가 이 DB 를 JDBC 로 조회한다(MyBatis SQL 이 실제로 돈다).
 
 `data-borami-mock.sql` 에는 **걸러져야 할 행**만 있다(삭제된 녹취, 해제된 특이수용자, 대상 아닌 관리코드,
-녹음 안 된 통화 — 대상이 되지 않아 배치 시간에는 영향이 없다). 유효 대상 10건은 시뮬레이션 데이터 생성이 만든다.
+녹음 안 된 통화 — 대상이 되지 않아 배치 시간에는 영향이 없다). 유효 대상 14건은 시뮬레이션 데이터 생성이 만든다.
 
 **DIRECT_JDBC 원본 쿼리**(접견 4단 조인 · 전화 조인 · 전화 지름길)를 스키마·테이블명과 값을 풀어
 DBeaver 에서 바로 실행할 수 있게 [`ref/borami_direct_jdbc_queries.sql`](ref/borami_direct_jdbc_queries.sql) 에 두었다.
@@ -253,7 +268,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local,realdb
 ```
 
 > 개발계 DB 에 [시뮬레이션 데이터 생성] 을 누르면 XVARM 모드가 `MOCK_DEV` 일 때 누락 테이블(`sm.tb_smsm_cmfi_bs` · `xvarm.asyscontentelement`)을
-> 먼저 만들고 10건을 넣는다. [시뮬레이션 데이터 초기화] 가 `SIM` 접두 행만 지운다. 대용량(10건 초과) 시딩은 로컬 H2 에서만 허용한다.
+> 먼저 만들고 14건을 넣는다. [시뮬레이션 데이터 초기화] 가 `SIM` 접두 행(과 테스트 이력)을 지운다. 대용량(14건 초과) 시딩은 로컬 H2 에서만 허용한다.
 
 로그 컬렉터용 DB는 별도다(네임스페이스가 다르니 `-n` 을 빠뜨리지 말 것).
 
@@ -272,7 +287,7 @@ kubectl port-forward -n service-core svc/admin-db-fy9tjq4tsk 15432:5432
 
 ### 대용량 부하 (OOM 방어)
 
-실데이터 규모는 접견 약 1,300건(6.5GB) · 전화 약 1,300건이다. 10건짜리 시뮬레이션 데이터로는
+실데이터 규모는 접견 약 1,300건(6.5GB) · 전화 약 1,300건이다. 14건짜리 시뮬레이션 데이터로는
 스트리밍·청크 처리가 메모리를 지키는지 알 수 없어, MOCK 소스의 **일배치용** 건수를 런타임에 올릴 수 있게 했다
 (주기배치용 2·2 는 그대로라 10분 주기 배치가 수백 건을 돌 일이 없다). 올린 값은 [시뮬레이션 데이터 생성] 이 기본으로 되돌린다.
 
@@ -311,29 +326,38 @@ STT 구간에 의도적으로 실패와 지연을 섞는다. **확인하려는 �
 - `ResilienceE2ETest` 가 수신·작업 디렉터리를 직접 세어 **전부 실패한 배치에서도 잔여 0** 임을 검증한다
   (예전의 `PiiResidueAuditor` · `GET /api/v1/mock/pii-residue` · 결과의 `residue` 는 제거했다)
 
-### STT 결과 저장 — 배치 단위 폴더
+### 환경 자동 감지 — ROOT_DIR · 브로커 · 로그 컬렉터 (`DeployEnvPreset`)
 
-STT 텍스트는 외부로 보내지 않고 **배치(EXEC_ID) 단위 폴더**에 남긴다. 하류(비식별)가 여기서 읽어 간다.
+기동 시 **OS 와 active profile** 로 환경을 정하고, 설정이 비어 있는 값을 채운다. 환경변수(ConfigMap)로 주면 그것이 이긴다.
 
-```
-{base-dir}/xenon/voice/{execId}/{건ID}.txt + .json     접견
-{base-dir}/xenon/phone/{execId}/{건ID}.txt + .json     전화
-```
-
-| 설정 (`voice.dirs.*`) | 환경변수 | local | dev/prod (PV) |
+| | Windows / 로컬(local 프로파일) | Linux / 배포(K8s) | 덮어쓰기 |
 |---|---|---|---|
-| `base-dir` | `VOICE_BASE_DIR` | `C:/k8s` | `/k8s` |
-| `receive-meet` / `receive-phone` | `VOICE_MEET_DIR` / `VOICE_PHONE_DIR` | `./work/voice_raw/{meet,phone}` | `{base}/voice_raw/{meet,phone}` |
-| `work` | `VOICE_WORK_DIR` | `./work/voice_work` | `{base}/voice_work` |
-| `output-meet` / `output-phone` | `VOICE_OUTPUT_MEET_DIR` / `VOICE_OUTPUT_PHONE_DIR` | `{base}/xenon/{voice,phone}` | `{base}/xenon/{voice,phone}` |
+| ROOT_DIR | `C:/k8s/voice_collector` | `/k8s/voice_collector` | `VOICE_BASE_DIR` |
+| XVARM 브로커 (①카드 라디오 · ④ 복구 주소) | `http://localhost:8082` | `http://borami-xvarm-broker-1joiuorqhl:8080` | `VOICE_BROKER_BASE_URL` |
+| 로그 컬렉터 | `http://localhost:8090/logc` | `http://log-collector-a2z96kgyrm:8080/logc` | `LOG_COLLECTOR_BASE_URL` |
 
-- 로컬은 수신·작업 폴더만 레포 상대경로에 둔다 — 로컬 브로커(local 프로파일)가 기본으로 그곳에 떨구기 때문이다.
-  전부 `C:/k8s` 로 옮기려면 시뮬레이터 ② 프리셋 "Windows C:/k8s" + 브로커 `BROKER_OUTPUT_DIR=C:/k8s/voice_raw/meet`
-- 런타임 변경: `GET/PUT /api/v1/mock/dirs` · `PUT /api/v1/mock/dirs/preset?key=configured|win|pv|base&baseDir=` ·
-  `POST /api/v1/mock/dirs/reset` (재기동하면 설정값으로 돌아간다)
-- 배치 응답의 `outputDirs` 가 이 배치의 폴더, `outcomes[].sttPath` 가 파일별 경로다.
-  텍스트 자체는 `GET /api/v1/mock/stt-outputs?execId=` 로만 본다(시뮬레이터용 · 운영 차단)
-- **테스트 데이터 초기화**(`DELETE /api/v1/mock/test-data`)가 EXEC_ID 에 `TST` 가 든 출력 폴더도 통째로 지운다
+- ROOT_DIR 은 OS 로, URL 은 환경 종류(LOCAL/K8S)로 정한다. `GET /api/v1/voice/config`(와 `/status` 의 `env`)가 이 값을 내려주고,
+  시뮬레이터가 로드될 때 상단 디렉터리 input · [XVARM 브로커] 라디오 · 로그 컬렉터 카드 · DB 정보를 그 값으로 맞춘다(헤더 "환경" 줄에 출처 표기)
+- 로그 컬렉터 K8s 주소는 차트(`data_HelmChart/pipeline/log-collector-a2z96kgyrm`)의 Service 명 `log-collector-a2z96kgyrm` · 포트 8080 이다
+
+### 표준 디렉터리 6종 — ROOT_DIR 아래
+
+```
+{ROOT_DIR}/xvram/original_voice_files   XVARM 접견 원본 (시뮬레이션 더미 파일)      voice.dirs.xvarm-original  VOICE_XVARM_ORIGINAL_DIR
+{ROOT_DIR}/esb/meet                     ESB 원본 수신 (접견) — 브로커 BROKER_OUTPUT_DIR 과 같아야   receive-meet   VOICE_MEET_DIR
+{ROOT_DIR}/esb/phone                    ESB 원본 수신 (전화)                         receive-phone  VOICE_PHONE_DIR
+{ROOT_DIR}/xvram/decoding               XVARM 접견 복호화 (작업 · 멱등 표식)         work           VOICE_WORK_DIR
+{ROOT_DIR}/xenon/meet/{execId}          최종 변환/저장 (접견) — {건ID}.txt + .json    output-meet    VOICE_OUTPUT_MEET_DIR
+{ROOT_DIR}/xenon/phone/{execId}         최종 변환/저장 (전화)                         output-phone   VOICE_OUTPUT_PHONE_DIR
+```
+
+- 없는 폴더는 **앱 기동 · 시뮬레이션 데이터 생성/초기화 · 경로 변경** 때 만든다(CREATE_IF_NOT_EXISTS)
+- STT 텍스트는 외부로 보내지 않고 배치(EXEC_ID) 단위 폴더에 남긴다. 하류(비식별)가 여기서 읽어 간다.
+  배치 응답의 `outputDirs` 가 이 배치의 폴더, `outcomes[].sttPath` 가 파일별 경로. 텍스트는 `GET /api/v1/mock/stt-outputs?execId=` 로만(시뮬레이터용)
+- 로컬 브로커(local 프로파일)는 기본으로 다른 폴더에 떨구므로 브로커에 `BROKER_OUTPUT_DIR=C:/k8s/voice_collector/esb/meet`(K8s 는 `/k8s/voice_collector/esb/meet`)를 준다 —
+  [브로커 연결 확인] 이 두 경로를 대조한다
+- 런타임 변경: `GET/PUT /api/v1/mock/dirs` · `PUT /api/v1/mock/dirs/preset?key=configured|win|pv|base&baseDir=` · `POST /api/v1/mock/dirs/reset`
+- [시뮬레이션 데이터 초기화](`DELETE /api/v1/mock/test-data`)가 EXEC_ID 에 `TST` 가 든 출력 폴더도 통째로 지운다
 
 ### T2 단계 로그 — COLLECT · ANALYZE
 

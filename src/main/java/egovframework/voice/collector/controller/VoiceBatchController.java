@@ -59,6 +59,7 @@ public class VoiceBatchController {
     private final egovframework.voice.collector.config.MockDatasetState dataset;
     private final egovframework.voice.collector.source.DbKindDetector db;
     private final egovframework.voice.collector.source.BoramiTableNames tables;
+    private final egovframework.voice.collector.config.DeployEnvPreset deployEnv;
 
     @Operation(summary = "일배치 실행",
             description = """
@@ -139,7 +140,8 @@ public class VoiceBatchController {
         dirMap.put("namingPolicy", props.sync().namingPolicy());
         dirMap.put("configured", dirs.configured());
         dirMap.put("presets", dirs.presets());
-        dirMap.put("suggestedBaseDir", VoiceDirState.suggestedBaseDir());
+        dirMap.put("suggestedBaseDir", deployEnv.rootDir());
+        dirMap.put("labels", VoiceDirState.LABELS);
         dirMap.put("outputPattern", "{outputMeet|outputPhone}/{execId}/{건ID}.txt (+ .json 메타)");
 
         Map<String, Object> out = new LinkedHashMap<>();
@@ -174,6 +176,54 @@ public class VoiceBatchController {
         // 장애 주입이 켜진 줄 모르고 시연하면 실패 건수를 버그로 오해한다 — 항상 노출한다.
         out.put("chaos", faultInjector.snapshot());
         out.put("dataset", dataset.snapshot());
+        // 환경 자동 감지(OS · profile) 결과 — 화면이 이 값으로 경로·브로커·컬렉터를 자동으로 맞춘다
+        out.put("env", deployEnv.snapshot());
+        return out;
+    }
+
+    @Operation(summary = "환경 설정 조회 (자동 프리셋)",
+            description = """
+                    서버가 기동 시 **OS 와 active profile 로 감지한 환경 프리셋**과 지금 적용 중인 값을 돌려줍니다.
+                    시뮬레이터가 로드될 때 이 값으로 상단 디렉터리 input · [XVARM 브로커] 라디오 · 로그 컬렉터 카드 · DB 정보를 맞춥니다.
+
+                    | | Windows / 로컬(local 프로파일) | Linux / 배포(K8s) |
+                    |---|---|---|
+                    | ROOT_DIR | `C:/k8s/voice_collector` | `/k8s/voice_collector` |
+                    | XVARM 브로커 | `http://localhost:8082` | `http://borami-xvarm-broker-1joiuorqhl:8080` |
+                    | 로그 컬렉터 | `http://localhost:8090/logc` | `http://log-collector-a2z96kgyrm:8080/logc` |
+
+                    설정(환경변수 `VOICE_BASE_DIR` · `VOICE_BROKER_BASE_URL` · `LOG_COLLECTOR_BASE_URL`)이 있으면 그것이 이깁니다.
+                    표준 디렉터리 6종은 `{ROOT_DIR}/xvram/original_voice_files` · `esb/meet` · `esb/phone` · `xvram/decoding` ·
+                    `xenon/meet/{execId}` · `xenon/phone/{execId}` 이고 없으면 자동 생성됩니다.
+                    """)
+    @GetMapping("/config")
+    public Map<String, Object> config() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("env", deployEnv.snapshot());
+        Map<String, Object> dirMap = new LinkedHashMap<>(dirs.snapshot());
+        dirMap.put("configured", dirs.configured());
+        dirMap.put("presets", dirs.presets());
+        dirMap.put("labels", VoiceDirState.LABELS);
+        out.put("dirs", dirMap);
+        Map<String, Object> brokerMap = new LinkedHashMap<>();
+        brokerMap.put("mode", modeState.broker().name());
+        brokerMap.put("baseUrl", modeState.brokerBaseUrl());
+        brokerMap.put("baseUrlConfigured", modeState.configuredBrokerBaseUrl());
+        brokerMap.put("presets", props.broker().presets());
+        out.put("broker", brokerMap);
+        Map<String, Object> logc = new LinkedHashMap<>();
+        logc.put("enabled", logCollector.isEnabled());
+        logc.put("baseUrl", blankToNull(logCollector.baseUrl()));
+        out.put("logCollector", logc);
+        Map<String, Object> dbInfo = new LinkedHashMap<>();
+        dbInfo.put("target", db.target().name());
+        dbInfo.put("kind", db.kind().name());
+        dbInfo.put("label", db.label());
+        dbInfo.put("url", db.url());
+        dbInfo.put("xvarmMode", modeState.xvarm().name());
+        dbInfo.put("lastProbe", db.lastProbe());
+        out.put("db", dbInfo);
+        out.put("modes", modeState.snapshot());
         return out;
     }
 

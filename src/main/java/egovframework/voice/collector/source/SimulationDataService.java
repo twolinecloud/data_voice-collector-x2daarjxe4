@@ -26,7 +26,7 @@ import java.util.stream.Stream;
 /**
  * 시뮬레이션 데이터 — <b>DB 메타(보라미·XVARM) + 물리 더미 음성 파일</b>을 한 번에 만들고 지운다.
  *
- * <p><b>구성 (접견 5 · 전화 5 = 10건)</b>: 트랙마다 3건은 <b>어제 09:10/09:20/09:30</b>(일배치 창), 2건은
+ * <p><b>구성 (접견 7 · 전화 7 = 14건)</b>: 트랙마다 5건은 <b>어제 09:10~09:50</b>(일배치 창), 2건은
  * <b>지금-6분 / 지금-3분</b>(10분 주기 창). 접견은 4단(re·im·sm·xvarm) 1:1:1:1, 전화는 im 통화내역 + im 특이수용자 1:1 로
  * 조인이 서는 유효 메타를 넣고, DB 의 파일명과 1:1 인 경량 더미 파일(0~1KB)을 XVARM 원본 스토리지에 쓴다.</p>
  *
@@ -43,8 +43,8 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class SimulationDataService {
 
-    /** 시연 기본 — 트랙별 일배치 3건(어제) + 주기배치 2건(최근 10분) = 5건. */
-    public static final int DAILY_PER_KIND = 3;
+    /** 시연 기본 — 트랙별 일배치 5건(어제) + 주기배치 2건(최근 10분) = 7건, 합계 14건. */
+    public static final int DAILY_PER_KIND = 5;
     public static final int PERIODIC_PER_KIND = 2;
     public static final int MEET_COUNT = DAILY_PER_KIND + PERIODIC_PER_KIND;
     public static final int PHONE_COUNT = DAILY_PER_KIND + PERIODIC_PER_KIND;
@@ -125,6 +125,7 @@ public class SimulationDataService {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("db", db.label());
         out.put("target", db.target().name());
+        out.put("dirsEnsured", dirs.ensureDirs());
         out.put("ensured", ensureXvarmMockTables());
         Map<String, Object> cleaned = cleanRows();
         out.put("cleaned", cleaned);
@@ -135,7 +136,9 @@ public class SimulationDataService {
         int inmates = Math.max(meetCount, phoneCount);
         List<Object[]> inmateRows = new ArrayList<>();
         for (int i = 1; i <= inmates; i++) {
-            inmateRows.add(new Object[] {corrNo(i), 1, SPECL_CODES[(i - 1) % SPECL_CODES.length], "A01", "20260101", null, ts, USR, ts, USR});
+            // 001 만 마약(1) — 나머지는 2/3/0/5 를 돌린다(코드 필터 테스트가 001 하나만 기대한다)
+            String code = i == 1 ? SPECL_CODES[0] : SPECL_CODES[1 + ((i - 2) % (SPECL_CODES.length - 1))];
+            inmateRows.add(new Object[] {corrNo(i), 1, code, "A01", "20260101", null, ts, USR, ts, USR});
         }
         jdbc.batchUpdate("INSERT INTO " + tables.imscPtprDt()
                 + " (CORR_NO, PTCR_PRSR_DTL_SN, SPECL_MNG_SE_CD, PTCR_PRSR_SE_CD, PTCR_PRSR_APNT_YMD, PTCR_PRSR_RMV_YMD,"
@@ -228,6 +231,7 @@ public class SimulationDataService {
     public Map<String, Object> clean() {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("db", db.label());
+        out.put("dirsEnsured", dirs.ensureDirs());
         out.put("cleaned", cleanRows());
         out.put("filesDeleted", deleteDummyFiles());
         log.info("[Sim] 시뮬레이션 데이터 초기화 — {}", out);
@@ -255,16 +259,17 @@ public class SimulationDataService {
         }
     }
 
-    /** 원본 스토리지(meet·phone)의 더미 파일({@code mock_*})을 지운다. 우리가 만든 이름만 — 남의 파일은 두 손 댄다. */
+    /** 원본 스토리지의 더미 파일({@code mock_meet_*} · {@code mock_phone_*})을 지운다. 우리가 만든 이름만 — 남의 파일은 손 대지 않는다. */
     private Map<String, Integer> deleteDummyFiles() {
         Map<String, Integer> m = new LinkedHashMap<>();
         for (VoiceKind k : VoiceKind.values()) {
             Path dir = dirs.xvarmOriginalDir(k);
+            String prefix = k == VoiceKind.MEET ? "mock_meet_" : "mock_phone_";
             int n = 0;
             if (Files.isDirectory(dir)) {
                 try (Stream<Path> s = Files.list(dir)) {
                     for (Path f : s.filter(Files::isRegularFile)
-                            .filter(f -> f.getFileName().toString().startsWith("mock_")).toList()) {
+                            .filter(f -> f.getFileName().toString().startsWith(prefix)).toList()) {
                         Files.deleteIfExists(f);
                         n++;
                     }
@@ -391,11 +396,13 @@ public class SimulationDataService {
                     // 목록을 못 읽으면 빈 목록 — 상태 조회가 실패를 만들면 안 된다
                 }
             }
+            String prefix = k == VoiceKind.MEET ? "mock_meet_" : "mock_phone_";
+            List<String> mine = names.stream().filter(n -> n.startsWith(prefix)).toList();
             Map<String, Object> d = new LinkedHashMap<>();
             d.put("dir", slash(dir));
             d.put("exists", Files.isDirectory(dir));
-            d.put("count", names.size());
-            d.put("names", names);
+            d.put("count", mine.size());
+            d.put("names", mine);
             m.put(k.name(), d);
         }
         return m;

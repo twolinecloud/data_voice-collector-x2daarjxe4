@@ -34,6 +34,7 @@ import java.util.Map;
 public class VoiceModeState {
 
     private final VoiceProperties props;
+    private final DeployEnvPreset env;
 
     private volatile SourceMode source;
     private volatile BrokerMode broker;
@@ -67,7 +68,8 @@ public class VoiceModeState {
         this.decrypt = props.decrypt().mode();
         this.stt = props.stt().mode();
         this.xvarm = props.source().xvarmMode();
-        this.brokerBaseUrl = nullToBlank(props.broker().baseUrl());
+        // 설정(voice.broker.base-url)이 비면 환경 프리셋 — 로컬 localhost:8082 · K8s 브로커 서비스명
+        this.brokerBaseUrl = nullToBlank(env.brokerBaseUrl());
         log.info("[Mode] 초기 모드 — 접견트랙(source={} xvarm={} broker={}) · 전화트랙(source={} phone={}) · 공통(decrypt={} stt={})",
                 source, xvarm, broker, source, phone, decrypt, stt);
     }
@@ -202,9 +204,9 @@ public class VoiceModeState {
         init();
     }
 
-    /** 기동 시 설정된 브로커 주소(되돌리기 기준). */
+    /** 기동 시 브로커 주소(되돌리기 기준) — 설정이 비면 환경 프리셋 값. */
     public String configuredBrokerBaseUrl() {
-        return nullToBlank(props.broker().baseUrl());
+        return nullToBlank(env.brokerBaseUrl());
     }
 
     private <E extends Enum<E>> E parse(Class<E> type, String value, String key) {

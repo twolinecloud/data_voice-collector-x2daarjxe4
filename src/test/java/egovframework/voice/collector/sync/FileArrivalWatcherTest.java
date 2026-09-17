@@ -58,7 +58,7 @@ class FileArrivalWatcherTest {
         Files.createDirectories(meet);
         Files.createDirectories(phone);
         VoiceProperties p = props(meet, phone);
-        egovframework.voice.collector.config.VoiceDirState dirs = new egovframework.voice.collector.config.VoiceDirState(p);
+        egovframework.voice.collector.config.VoiceDirState dirs = new egovframework.voice.collector.config.VoiceDirState(p, new egovframework.voice.collector.config.DeployEnvPreset(new org.springframework.mock.env.MockEnvironment(), p, ""));
         dirs.resetToConfigured();
         return new FileArrivalWatcher(p, dirs, new EsbFileNamingPolicy());
     }

@@ -17,7 +17,8 @@ class VoiceModeStateTest {
 
     @BeforeEach
     void setUp() {
-        state = new VoiceModeState(props());
+        VoiceProperties p = props();
+        state = new VoiceModeState(p, new egovframework.voice.collector.config.DeployEnvPreset(new org.springframework.mock.env.MockEnvironment(), p, ""));
         state.resetToConfigured();
     }
 

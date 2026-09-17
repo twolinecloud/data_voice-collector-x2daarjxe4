@@ -9,9 +9,9 @@ import java.util.Map;
 /**
  * Mock 데이터셋 규모 — 시연 기본은 <b>12건</b>, 대용량 부하 시험 때만 올린다.
  *
- * <p><b>시연 기본 배치</b> (시뮬레이션 데이터 {@code SimulationDataService} 와 같은 구성 — 접견 5 · 전화 5)</p>
+ * <p><b>시연 기본 배치</b> (시뮬레이션 데이터 {@code SimulationDataService} 와 같은 구성 — 접견 7 · 전화 7 = 14건)</p>
  * <pre>
- *   일배치(DAILY)      — 접견 3 · 전화 3   (어제 09:10/09:20/09:30)
+ *   일배치(DAILY)      — 접견 5 · 전화 5   (어제 09:10~09:50)
  *   주기배치(PERIODIC) — 접견 2 · 전화 2   (지금-6분 / 지금-3분)
  * </pre>
  * <p>MOCK 소스는 이 두 묶음을 만들어 두고 <b>배치 시간창에 걸리는 것만</b> 돌려준다. 예전에는 창과 무관하게
@@ -30,8 +30,8 @@ public class MockDatasetState {
     /** 이 건수를 넘으면 대량 모드로 보고 파일을 짧게 만든다. */
     private static final int BULK_THRESHOLD = 200;
 
-    public static final int DEFAULT_DAILY_MEET = 3;
-    public static final int DEFAULT_DAILY_PHONE = 3;
+    public static final int DEFAULT_DAILY_MEET = 5;
+    public static final int DEFAULT_DAILY_PHONE = 5;
     public static final int DEFAULT_PERIODIC_MEET = 2;
     public static final int DEFAULT_PERIODIC_PHONE = 2;
     private static final int MAX_PER_KIND = 50_000;
@@ -90,7 +90,7 @@ public class MockDatasetState {
                 meet, phone, periodicMeet, periodicPhone, isBulk(), wavSeconds());
     }
 
-    /** 시연 기본(일배치 3·3 + 주기 2·2 = 10건)으로 되돌린다. */
+    /** 시연 기본(일배치 5·5 + 주기 2·2 = 14건)으로 되돌린다. */
     public void reset() {
         this.periodicMeet = DEFAULT_PERIODIC_MEET;
         this.periodicPhone = DEFAULT_PERIODIC_PHONE;

@@ -54,6 +54,7 @@ import java.util.List;
 public class LogCollectorClient {
 
     private final ObjectMapper objectMapper;
+    private final egovframework.voice.collector.config.DeployEnvPreset env;
 
     private RestTemplate restTemplate;
 
@@ -75,6 +76,10 @@ public class LogCollectorClient {
 
     @PostConstruct
     void init() {
+        // 설정(log-collector.base-url / LOG_COLLECTOR_BASE_URL)이 비면 환경 프리셋 — 로컬 8090 · K8s 컬렉터 서비스명
+        if (!StringUtils.hasText(baseUrl)) {
+            baseUrl = env.logCollectorBaseUrl();
+        }
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(connectTimeoutSec)).build());
         factory.setReadTimeout(Duration.ofSeconds(readTimeoutSec));

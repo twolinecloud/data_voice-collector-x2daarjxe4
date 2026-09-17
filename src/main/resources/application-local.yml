@@ -30,7 +30,7 @@ spring:
 #     로컬 임시 ID(…VOC-LOCAL)로 돌아간다.
 log-collector:
   enabled: ${LOG_COLLECTOR_ENABLED:true}
-  base-url: ${LOG_COLLECTOR_BASE_URL:http://localhost:8090/logc}
+  base-url: ${LOG_COLLECTOR_BASE_URL:}     # 비우면 환경 프리셋(로컬 http://localhost:8090/logc)
   auth-token: ${LOG_COLLECTOR_TOKEN:}
 
 # ── 실제 K8s DB 를 보려면 (포트포워딩 전제) ──────────────────────────────
@@ -88,7 +88,7 @@ voice:
   #     curl -X PUT "http://localhost:8085/api/v1/mock/modes/broker?value=MOCK"
   broker:
     mode: ${VOICE_BROKER_MODE:REST}
-    base-url: ${VOICE_BROKER_BASE_URL:http://localhost:8082}
+    base-url: ${VOICE_BROKER_BASE_URL:}     # 비우면 환경 프리셋(로컬 http://localhost:8082)
     # 시뮬레이터의 원클릭 주소 프리셋. 환경마다 브로커가 사는 곳이 달라
     # 매번 손으로 치지 않게 둔다. 주소가 바뀌면 여기만 고치면 화면에 그대로 반영된다.
     presets:
@@ -118,23 +118,17 @@ voice:
     wait-timeout-sec: ${VOICE_WAIT_TIMEOUT_SEC:20}
     naming-policy: ORIGINAL
 
-  # ── 디렉터리 (로컬) ──────────────────────────────────────────────────────
-  #   base-dir 는 Windows 로컬 표준 C:/k8s — STT 출력이 C:/k8s/xenon/voice/{execId}/ (접견) ·
-  #   C:/k8s/xenon/phone/{execId}/ (전화) 로 쌓인다. 개발계 PV(/k8s) 와 같은 구조다.
-  #
-  #   수신·작업 폴더만 레포 상대경로(./work)에 둔다 — 로컬 브로커(local 프로파일)가 기본으로
-  #   ../data_voice-collector-x2daarjxe4/work/voice_raw/meet 에 파일을 떨구기 때문이다. 전부 C:/k8s 로
-  #   옮기려면 시뮬레이터 [디렉터리] 프리셋 "Windows C:/k8s" 를 고르고, 브로커에
-  #   BROKER_OUTPUT_DIR=C:/k8s/voice_raw/meet 를 주면 된다.
+  # ── 디렉터리 (로컬) — ROOT_DIR 자동: Windows C:/k8s/voice_collector ─────────
+  #   전부 비워 두면 표준 배치가 된다. 로컬 브로커(local 프로파일)는 기본으로 다른 폴더에 떨구므로
+  #   브로커에 BROKER_OUTPUT_DIR=C:/k8s/voice_collector/esb/meet 를 주거나 [브로커 연결 확인] 으로 대조한다.
   dirs:
-    base-dir: ${VOICE_BASE_DIR:C:/k8s}
-    receive-meet: ${VOICE_MEET_DIR:./work/voice_raw/meet}
-    receive-phone: ${VOICE_PHONE_DIR:./work/voice_raw/phone}
-    work: ${VOICE_WORK_DIR:./work/voice_work}
-    output-meet: ${VOICE_OUTPUT_MEET_DIR:${voice.dirs.base-dir}/xenon/voice}
-    output-phone: ${VOICE_OUTPUT_PHONE_DIR:${voice.dirs.base-dir}/xenon/phone}
-    # XVARM 원본 더미 파일 — Windows 기본 C:/XVARM_ORIGINAL_VOICE_FILES/{meet,phone} (비우면 OS 로 정한다)
-    xvarm-original-base: ${VOICE_XVARM_ORIGINAL_DIR:}
+    base-dir: ${VOICE_BASE_DIR:}
+    xvarm-original: ${VOICE_XVARM_ORIGINAL_DIR:}
+    receive-meet: ${VOICE_MEET_DIR:}
+    receive-phone: ${VOICE_PHONE_DIR:}
+    work: ${VOICE_WORK_DIR:}
+    output-meet: ${VOICE_OUTPUT_MEET_DIR:}
+    output-phone: ${VOICE_OUTPUT_PHONE_DIR:}
 
   # 로컬 H2 는 매 기동마다 비어 있으므로 시뮬레이션 데이터(접견 5·전화 5 + 더미 파일)를 기동 시 자동 생성한다.
   sim:

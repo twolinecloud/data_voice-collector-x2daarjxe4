@@ -43,7 +43,7 @@ class BoramiTableNamesTest {
                 new VoiceProperties.Batch("0 0 2 * * *", "0 */10 * * * *", 20, false,
                         List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "UNSTRUCTURED", false),
                 new VoiceProperties.Sim(false));
-        egovframework.voice.collector.config.VoiceModeState mode = new egovframework.voice.collector.config.VoiceModeState(p);
+        egovframework.voice.collector.config.VoiceModeState mode = new egovframework.voice.collector.config.VoiceModeState(p, new egovframework.voice.collector.config.DeployEnvPreset(new org.springframework.mock.env.MockEnvironment(), p, ""));
         mode.resetToConfigured();
         return new BoramiTableNames(p, mode, DbKindDetector.fixed(dbKind));
     }

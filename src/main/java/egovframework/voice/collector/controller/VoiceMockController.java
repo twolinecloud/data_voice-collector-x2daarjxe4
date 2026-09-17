@@ -66,6 +66,7 @@ public class VoiceMockController {
     private final egovframework.voice.collector.stt.SttOutputStore outputStore;
     private final egovframework.voice.collector.source.SimulationDataService sim;
     private final egovframework.voice.collector.source.DbKindDetector dbKind;
+    private final egovframework.voice.collector.config.DeployEnvPreset deployEnv;
     private final egovframework.voice.collector.logging.LogCollectorClient logCollector;
 
     @Operation(summary = "시뮬레이션 데이터 생성 (Complete Clean & Seed)",
@@ -154,7 +155,7 @@ public class VoiceMockController {
         return cleared;
     }
 
-    @Operation(summary = "테스트 데이터 초기화 (TST 연쇄 삭제)",
+    @Operation(summary = "시뮬레이션 데이터 초기화 (테스트 이력 + 시뮬레이션 데이터 일괄 삭제)",
             description = """
                     **시뮬레이터에서 돌린 시험 기록을 통째로 지웁니다.**
 
@@ -168,9 +169,11 @@ public class VoiceMockController {
                        컬렉터가 `JOB_ID='TEST_BATCH'` 인 T1 과 하위 T2~T8 을 FK 안전 순서로
                        연쇄 삭제합니다. 삭제 SQL 에 작업코드 조건이 박혀 있어 운영 배치는
                        어떤 경우에도 걸리지 않습니다.
-                    2. **로컬 산출물** — 멱등 표식·수신 파일·작업 파일 (Mock 초기화와 동일)
+                    2. **로컬 산출물** — 멱등 표식·수신 파일·작업 파일
                     3. **STT 출력 폴더** — `{output}/{execId}/` 중 EXEC_ID 에 `TST` 가 든 폴더째
-                    4. 마지막으로 **시뮬레이션 데이터를 다시 생성**합니다(Clean & Seed) — 바로 다음 시연을 돌릴 수 있게
+                    4. **시뮬레이션 데이터** — DB 의 SIM 접두 메타 행 일괄 DELETE + XVARM 원본 더미 파일 삭제 (= `DELETE /sim-data`)
+
+                    즉 시뮬레이터가 만든 것을 전부 되돌립니다. 다시 돌리려면 [시뮬레이션 데이터 생성] 을 누릅니다.
                     """)
     @DeleteMapping("/test-data")
     public Map<String, Object> deleteTestData() {
@@ -195,10 +198,11 @@ public class VoiceMockController {
         local.put("sttOutputDirs", outputStore.deleteTestOutputs());
         out.put("local", local);
         dataset.reset();
-        out.put("sim", sim.seed());
+        // ③ 시뮬레이션 데이터 (DB 메타 SIM 행 + 더미 파일) — 만들지는 않는다
+        out.put("sim", sim.clean());
 
         out.put("testJobId", props.batch().testJobId());
-        out.put("message", "테스트(TST) 데이터 초기화 완료 — 운영 배치(VOC/STR/EXT)는 건드리지 않았습니다");
+        out.put("message", "시뮬레이션 데이터 초기화 완료 — 테스트(TST) 이력·STT 출력·DB 메타·더미 파일을 지웠습니다. 운영 배치(VOC/STR/EXT)는 건드리지 않았습니다");
         log.info("[Mock] 테스트 데이터 초기화 — 컬렉터={} 로컬={}", out.get("logCollector"), local);
         return out;
     }
@@ -316,7 +320,7 @@ public class VoiceMockController {
 
     @Operation(summary = "디렉터리 프리셋 적용",
             description = """
-                    프리셋 하나로 5종을 한 번에 바꿉니다.
+                    프리셋 하나로 6종을 한 번에 바꿉니다.
 
                     - `configured` : 기동 시 설정값(로컬 기본)
                     - `win`        : Windows 로컬 `C:/k8s` 아래 표준 배치
@@ -331,8 +335,8 @@ public class VoiceMockController {
                                               @RequestParam(required = false) String baseDir) {
         Map<String, String> target = switch (key.trim().toLowerCase()) {
             case "configured" -> dirs.configured();
-            case "win" -> VoiceDirState.layoutOf("C:/k8s");
-            case "pv" -> VoiceDirState.layoutOf("/k8s");
+            case "win" -> VoiceDirState.layoutOf(egovframework.voice.collector.config.DeployEnvPreset.ROOT_WINDOWS);
+            case "pv" -> VoiceDirState.layoutOf(egovframework.voice.collector.config.DeployEnvPreset.ROOT_LINUX);
             case "base" -> {
                 if (baseDir == null || baseDir.isBlank()) {
                     throw new IllegalArgumentException("key=base 에는 baseDir 이 필요하다");
@@ -363,7 +367,8 @@ public class VoiceMockController {
         out.put("absolute", abs);
         out.put("configured", dirs.configured());
         out.put("presets", dirs.presets());
-        out.put("suggestedBaseDir", VoiceDirState.suggestedBaseDir());
+        out.put("suggestedBaseDir", deployEnv.rootDir());
+        out.put("labels", VoiceDirState.LABELS);
         return out;
     }
 

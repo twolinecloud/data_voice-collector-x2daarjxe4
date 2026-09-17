@@ -187,38 +187,31 @@ public record VoiceProperties(
     ) {}
 
     /**
-     * 디렉터리 5종 — <b>수신(접견·전화) · 작업 · STT 출력(접견·전화)</b>.
+     * 디렉터리 6종 — ROOT_DIR 아래 <b>표준 배치</b>. 비우면 ROOT_DIR 로 파생되고, 채우면 그 값이 이긴다.
      *
-     * <p><b>왜 한곳에 모았나</b>: 수신 폴더는 ESB·브로커가 떨궈 주는 곳(상대가 정한다), 작업 폴더는
-     * 복호화 산출물·멱등 표식(우리 내부), 출력 폴더는 STT 결과가 <b>남는</b> 곳(하류가 읽는다)이다.
-     * 셋의 성격이 달라 하나의 값으로 묶을 수 없지만, 어디에 무엇이 쌓이는지는 한 화면에서 보여야
-     * 경로가 어긋났을 때 바로 잡힌다. 기동 초기값은 여기서 오고, 시뮬레이터에서 런타임으로
-     * 바꿀 수 있다({@code VoiceDirState}).</p>
+     * <pre>
+     *   ROOT_DIR (base-dir)   비우면 OS 로 결정 — Windows C:/k8s/voice_collector · Linux/K8s /k8s/voice_collector
+     *   xvarmOriginal          {ROOT}/xvram/original_voice_files   XVARM 접견 원본(시뮬레이션 더미 파일도 여기)
+     *   receiveMeet            {ROOT}/esb/meet                     ESB 원본 수신 (접견) — 브로커·ESB 가 떨구는 곳
+     *   receivePhone           {ROOT}/esb/phone                    ESB 원본 수신 (전화)
+     *   work                   {ROOT}/xvram/decoding               XVARM 접견 복호화 산출물 · 멱등 표식
+     *   outputMeet             {ROOT}/xenon/meet                   최종 변환/저장 (접견) — 실제 파일은 {outputMeet}/{execId}/
+     *   outputPhone            {ROOT}/xenon/phone                  최종 변환/저장 (전화) — 실제 파일은 {outputPhone}/{execId}/
+     * </pre>
      *
-     * <p><b>STT 출력은 배치 단위로 격리한다</b> — {@code {output}/{execId}/} 아래에 그 배치가 만든
-     * 텍스트만 놓인다. 배치를 재처리하면 새 EXEC_ID 폴더가 생기고, 시험 배치(TST)는 폴더째 지운다.
-     * 표준 배치는 {@code {base-dir}/xenon/voice/{execId}/}(접견) · {@code {base-dir}/xenon/phone/{execId}/}(전화) 다.
-     * base-dir 는 Windows 로컬 {@code C:/k8s}, 배포(PV) {@code /k8s}.</p>
+     * <p>기동 초기값은 여기서 오고 시뮬레이터에서 런타임으로 바꿀 수 있다({@code VoiceDirState}). 앱 기동과
+     * 시뮬레이션 데이터 생성/초기화 때 없는 폴더는 만든다(CREATE_IF_NOT_EXISTS).</p>
      */
     public record Dirs(
-            /** 표준 배치의 뿌리. 출력 폴더 기본값이 여기서 파생된다(application.yml 의 placeholder). */
-            @DefaultValue("./work") String baseDir,
-            /** 접견 파일 수신 디렉터리 — 브로커·ESB 가 떨궈 주는 곳 */
-            @DefaultValue("./work/voice_raw/meet") String receiveMeet,
-            /** 전화 파일 수신 디렉터리 — ESB 전화 프로바이더가 떨궈 주는 곳 */
-            @DefaultValue("./work/voice_raw/phone") String receivePhone,
-            /** 복호화 산출물·멱등 표식 등 작업 공간 */
-            @DefaultValue("./work/voice_work") String work,
-            /** 접견 STT 결과 출력 뿌리 — 실제 파일은 {@code {outputMeet}/{execId}/} 아래 */
-            @DefaultValue("./work/xenon/voice") String outputMeet,
-            /** 전화 STT 결과 출력 뿌리 — 실제 파일은 {@code {outputPhone}/{execId}/} 아래 */
-            @DefaultValue("./work/xenon/phone") String outputPhone,
-            /**
-             * XVARM 원본 음성 파일 스토리지(보라미 쪽 원본을 흉내 내는 자리) 뿌리. 아래 {@code meet}/{@code phone} 가 생긴다.
-             * 비우면 OS 로 정한다 — Windows {@code C:/XVARM_ORIGINAL_VOICE_FILES}, 그 외 {@code /k8s/XVARM_ORIGINAL_VOICE_FILES}.
-             * 시뮬레이션 데이터 생성이 DB 메타의 파일명과 1:1 인 경량 더미 파일(0~1KB)을 여기에 쓴다.
-             */
-            @DefaultValue("") String xvarmOriginalBase
+            /** ROOT_DIR. 비우면 OS 로 정한다({@code DeployEnvPreset}). */
+            @DefaultValue("") String baseDir,
+            @DefaultValue("") String receiveMeet,
+            @DefaultValue("") String receivePhone,
+            @DefaultValue("") String work,
+            @DefaultValue("") String outputMeet,
+            @DefaultValue("") String outputPhone,
+            /** XVARM 접견 원본 음성 스토리지 — 시뮬레이션 데이터 생성이 DB 파일명과 1:1 인 경량 더미 파일을 여기에 쓴다. */
+            @DefaultValue("") String xvarmOriginal
     ) {}
 
     /** 시뮬레이션 데이터(개발계 DB 메타 + 물리 더미 파일) 생성 정책. */

@@ -57,7 +57,7 @@ class ResilienceE2ETest {
         registry.add("voice.dirs.work", () -> tmp.resolve("work").toString());
         registry.add("voice.dirs.output-meet", () -> tmp.resolve("xenon/voice").toString());
         registry.add("voice.dirs.output-phone", () -> tmp.resolve("xenon/phone").toString());
-        registry.add("voice.dirs.xvarm-original-base", () -> tmp.resolve("xvarm_original").toString());
+        registry.add("voice.dirs.xvarm-original", () -> tmp.resolve("xvarm_original").toString());
         registry.add("voice.sync.wait-timeout-sec", () -> "15");
         registry.add("voice.sync.stable-check-ms", () -> "30");
         registry.add("log-collector.enabled", () -> "false");
@@ -78,8 +78,8 @@ class ResilienceE2ETest {
     @Autowired
     private egovframework.voice.collector.source.SimulationDataService sim;
 
-    /** Mock 기본 대상(넓은 창) — 일배치용 접견 3·전화 3 + 주기배치용 접견 2·전화 2. */
-    private static final int TOTAL = 10;
+    /** 시뮬레이션 기본 대상(넓은 창) — 일배치용 접견 5·전화 5 + 주기배치용 접견 2·전화 2. */
+    private static final int TOTAL = 14;
 
     /**
      * 그중 1건(전화 3번)은 <b>보라미가 이미 가진 STT</b> 를 쓴다(계획서 Q1 시나리오).
@@ -88,7 +88,7 @@ class ResilienceE2ETest {
     private static final int SOURCE_STT = 1;
 
     /** STT 엔진을 실제로 타는 건수 = 장애 주입이 닿는 범위. */
-    private static final int STT_DEPENDENT = TOTAL - SOURCE_STT;   // 9
+    private static final int STT_DEPENDENT = TOTAL - SOURCE_STT;   // 13
 
     private BatchWindow wide() {
         LocalDateTime now = LocalDateTime.now();
