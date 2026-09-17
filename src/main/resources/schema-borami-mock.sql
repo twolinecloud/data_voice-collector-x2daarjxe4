@@ -100,8 +100,12 @@ CREATE TABLE TB_IMPH_UCDR_DS (
     ACQT_RLTNS_NM           VARCHAR(40),             -- 지인관계명 (PII)
     INTRL_TELNO             VARCHAR(15)   NOT NULL,  -- 국제전화번호 (PII)
     TELP_PCALL_BGNG_DT      CHAR(14)      NOT NULL,  -- 통화시작일시
+    TELP_PCALL_RSPNS_DT     CHAR(14)      NOT NULL DEFAULT '00000000000000',  -- 통화응답일시 (스펙 NOT NULL — 개발계 DB 와 같은 INSERT 가 돌게 둔다)
     TELP_PCALL_END_DT       CHAR(14)      NOT NULL,  -- 통화종료일시
     TELP_PCALL_TIME         NUMERIC(20,0) NOT NULL,  -- 통화시간(초)
+    TELP_RSPNS_TIME         NUMERIC(20,0) NOT NULL DEFAULT 0,    -- 전화응답시간 (스펙 NOT NULL)
+    TELP_PCALL_RSPNS_YN     VARCHAR(1)    NOT NULL DEFAULT 'Y',  -- 전화통화응답여부 (스펙 NOT NULL)
+    TELP_PCALL_OCRN_AMT     NUMERIC(18,0) NOT NULL DEFAULT 0,    -- 전화통화발생금액 (스펙 NOT NULL)
     TELP_PCALL_RECRD_YN     CHAR(1)       NOT NULL,  -- ★ 녹음여부 — 'Y' 만 파일이 있다
     TELP_PTCR_PRSR_YN       CHAR(1)       NOT NULL,  -- ★ 전화특이수용자여부 — 지름길 필터 후보
     TELP_PTCR_PRSR_TCNT     NUMERIC(2,0),

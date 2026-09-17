@@ -57,6 +57,8 @@ public class VoiceBatchController {
     private final egovframework.voice.collector.config.VoiceModeState modeState;
     private final egovframework.voice.collector.config.FaultInjector faultInjector;
     private final egovframework.voice.collector.config.MockDatasetState dataset;
+    private final egovframework.voice.collector.source.DbKindDetector db;
+    private final egovframework.voice.collector.source.BoramiTableNames tables;
 
     @Operation(summary = "일배치 실행",
             description = """
@@ -114,6 +116,7 @@ public class VoiceBatchController {
         modes.put("phone", phoneFileProvider.mode());
         modes.put("decrypt", decryptService.mode());
         modes.put("stt", sttClient.mode());
+        modes.put("xvarm", modeState.xvarm().name());
 
         Map<String, Object> logc = new LinkedHashMap<>();
         logc.put("enabled", logCollector.isEnabled());
@@ -141,6 +144,15 @@ public class VoiceBatchController {
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("modes", modes);
+        out.put("switchLabels", switchLabels());
+        // 지금 붙어 있는 DB — 개발계 DB 모드에서 "어디를 보는지" 를 화면에 그대로 보여준다
+        Map<String, Object> dbInfo = new LinkedHashMap<>();
+        dbInfo.put("kind", db.kind().name());
+        dbInfo.put("label", db.label());
+        dbInfo.put("url", db.url());
+        dbInfo.put("tables", tables.describe());
+        dbInfo.put("xvarmMode", modeState.xvarm().name());
+        out.put("db", dbInfo);
         out.put("configuredModes", modeState.configured());
         out.put("logCollector", logc);
         out.put("batch", batch);
@@ -174,9 +186,8 @@ public class VoiceBatchController {
         meet.put("kind", "MEET");
         meet.put("desc", "보라미 DB 4단 조인으로 키를 얻어 XVARM 브로커에 추출을 지시하고, ESB FILE2FILE 로 받는다");
         meet.put("steps", List.of(
-                step("보라미 조회", "source", source.mode(),
-                        sourceEndpoint(),
-                        "TB_IMSC_PTPR_DT → TB_RERD_TFIN_DS → TB_SMSM_CMFI_BS → XVARM.ASYSCONTENTELEMENT (4단 조인)"),
+                sourceStep("보라미 조회",
+                        "TB_IMSC_PTPR_DT → TB_RERD_TFIN_DS → TB_SMSM_CMFI_BS → XVARM.ASYSCONTENTELEMENT (4단 조인)", true),
                 brokerStep(),
                 step("ESB 수신", null, props.sync().namingPolicy().name(),
                         dirs.receiveMeet(),
@@ -196,9 +207,8 @@ public class VoiceBatchController {
         phone.put("kind", "PHONE");
         phone.put("desc", "단일 테이블 조회 후 ESB 전화 전용 연계 프로바이더가 떨궈 주는 파일을 받는다. XVARM·브로커를 타지 않는다");
         phone.put("steps", List.of(
-                step("전화 DB 조회", "source", source.mode(),
-                        sourceEndpoint(),
-                        "TB_IMPH_UCDR_DS 단일 테이블. TELP_PCALL_RECRD_YN='Y' + 특이수용자"),
+                sourceStep("전화 DB 조회",
+                        "TB_IMPH_UCDR_DS 단일 테이블. TELP_PCALL_RECRD_YN='Y' + 특이수용자", false),
                 step("전화 파일 연계", "phone", phoneFileProvider.mode(),
                         dirs.receivePhone(),
                         "별도 서버의 파일을 ESB 전화 전용 프로바이더가 수신 디렉터리에 떨궈 준다. 우리는 대기만 한다"),
@@ -264,14 +274,60 @@ public class VoiceBatchController {
     private String sourceEndpoint() {
         return switch (modeState.source()) {
             case MOCK -> "내부 Mock 생성기 (외부 호출 없음)";
-            case DIRECT_JDBC -> "JDBC — " + blankToNull(props.source().schema().imsc() == null
-                    || props.source().schema().imsc().isBlank() ? "스키마 없음(H2 Mock)" : "스키마 " + props.source().schema().imsc());
+            case DIRECT_JDBC -> "JDBC — " + db.label() + " · " + tables.imscPtprDt();
             case ESB_HTTP2DB -> {
                 String base = blankToNull(props.source().esbBaseUrl());
                 String ifId = blankToNull(props.source().interfaceId());
                 yield (base == null ? "ESB 주소 미설정" : base) + "/" + (ifId == null ? "{인터페이스ID 미정}" : ifId);
             }
         };
+    }
+
+    /** 드롭다운 라벨 — source: MOCK(로컬 H2) / 개발계 DB / 메타빌드(ESB) · xvarm: XVARM DB MOCK(개발계) / 실 XVARM DB. */
+    private static Map<String, Map<String, String>> switchLabels() {
+        Map<String, String> source = new LinkedHashMap<>();
+        source.put("MOCK", "MOCK (로컬 H2)");
+        source.put("DIRECT_JDBC", "개발계 DB");
+        source.put("ESB_HTTP2DB", "메타빌드 (ESB)");
+        Map<String, String> xvarm = new LinkedHashMap<>();
+        xvarm.put("MOCK_DEV", "XVARM DB MOCK (개발계)");
+        xvarm.put("REAL", "실 XVARM DB");
+        Map<String, Map<String, String>> m = new LinkedHashMap<>();
+        m.put("source", source);
+        m.put("xvarm", xvarm);
+        return m;
+    }
+
+    /**
+     * 데이터 조회 단계 — 드롭다운(source)에 더해, <b>개발계 DB 모드일 때 XVARM 연동 라디오</b>를 붙인다.
+     *
+     * <p>2026-09-12 확인 기준 개발계 borami-db 에는 공통파일기본·XVARM 테이블이 없다. 라디오가 없으면 접견 4단 조인이
+     * 조회 즉시 실패하는데 그 이유가 화면에 드러나지 않는다. MOCK_DEV(기본)는 우리가 만든 테이블을,
+     * REAL 은 설정된 실 테이블을 조인한다.</p>
+     */
+    private Map<String, Object> sourceStep(String label, String note, boolean withXvarm) {
+        Map<String, Object> m = step(label, "source", source.mode(), sourceEndpoint(), note);
+        if (withXvarm && modeState.source() == VoiceProperties.SourceMode.DIRECT_JDBC) {
+            m.put("radioKey", "xvarm");
+            m.put("radioValue", modeState.xvarm().name());
+            m.put("radioConfigured", props.source().xvarmMode().name());
+            m.put("radioOptions", List.of(
+                    radioOpt("MOCK_DEV", "XVARM DB MOCK (개발계)",
+                            "개발계 DB 에 누락된 " + tables.smsmCmfiBs() + " · " + tables.asysContentElement()
+                                    + " 를 자동 생성·시딩해 4단 조인이 돌게 한다"),
+                    radioOpt("REAL", "실 XVARM DB",
+                            "설정된 실 테이블(voice.source.schema.smsm/xvarm)을 직접 조인한다 — 없으면 조회가 실패한다")));
+            m.put("radioNote", "지금 조인: " + tables.smsmCmfiBs() + " · " + tables.asysContentElement());
+        }
+        return m;
+    }
+
+    private static Map<String, Object> radioOpt(String value, String label, String note) {
+        Map<String, Object> o = new LinkedHashMap<>();
+        o.put("value", value);
+        o.put("label", label);
+        o.put("note", note);
+        return o;
     }
 
     private String brokerEndpoint() {

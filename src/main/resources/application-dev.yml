@@ -57,7 +57,13 @@ voice:
       imsc: ${VOICE_SCHEMA_IMSC:im}
       rerd: ${VOICE_SCHEMA_RERD:re}
       smsm: ${VOICE_SCHEMA_SMSM:sm}
-      xvarm: ${VOICE_SCHEMA_XVARM:}          # 테이블 미확인 — 확정 전까지 비워 둔다
+      xvarm: ${VOICE_SCHEMA_XVARM:}          # 실 XVARM 테이블 미확인 — REAL 모드로 올리기 전에 채운다
+    # 개발계 DB 에는 공통파일기본·XVARM 테이블이 없다(2026-09-12). 기본 MOCK_DEV 가 sm.tb_smsm_cmfi_bs ·
+    # xvarm.asyscontentelement 를 만들어 시딩하고, 실 테이블이 생기면 VOICE_XVARM_MODE=REAL 로 올린다.
+    xvarm-mode: ${VOICE_XVARM_MODE:MOCK_DEV}
+    xvarm-mock:
+      schema-smsm: ${VOICE_XVARM_MOCK_SCHEMA_SMSM:sm}
+      schema-xvarm: ${VOICE_XVARM_MOCK_SCHEMA_XVARM:xvarm}
     flag:
       recorded-yes: ${VOICE_FLAG_RECORDED_YES:Y}
       ptcr-yes: ${VOICE_FLAG_PTCR_YES:Y}     # 실DB 관측값은 '0' — 의미 확정 후 조정
@@ -111,6 +117,12 @@ voice:
     work: ${VOICE_WORK_DIR:${voice.dirs.base-dir}/voice_work}
     output-meet: ${VOICE_OUTPUT_MEET_DIR:${voice.dirs.base-dir}/xenon/voice}
     output-phone: ${VOICE_OUTPUT_PHONE_DIR:${voice.dirs.base-dir}/xenon/phone}
+    # XVARM 원본 더미 파일 — PV 아래 /k8s/XVARM_ORIGINAL_VOICE_FILES/{meet,phone}
+    xvarm-original-base: ${VOICE_XVARM_ORIGINAL_DIR:${voice.dirs.base-dir}/XVARM_ORIGINAL_VOICE_FILES}
+
+  # 개발계는 기동 시 자동 생성하지 않는다 — 시뮬레이터 [시뮬레이션 데이터 생성] 으로만 만든다(남의 시험 보호).
+  sim:
+    seed-on-startup: ${VOICE_SIM_SEED_ON_STARTUP:false}
 
   batch:
     # 스케줄은 기본으로 꺼 둔다. 개발계에서 예고 없이 배치가 돌면 대상이 소진되어

@@ -39,7 +39,8 @@
 
 | 스위치 | 값 | 기본 (`local`) | 실물 전환 조건 |
 |---|---|---|---|
-| `voice.source.mode` | `MOCK` / `DIRECT_JDBC` / `ESB_HTTP2DB` | MOCK (**DIRECT_JDBC**) | 인터페이스ID(Q2)·I/F 테이블(Q15) |
+| `voice.source.mode` | `MOCK` / `DIRECT_JDBC` / `ESB_HTTP2DB` — 화면 표기 `MOCK (로컬 H2)` / `개발계 DB` / `메타빌드 (ESB)` | MOCK (**DIRECT_JDBC**) | 인터페이스ID(Q2)·I/F 테이블(Q15) |
+| `voice.source.xvarm-mode` | `MOCK_DEV` / `REAL` — 화면 표기 `XVARM DB MOCK (개발계)` / `실 XVARM DB` (개발계 DB 모드 라디오) | **MOCK_DEV** | 실 XVARM·공통파일 테이블 확보 |
 | `voice.broker.mode` | `MOCK` / `REST` — 접견 전용 | MOCK (**REST**) | XVARM 사양(Q3), 브로커 배포 |
 | `voice.phone.mode` | `MOCK` / `ESB` — 전화 전용 | MOCK (MOCK) | ESB 전화 연계 프로바이더 구성 |
 | `voice.decrypt.mode` | `SKIP` / `REAL` | SKIP (SKIP) | 복호화 주체 확정(Q13), 키 수령(Q8) |
@@ -88,17 +89,43 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 브로커 없이 돌리려면 시뮬레이터의 [XVARM 브로커] 드롭다운을 `MOCK` 으로 내리면 된다
 (또는 `VOICE_BROKER_MODE=MOCK`).
 
-**시연 Mock 은 총 12건**이다 — H2 Mock 보라미와 MOCK 소스가 같은 구성을 쓴다.
+### 시뮬레이션 데이터 — DB 메타 10건 + 물리 더미 파일 (Complete Clean & Seed)
+
+**접견 5 · 전화 5 = 10건**을 `SimulationDataService` 가 만든다. DB 메타(접견 re·im·sm·xvarm 4단 1:1:1:1, 전화 im 통화내역 + im 특이수용자 1:1)와
+DB 파일명과 1:1 인 **경량 더미 음성 파일**(수십 byte)을 한 번에 쓴다. 로컬(H2)은 기동 시 자동 생성하고(`voice.sim.seed-on-startup=true`),
+개발계(PostgreSQL)는 시뮬레이터 버튼으로만 만든다.
 
 | 배치 | 시간창 | 접견 | 전화 | 시각 |
 |---|---|---:|---:|---|
-| 일배치 `POST /batches/daily` | [어제 00:00, 오늘 00:00) | 5 | 5 | 어제 09:10~09:50 |
-| 10분 주기 `POST /batches/periodic` (접견만·전화만 포함) | [지금-20분, 지금) | 1 | 1 | 5분 전 |
+| 일배치 `POST /batches/daily` | [어제 00:00, 오늘 00:00) | 3 | 3 | 어제 09:10 / 09:20 / 09:30 |
+| 10분 주기 `POST /batches/periodic` (접견만·전화만 포함) | [지금-20분, 지금) | 2 | 2 | 지금-6분 / 지금-3분 |
 
-> 시각은 **적재 시점 기준**이라, 기동 후 20분이 지나면 주기배치 창에 걸리는 행이 없어진다.
-> 시뮬레이터 [Mock 데이터 초기화/생성](`POST /api/v1/mock/reset`)이 H2 를 **지금 시각 기준으로 다시 적재**하고
-> Mock 규모도 12건으로 되돌리므로, 시연 직전에 한 번 누르면 된다. 전체 배치는 10초 안에 끝난다
-> (접견 5건은 로컬 브로커의 추출 지연 `BROKER_DELAY_MS`=1500ms 가 대부분이다 — 더 빠르게 보려면 브로커에 `BROKER_DELAY_MS=0`).
+| 버튼 / API | 하는 일 |
+|---|---|
+| **시뮬레이션 데이터 생성** `POST /api/v1/mock/sim-data` (= `/reset`) | 멱등 표식·수신 파일 삭제 → SIM 행 삭제 → (개발계) 누락 테이블 생성 → 10건 INSERT → 더미 파일 11개 write(전화 기존 STT 텍스트 1개 포함) |
+| **시뮬레이션 데이터 초기화** `DELETE /api/v1/mock/sim-data` | SIM 접두 행 일괄 DELETE(수용자·녹취·통화·공통파일·XVARM) + 더미 파일(`mock_*`) 삭제 + 멱등 표식 삭제 |
+| 현황 `GET /api/v1/mock/sim-data` | DB 종류 · 조립된 테이블명 · SIM 행 수 · 더미 파일 목록 |
+
+- 우리가 넣은 행은 전부 **`SIM` 접두**(교정번호 `SIM…`, 녹취 `SIM-MEET-nnn`, 통화 `SIM-PHONE-nnn`, 공통파일 `SIMCMFInnnn`, 문서 `SIMDOCnnnn`)라
+  초기화가 운영·다른 사람 행을 건드리지 않는다. INSERT 는 테이블 정의서의 NOT NULL 컬럼을 전부 채운다(개발계 실제 테이블 기준)
+- 더미 파일 위치(`voice.dirs.xvarm-original-base`, 비우면 OS 로 결정 · 자동 생성): Windows `C:/XVARM_ORIGINAL_VOICE_FILES/{meet,phone}` ·
+  Linux/K8s `/k8s/XVARM_ORIGINAL_VOICE_FILES/{meet,phone}`. `TARE_FLPTH_NM`/`TELP_RECRD_FLPTH_NM` 이 이 폴더, XVARM `FILEKEY` 가 파일 절대경로다
+- 시각은 **생성 시점 기준**이라 기동 후 20분이 지나면 주기배치 창이 비니, 시연 직전에 [시뮬레이션 데이터 생성] 을 한 번 누른다.
+  전체 배치는 10초 안에 끝난다(접견은 로컬 브로커 추출 지연 `BROKER_DELAY_MS`=1500ms 가 대부분 — 더 빠르게는 브로커에 `BROKER_DELAY_MS=0`)
+
+### XVARM 연동 — 개발계 DB 에 없는 두 테이블
+
+2026-09-12 확인 기준 개발계 borami-db 에는 **공통파일기본(`sm.tb_smsm_cmfi_bs`)과 XVARM(`asyscontentelement`)이 없어** 접견 4단 조인이 서지 않는다.
+`개발계 DB` 모드의 라디오 `voice.source.xvarm-mode` 로 고른다.
+
+| 값 | 화면 | 동작 |
+|---|---|---|
+| `MOCK_DEV` (기본) | XVARM DB MOCK (개발계) | 개발계 DB 에 `sm.tb_smsm_cmfi_bs` · `xvarm.asyscontentelement` 를 **자동 생성**(`CREATE … IF NOT EXISTS`, `src/main/resources/sql/xvarm_mock_tables_postgres.sql`)하고 시뮬레이션 데이터를 시딩해 4단 조인이 돈다. 스키마는 `voice.source.xvarm-mock.schema-smsm/schema-xvarm` |
+| `REAL` | 실 XVARM DB | `voice.source.schema.smsm/xvarm` 의 실 테이블을 직접 조인한다 — 없으면 조회가 사유와 함께 실패한다 |
+
+DBeaver 에서 손으로 만들려면 [`ref/borami_missing_tables.sql`](ref/borami_missing_tables.sql)(DDL + 시딩 + 확인 쿼리 + 정리).
+컬럼 정의 근거는 `ref/c9uviulsfMXZ-비정형-140926-020258.pdf`(테이블 정의서, TB_SMSM_CMFI_BS 17컬럼)이고,
+`ref/(발췌)교정청_표준인터페이스_설계서.pdf` 는 ESB 연계 규약이라 테이블 정의는 없다. XVARM 테이블은 솔루션 소유라 조인 키(ELEMENTID·FILEKEY)만 둔다.
 
 > **브로커 출력 경로가 어긋나면** 브로커는 "추출 완료" 를 돌려주지만 우리 수신 폴더는 비어 있다.
 > 브로커 응답의 `filePath`(절대경로)에 파일이 **실제로 있는데** 수신 폴더 밖이면 5분을 기다리지 않고
@@ -147,13 +174,15 @@ log-collector:
   [편집 ▾] 을 누르면 5종 입력칸과 base-dir 로 표준 배치 채우기가 펼쳐진다.
   수신(접견)을 바꾸면 로컬 브로커의 `BROKER_OUTPUT_DIR` 도 맞춰야 한다 — [브로커 연결 확인] 으로 대조
 - **① 처리 구간 모드** — 접견·전화 2트랙의 스위치를 **드롭다운으로 즉시 전환**(서버 재시작 불필요).
+  데이터 조회는 `MOCK (로컬 H2)` / `개발계 DB` / `메타빌드 (ESB)` 로 표기하고, `개발계 DB` 를 고르면 그 아래
+  **XVARM 연동 라디오**(`XVARM DB MOCK (개발계)` 기본 / `실 XVARM DB`)가 뜬다. 지금 붙어 있는 DB 와 조립된 테이블명도 한 줄로 보인다.
   MOCK/SKIP 은 주황, 실물은 초록. 로그 컬렉터 연결 여부도 함께 본다.
   브로커가 `REST` 면 단계 아래에 **주소 라디오**(`개발계 K8s` / `로컬 PC`)가 뜨고 고르는 즉시 반영된다 —
   기동 설정값과 같은 항목에 `(Default)` 가 붙는다(`voice.broker.presets` 에서 내려준다)
 - **② 제어**
   - 배치 4종: `접견만`(`POST /api/v1/voice/batches/periodic?kinds=MEET`) · `전화만`(`?kinds=PHONE`) ·
     `10분 주기`(`/periodic`) · `일배치`(`/daily`) — 실행 중에는 버튼이 잠기고 누른 버튼에 스피너가 돈다
-  - 보조: `Mock 데이터 초기화/생성`(멱등 표식·수신 파일 삭제 + H2 재적재 12건) · `대상 미리보기` · `수신 파일` · `STT 출력 확인` · `브로커 연결 확인`
+  - 보조: `시뮬레이션 데이터 생성`(Clean & Seed — DB 메타 10건 + 더미 파일) · `시뮬레이션 데이터 초기화`(Complete Clean) · `대상 미리보기` · `수신 파일` · `STT 출력 확인` · `브로커 연결 확인`
   - **고급 (접힘)**: 대용량 Mock(일배치용 건수 + 프리셋 1,000 / 5,000 / 10,000건) · 장애 주입(활성 토글 + 실패 % · 지연 % · 지연 ms).
     규모를 올리거나 장애 주입이 켜져 있으면 접힌 상태에서도 노란 요약이 뜬다
 - **③ 최근 배치 결과** — 대상 / 성공 / 실패 / 건너뜀 / 상태 숫자 +
@@ -189,11 +218,11 @@ H2 에 보라미 Mock 스키마가 올라간다. `voice.source.mode=DIRECT_JDBC`
 mvn spring-boot:run -Dspring-boot.run.profiles=local -Dspring-boot.run.arguments="--voice.source.mode=DIRECT_JDBC"
 ```
 
-샘플에는 **걸러져야 할 행**을 섞어 두었다(삭제된 녹취, 해제된 특이수용자, 대상 아닌 관리코드,
-녹음 안 된 통화 — 대상이 되지 않아 배치 시간에는 영향이 없다). 기대 결과는 `data-borami-mock.sql` 머리말에 적어 두었다.
+`data-borami-mock.sql` 에는 **걸러져야 할 행**만 있다(삭제된 녹취, 해제된 특이수용자, 대상 아닌 관리코드,
+녹음 안 된 통화 — 대상이 되지 않아 배치 시간에는 영향이 없다). 유효 대상 10건은 시뮬레이션 데이터 생성이 만든다.
 
 **DIRECT_JDBC 원본 쿼리**(접견 4단 조인 · 전화 조인 · 전화 지름길)를 스키마·테이블명과 값을 풀어
-DBeaver 에서 바로 실행할 수 있게 [`docs/borami_direct_jdbc_queries.sql`](docs/borami_direct_jdbc_queries.sql) 에 두었다.
+DBeaver 에서 바로 실행할 수 있게 [`ref/borami_direct_jdbc_queries.sql`](ref/borami_direct_jdbc_queries.sql) 에 두었다.
 
 ### 실제 borami-db 조회 (`realdb` 프로파일)
 
@@ -227,9 +256,9 @@ kubectl port-forward -n service-core svc/admin-db-fy9tjq4tsk 15432:5432
 
 ### 대용량 부하 (OOM 방어)
 
-실데이터 규모는 접견 약 1,300건(6.5GB) · 전화 약 1,300건이다. 12건짜리 시연 Mock 으로는
-스트리밍·청크 처리가 메모리를 지키는지 알 수 없어, **일배치용** 건수를 런타임에 올릴 수 있게 했다
-(주기배치용 1·1 은 그대로라 10분 주기 배치가 수백 건을 돌 일이 없다). 올린 값은 [Mock 데이터 초기화/생성] 이 12건으로 되돌린다.
+실데이터 규모는 접견 약 1,300건(6.5GB) · 전화 약 1,300건이다. 10건짜리 시뮬레이션 데이터로는
+스트리밍·청크 처리가 메모리를 지키는지 알 수 없어, MOCK 소스의 **일배치용** 건수를 런타임에 올릴 수 있게 했다
+(주기배치용 2·2 는 그대로라 10분 주기 배치가 수백 건을 돌 일이 없다). 올린 값은 [시뮬레이션 데이터 생성] 이 기본으로 되돌린다.
 
 ```bash
 curl -X PUT "http://localhost:8085/api/v1/mock/dataset?meet=500&phone=500"

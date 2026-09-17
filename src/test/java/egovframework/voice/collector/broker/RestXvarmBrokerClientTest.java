@@ -62,16 +62,18 @@ class RestXvarmBrokerClientTest {
         return new VoiceProperties(
                 new VoiceProperties.Source(VoiceProperties.SourceMode.MOCK, "", "",
                         new VoiceProperties.Schema("", "", "", ""),
-                        new VoiceProperties.Flag("Y", "Y", "N", "Y")),
+                        new VoiceProperties.Flag("Y", "Y", "N", "Y"),
+                        VoiceProperties.XvarmMode.MOCK_DEV, new VoiceProperties.XvarmMock("sm", "xvarm")),
                 // 폴링 간격을 짧게 — 테스트가 몇 초씩 잡고 있을 이유가 없다
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, BASE, java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 new VoiceProperties.Sync(10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
-                new VoiceProperties.Dirs("b", "m", "p", "w", "om", "op"),
+                new VoiceProperties.Dirs("b", "m", "p", "w", "om", "op", ""),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),
                 new VoiceProperties.Stt(VoiceProperties.SttMode.MOCK, "", 30),
                 new VoiceProperties.Batch("0 0 2 * * *", "0 */10 * * * *", 20, false,
-                        List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "UNSTRUCTURED", false));
+                        List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "UNSTRUCTURED", false),
+                new VoiceProperties.Sim(false));
     }
 
     private VoiceTarget meet() {
@@ -203,7 +205,7 @@ class RestXvarmBrokerClientTest {
                 props().source(),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, "", java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
-                props().sync(), props().dirs(), props().decrypt(), props().stt(), props().batch());
+                props().sync(), props().dirs(), props().decrypt(), props().stt(), props().batch(), props().sim());
 
         assertThatThrownBy(() ->
                 new RestXvarmBrokerClient(noUrl, modeState(noUrl), rt, new EsbFileNamingPolicy()).extract(meet()))
