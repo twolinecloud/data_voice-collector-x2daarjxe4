@@ -17,9 +17,11 @@
   .stat .k { font-size:.72rem; color:#6c757d; }
   #log {
     background:#1e1f22; color:#d6d6d6; font-family:var(--mono); font-size:.8rem;
-    height:280px; overflow-y:auto; padding:.75rem .9rem; border-radius:.375rem;
-    white-space:pre-wrap; word-break:break-all;
+    /* 하단 고정이라 기본은 낮게 — 헤더의 [크게] 로 늘린다 */
+    height:170px; overflow-y:auto; padding:.6rem .8rem; border-radius:.375rem;
+    white-space:pre-wrap; word-break:break-all; transition:height .2s ease;
   }
+  #log-card.tall #log { height:340px; }
   #log .t  { color:#7f848e; }
   #log .ok { color:#7ec699; }
   #log .er { color:#e06c75; }
@@ -33,6 +35,31 @@
   .chaos-on { background:#fff4e5; }
   .hint { font-size:.75rem; color:#6c757d; }
   code { font-size:.76rem; }
+
+  /* ── 탭 ─────────────────────────────────────────────────────────────── */
+  .sim-tabs { border-bottom:2px solid #dee2e6; gap:.15rem; flex-wrap:wrap; }
+  .sim-tabs .nav-link {
+    border:1px solid transparent; border-bottom:none; border-radius:.45rem .45rem 0 0;
+    color:#495057; font-weight:600; font-size:.88rem; padding:.45rem .9rem; background:transparent;
+  }
+  .sim-tabs .nav-link:hover { background:#eef1f4; color:#0d6efd; }
+  .sim-tabs .nav-link.active {
+    background:#fff; color:#0d6efd; border-color:#dee2e6; border-bottom:2px solid #fff; margin-bottom:-2px;
+  }
+  .sim-tabs .nav-link .hint { margin-left:.35rem; }
+  .tabp { display:none; }
+  .tabp.active { display:block; animation:tabin .18s ease; }
+  @keyframes tabin { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
+
+  /* ── 하단 공통 로그 (접이식) ───────────────────────────────────────── */
+  #log-card { position:sticky; bottom:0; z-index:5; }
+  #log-card .card-header { cursor:pointer; }
+  #log-card.collapsed #log-body { display:none; }
+  #log-card.collapsed { box-shadow:0 -2px 8px rgba(0,0,0,.06); }
+  #log-tgl { transition:transform .25s ease; display:inline-block; }
+  #log-card.collapsed #log-tgl { transform:rotate(180deg); }
+  #log-unread { display:none; }
+  #log-card.collapsed #log-unread.on { display:inline-block; }
 
   /* ── 아코디언 (공통) — grid-rows 전환으로 높이를 자연스럽게 펼친다 ─────── */
   .acc { border:1px solid #dee2e6; border-radius:.45rem; background:#fff; overflow:hidden; }
@@ -167,6 +194,89 @@
     </div>
   </div>
 
+  <!-- 탭 -->
+  <ul class="nav nav-tabs sim-tabs mb-3" id="sim-tabs">
+    <li class="nav-item"><button type="button" class="nav-link active" data-tab="tab-pipeline">1. 파이프라인 제어 &amp; 검증</button></li>
+    <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-env">2. 환경 &amp; 디렉터리 설정</button></li>
+    <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-fault">3. 장애 &amp; 재처리 시나리오 <span class="hint" id="adv-sum"></span></button></li>
+    <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-perf">4. 성능 테스트</button></li>
+  </ul>
+
+  <div id="tab-panes">
+
+  <div class="tabp active" id="tab-pipeline">
+  <!-- ① 모드 전환 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+      <strong>① 처리 구간 모드 — 2트랙</strong>
+      <span class="hint">드롭다운을 바꾸면 <b>서버 재시작 없이</b> 즉시 전환됩니다</span>
+    </div>
+    <div class="card-body py-2">
+      <div class="row g-3 mb-2" id="tracks"></div>
+      <div class="hint mt-1" id="batch-line"></div>
+      <div class="mt-2" id="warnings"></div>
+    </div>
+  </div>
+
+  <!-- ② 제어 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white py-2"><strong>② 제어</strong></div>
+    <div class="card-body py-2" id="controls">
+      <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 7·전화 7 = 14건(트랙별 일배치 5 · 10분 주기 2)</div>
+      <div class="d-flex flex-wrap gap-2 mb-2">
+        <button class="btn btn-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
+        <button class="btn btn-primary btn-sm" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
+        <button class="btn btn-outline-primary btn-sm" id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
+        <button class="btn btn-sm" id="btn-phone" style="color:#6f42c1;border-color:#6f42c1;background:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
+      </div>
+      <div class="d-flex flex-wrap gap-2 mb-2">
+        <button class="btn btn-outline-secondary btn-sm" id="btn-targets">처리 대상 미리보기</button>
+        <button class="btn btn-outline-secondary btn-sm" id="btn-files">수신 파일 확인</button>
+        <button class="btn btn-outline-secondary btn-sm" id="btn-outputs">STT 출력 확인 (최근 배치)</button>
+      </div>
+
+      <div id="sim-box" class="mb-2"></div>
+      <div class="hint mt-2">같은 배치를 <b>두 번</b> 실행하면 두 번째는 <code>건너뜀</code>으로 잡힙니다 — 주기배치 창이 겹쳐도 같은 음성을 다시 처리하지 않습니다.</div>
+    </div>
+  </div>
+
+  <!-- ③ 결과 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+      <strong>③ 최근 배치 결과</strong>
+      <span class="small text-secondary font-monospace" id="last-exec">—</span>
+    </div>
+    <div class="card-body py-2">
+      <div class="row row-cols-2 row-cols-md-5 g-0 mb-2" id="stats"></div>
+      <div id="result-acc-wrap">
+        <div class="hint">아직 실행한 배치가 없습니다. ② 의 배치 버튼을 누르면 호출한 API 와 응답이 여기에 요약 바로 남습니다.</div>
+      </div>
+      <div class="mt-2" id="files-acc-wrap"></div>
+    </div>
+  </div>
+
+  <!-- 대상 미리보기 -->
+  <div class="card shadow-sm mb-3 d-none" id="targets-card">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+      <strong>처리 대상</strong>
+      <button class="btn-close btn-sm" id="btn-close-targets" aria-label="닫기"></button>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive" style="max-height:300px">
+        <table class="table table-sm table-hover mb-0 tgt-table">
+          <thead class="table-light sticky-top">
+            <tr><th>종류</th><th>키</th><th>파일명</th><th>발생 시각</th>
+                <th class="text-center">암호화</th><th class="text-center">기존 STT</th><th class="text-center">처리됨</th></tr>
+          </thead>
+          <tbody id="targets-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  </div>
+
+  <div class="tabp" id="tab-env">
   <!-- 서브헤더: 디렉터리 경로 (콤팩트) -->
   <div class="subhead mb-3 acc" id="dirs-acc">
     <div class="d-flex align-items-center flex-wrap gap-2">
@@ -196,114 +306,28 @@
     </div></div></div>
   </div>
 
-  <!-- ① 모드 전환 -->
+  <!-- 연동 상태 -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
-      <strong>① 처리 구간 모드 — 2트랙</strong>
-      <span class="hint">드롭다운을 바꾸면 <b>서버 재시작 없이</b> 즉시 전환됩니다</span>
+      <strong>연동 상태 — DB · 브로커 · 로그 컬렉터</strong>
+      <span class="hint">배치를 돌리기 전에 여기서 먼저 대조하십시오</span>
     </div>
     <div class="card-body py-2">
-      <div class="row g-3 mb-2" id="tracks"></div>
       <div class="row g-2" id="logc"></div>
       <div class="d-flex align-items-start gap-2 mt-2">
         <div class="db-line grow" id="db-line" style="flex:1 1 auto"></div>
         <button class="btn btn-sm btn-outline-secondary text-nowrap" id="btn-db-probe" title="지금 조회 모드가 가리키는 DB(로컬 H2 / 개발계 PostgreSQL)에 실제로 붙어 봅니다">DB 연결 확인</button>
       </div>
-      <div class="hint mt-1" id="batch-line"></div>
-      <div class="mt-2" id="warnings"></div>
+      <div class="d-flex align-items-center gap-2 mt-2">
+        <button class="btn btn-sm btn-outline-secondary text-nowrap" id="btn-probe" title="브로커 출력 폴더와 우리 ESB 수신(접견) 폴더가 같은지 대조합니다">브로커 연결 확인</button>
+        <span class="hint">두 경로가 어긋나면 브로커는 &quot;추출 완료&quot; 를 돌려주는데 수집기는 빈 폴더를 봅니다</span>
+      </div>
       <div class="mt-2" id="probe-line"></div>
     </div>
   </div>
-
-  <!-- ② 제어 -->
-  <div class="card shadow-sm mb-3">
-    <div class="card-header bg-white py-2"><strong>② 제어</strong></div>
-    <div class="card-body py-2" id="controls">
-      <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 7·전화 7 = 14건(트랙별 일배치 5 · 10분 주기 2)</div>
-      <div class="d-flex flex-wrap gap-2 mb-2">
-        <button class="btn btn-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
-        <button class="btn btn-primary btn-sm" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
-        <button class="btn btn-outline-primary btn-sm" id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
-        <button class="btn btn-sm" id="btn-phone" style="color:#6f42c1;border-color:#6f42c1;background:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
-      </div>
-      <div class="d-flex flex-wrap gap-2 mb-2">
-        <button class="btn btn-outline-secondary btn-sm" id="btn-targets">처리 대상 미리보기</button>
-        <button class="btn btn-outline-secondary btn-sm" id="btn-files">수신 파일 확인</button>
-        <button class="btn btn-outline-secondary btn-sm" id="btn-outputs">STT 출력 확인 (최근 배치)</button>
-        <button class="btn btn-outline-secondary btn-sm" id="btn-probe">브로커 연결 확인</button>
-      </div>
-
-      <div id="sim-box" class="mb-2"></div>
-      <div class="acc" id="adv-acc">
-        <div class="acc-head" data-acc="adv-acc">
-          <span class="grow small"><b>고급</b> — 대용량 Mock(OOM 방어) · 장애 주입(Chaos)</span>
-          <span class="hint" id="adv-sum"></span>
-          <button class="acc-tgl" type="button">▼</button>
-        </div>
-        <div class="acc-body"><div class="acc-inner"><div class="pad">
-          <div class="row g-3">
-            <div class="col-12 col-lg-6">
-              <div class="border rounded p-2 h-100">
-                <div class="fw-semibold small mb-1">대용량 Mock 데이터 (일배치용 건수 · OOM 방어 검증)</div>
-                <div class="row g-2 align-items-end">
-                  <div class="col-4"><label class="hint">접견 건수</label>
-                    <input type="number" class="form-control form-control-sm" id="ds-meet" value="5" min="0" max="50000"></div>
-                  <div class="col-4"><label class="hint">전화 건수</label>
-                    <input type="number" class="form-control form-control-sm" id="ds-phone" value="5" min="0" max="50000"></div>
-                  <div class="col-4"><button class="btn btn-sm btn-dark w-100" id="btn-dataset">규모 적용</button></div>
-                </div>
-                <div class="d-flex flex-wrap gap-1 mt-2">
-                  <button class="btn btn-sm btn-outline-secondary preset" data-m="5"    data-p="5">기본 (일배치 5·5 + 주기 2·2)</button>
-                  <button class="btn btn-sm btn-outline-secondary preset" data-m="500"  data-p="500">1,000건</button>
-                  <button class="btn btn-sm btn-outline-secondary preset" data-m="2500" data-p="2500">5,000건</button>
-                  <button class="btn btn-sm btn-outline-secondary preset" data-m="5000" data-p="5000">10,000건</button>
-                </div>
-                <div class="hint mt-2" id="ds-note">올린 건수는 일배치 창에 놓입니다 — [전체 실행 (일배치)] 로 돌리세요. 건당 안정성 검사(100ms)가 곱해집니다.</div>
-              </div>
-            </div>
-            <div class="col-12 col-lg-6">
-              <div class="border rounded p-2 h-100" id="chaos-box">
-                <div class="d-flex justify-content-between align-items-center mb-1">
-                  <span class="fw-semibold small">장애 주입 (Chaos)</span>
-                  <div class="form-check form-switch mb-0">
-                    <input class="form-check-input" type="checkbox" id="chaos-on">
-                    <label class="form-check-label hint" for="chaos-on">활성</label>
-                  </div>
-                </div>
-                <div class="row g-2 align-items-end">
-                  <div class="col-4"><label class="hint">실패 %</label>
-                    <input type="number" class="form-control form-control-sm" id="chaos-fail" value="10" min="0" max="100"></div>
-                  <div class="col-4"><label class="hint">지연 %</label>
-                    <input type="number" class="form-control form-control-sm" id="chaos-delay" value="10" min="0" max="100"></div>
-                  <div class="col-4"><label class="hint">지연 ms</label>
-                    <input type="number" class="form-control form-control-sm" id="chaos-ms" value="2000" min="0" max="60000"></div>
-                </div>
-                <button class="btn btn-sm btn-dark mt-2" id="btn-chaos">설정 적용</button>
-                <div class="hint mt-2">STT 구간에 실패·지연을 섞습니다. 한 건이 터져도 배치가 <b>failCnt만 올리며 끝까지 도는지</b> 봅니다.</div>
-              </div>
-            </div>
-          </div>
-        </div></div></div>
-      </div>
-      <div class="hint mt-2">같은 배치를 <b>두 번</b> 실행하면 두 번째는 <code>건너뜀</code>으로 잡힙니다 — 주기배치 창이 겹쳐도 같은 음성을 다시 처리하지 않습니다.</div>
-    </div>
   </div>
 
-  <!-- ③ 결과 -->
-  <div class="card shadow-sm mb-3">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
-      <strong>③ 최근 배치 결과</strong>
-      <span class="small text-secondary font-monospace" id="last-exec">—</span>
-    </div>
-    <div class="card-body py-2">
-      <div class="row row-cols-2 row-cols-md-5 g-0 mb-2" id="stats"></div>
-      <div id="result-acc-wrap">
-        <div class="hint">아직 실행한 배치가 없습니다. ② 의 배치 버튼을 누르면 호출한 API 와 응답이 여기에 요약 바로 남습니다.</div>
-      </div>
-      <div class="mt-2" id="files-acc-wrap"></div>
-    </div>
-  </div>
-
+  <div class="tabp" id="tab-fault">
   <!-- ④ 재처리 시나리오 -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
@@ -341,32 +365,92 @@
     </div>
   </div>
 
-  <!-- 대상 미리보기 -->
-  <div class="card shadow-sm mb-3 d-none" id="targets-card">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
-      <strong>처리 대상</strong>
-      <button class="btn-close btn-sm" id="btn-close-targets" aria-label="닫기"></button>
-    </div>
-    <div class="card-body p-0">
-      <div class="table-responsive" style="max-height:300px">
-        <table class="table table-sm table-hover mb-0 tgt-table">
-          <thead class="table-light sticky-top">
-            <tr><th>종류</th><th>키</th><th>파일명</th><th>발생 시각</th>
-                <th class="text-center">암호화</th><th class="text-center">기존 STT</th><th class="text-center">처리됨</th></tr>
-          </thead>
-          <tbody id="targets-body"></tbody>
-        </table>
+  <!-- 장애 주입 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white py-2"><strong>장애 주입 (Chaos)</strong></div>
+    <div class="card-body py-2">
+      <div class="border rounded p-2" id="chaos-box">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <span class="fw-semibold small">STT 구간에 실패·지연을 섞습니다</span>
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="chaos-on">
+            <label class="form-check-label hint" for="chaos-on">활성</label>
+          </div>
+        </div>
+        <div class="row g-2 align-items-end">
+          <div class="col-4"><label class="hint">실패 %</label>
+            <input type="number" class="form-control form-control-sm" id="chaos-fail" value="10" min="0" max="100"></div>
+          <div class="col-4"><label class="hint">지연 %</label>
+            <input type="number" class="form-control form-control-sm" id="chaos-delay" value="10" min="0" max="100"></div>
+          <div class="col-4"><label class="hint">지연 ms</label>
+            <input type="number" class="form-control form-control-sm" id="chaos-ms" value="2000" min="0" max="60000"></div>
+        </div>
+        <button class="btn btn-sm btn-dark mt-2" id="btn-chaos">설정 적용</button>
+        <div class="hint mt-2">한 건이 터져도 배치가 <b>failCnt만 올리며 끝까지 도는지</b> 봅니다. 켜 두면 탭 제목에 경고가 붙습니다.</div>
       </div>
     </div>
   </div>
+  </div>
 
-  <!-- ⑤ 로그 -->
-  <div class="card shadow-sm">
+  <div class="tabp" id="tab-perf">
+  <!-- 대용량 -->
+  <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
-      <strong>⑤ 실행 로그</strong>
-      <button class="btn btn-sm btn-outline-secondary" id="btn-clear">로그 지우기</button>
+      <strong>대용량 Mock 데이터 — OOM 방어 검증</strong>
+      <span class="hint">올린 건수는 <b>일배치 창</b>에 놓입니다</span>
     </div>
-    <div class="card-body py-2"><div id="log"></div></div>
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-end" style="max-width:38rem">
+        <div class="col-4"><label class="hint">접견 건수</label>
+          <input type="number" class="form-control form-control-sm" id="ds-meet" value="5" min="0" max="50000"></div>
+        <div class="col-4"><label class="hint">전화 건수</label>
+          <input type="number" class="form-control form-control-sm" id="ds-phone" value="5" min="0" max="50000"></div>
+        <div class="col-4"><button class="btn btn-sm btn-dark w-100" id="btn-dataset">규모 적용</button></div>
+      </div>
+      <div class="d-flex flex-wrap gap-1 mt-2">
+        <button class="btn btn-sm btn-outline-secondary preset" data-m="5"    data-p="5">기본 (일배치 5·5 + 주기 2·2)</button>
+        <button class="btn btn-sm btn-outline-secondary preset" data-m="500"  data-p="500">1,000건</button>
+        <button class="btn btn-sm btn-outline-secondary preset" data-m="2500" data-p="2500">5,000건</button>
+        <button class="btn btn-sm btn-outline-secondary preset" data-m="5000" data-p="5000">10,000건</button>
+      </div>
+      <div class="hint mt-2" id="ds-note">규모를 적용한 뒤 [1. 파이프라인 제어] 탭의 <b>[전체 실행 (일배치)]</b> 로 돌리세요. 건당 안정성 검사(100ms)가 곱해집니다.</div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white py-2"><strong>처리량·응답시간 측정 — 추후 개발 예정</strong></div>
+    <div class="card-body py-3">
+      <div class="hint">
+        아래 항목이 예정되어 있습니다. 현재는 위 [대용량 Mock 데이터] 로 건수를 올려
+        일배치를 돌리면서 <code>③ 최근 배치 결과</code> 의 소요 시간과 파드 메모리로 대신 확인합니다.
+        <ul class="mb-0 mt-2">
+          <li>건수별 처리량(TPS)·평균/최대 소요시간 그래프</li>
+          <li>STT 동시 요청 수에 따른 응답시간 곡선</li>
+          <li>힙 사용량 추이 — 스트리밍 처리가 메모리를 지키는지</li>
+          <li>로그 컬렉터 T4 적재 지연 측정</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  </div>
+
+  <!-- ⑤ 로그 — 탭과 무관하게 항상 하단에 붙어 있다 (접이식) -->
+  <div class="card shadow-sm" id="log-card">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2" id="log-head"
+         title="클릭하면 접거나 펼칩니다">
+      <strong>⑤ 실행 로그
+        <span class="badge text-bg-danger ms-1" id="log-unread">새 로그</span>
+      </strong>
+      <span class="d-flex align-items-center gap-2">
+        <span class="hint">어느 탭에서 실행하든 여기에 남습니다</span>
+        <button class="btn btn-sm btn-outline-secondary" id="btn-log-tall" title="로그 영역 높이 전환">크게</button>
+        <button class="btn btn-sm btn-outline-secondary" id="btn-clear">로그 지우기</button>
+        <span id="log-tgl">▼</span>
+      </span>
+    </div>
+    <div class="card-body py-2" id="log-body"><div id="log"></div></div>
   </div>
 
   <div class="text-center text-secondary small mt-3">
@@ -424,24 +508,63 @@ let SWITCH_LABELS = {};
 const lbl = (key, v) => (SWITCH_LABELS[key] && SWITCH_LABELS[key][v]) || v;
 
 // ── 로그 ────────────────────────────────────────────────────────────────
+// 접혀 있을 때 새 줄이 붙으면 헤더에 '새 로그' 배지를 띄운다 — 접어 둔 채로
+// 실행하고는 아무 일도 안 일어난 줄 아는 것을 막는다.
+function logAppend(line) {
+  const box = $('log');
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+  const card = $('log-card');
+  if (card && card.classList.contains('collapsed')) $('log-unread').classList.add('on');
+}
 function log(msg, cls='') {
   const t = new Date().toLocaleTimeString('ko-KR', { hour12:false });
   const line = document.createElement('div');
   line.innerHTML = `<span class="t">[${t}]</span> <span class="${cls}">${esc(msg)}</span>`;
-  $('log').appendChild(line);
-  $('log').scrollTop = $('log').scrollHeight;
+  logAppend(line);
 }
 function logRaw(html) {
   const t = new Date().toLocaleTimeString('ko-KR', { hour12:false });
   const line = document.createElement('div');
   line.innerHTML = `<span class="t">[${t}]</span> ${html}`;
-  $('log').appendChild(line);
-  $('log').scrollTop = $('log').scrollHeight;
+  logAppend(line);
 }
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ── 탭 ──────────────────────────────────────────────────────────────────
+// 탭을 옮겨도 DOM 은 그대로 살아 있다(display 만 바뀐다). 화면 렌더는 전부 id 로
+// 꽂히므로, 지금 안 보이는 탭에 있는 카드도 loadStatus() 가 정상으로 채운다.
+const TAB_KEY = 'vcsim.tab';
+function showTab(id, remember = true) {
+  const btn = document.querySelector(`#sim-tabs [data-tab="${id}"]`);
+  if (!btn) return;
+  document.querySelectorAll('#sim-tabs .nav-link').forEach(b => b.classList.toggle('active', b === btn));
+  document.querySelectorAll('#tab-panes .tabp').forEach(p => p.classList.toggle('active', p.id === id));
+  if (remember) { try { localStorage.setItem(TAB_KEY, id); } catch (e) {} }
+  // 환경 탭은 경로를 보러 오는 곳이라 디렉터리 편집칸을 처음 한 번 펼쳐 준다.
+  if (id === 'tab-env' && !showTab._envOpened) {
+    showTab._envOpened = true;
+    accToggle('dirs-acc', true);
+    const t = $('btn-dir-toggle'); if (t) t.textContent = '접기 ▴';
+  }
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('#sim-tabs [data-tab]');
+  if (b) { e.preventDefault(); showTab(b.dataset.tab); }
+});
+
+// ── 하단 로그 접이식 ────────────────────────────────────────────────────
+function logCollapsed() { return $('log-card').classList.contains('collapsed'); }
+function toggleLog(force) {
+  const c = $('log-card');
+  const next = force === undefined ? !c.classList.contains('collapsed') : !!force;
+  c.classList.toggle('collapsed', next);
+  if (!next) $('log-unread').classList.remove('on');
+  try { localStorage.setItem('vcsim.log', next ? '1' : '0'); } catch (e) {}
+}
 
 // ── 아코디언 — data-acc 가 가리키는 .acc 를 토글한다 ────────────────────
 function accToggle(id, open) {
@@ -471,7 +594,9 @@ document.addEventListener('click', (e) => {
 // 호출했고 무엇이 왔는지" 를 그대로 보여줘야 시연에서 API 를 신뢰할 수 있다.
 async function callFull(method, url, label, opts={}) {
   const t0 = performance.now();
-  $('controls').classList.add('busy');
+  // 탭 전체를 잠근다 — 버튼이 여러 탭에 흩어져 있어 ② 카드만 잠그면
+  // 다른 탭에서 동시에 또 누를 수 있다.
+  busyScope().classList.add('busy');
   if (!opts.quiet) log(`▶ ${label} — ${method} ${url}`, 'hd');
   const info = { method, url, label, status:0, statusText:'', ms:0, ok:false, body:null, error:null, reqBody: opts.json ?? null, at: new Date() };
   try {
@@ -489,10 +614,12 @@ async function callFull(method, url, label, opts={}) {
     info.error = e.message;
     log(`✖ 요청 실패 — ${e.message}`, 'er');
   } finally {
-    $('controls').classList.remove('busy');
+    busyScope().classList.remove('busy');
   }
   return info;
 }
+/** 호출 중 잠글 범위 — 탭 4개 전체. 없으면(옛 구조) ② 카드로 되돌아간다. */
+function busyScope() { return $('tab-panes') || $('controls'); }
 async function call(method, url, label, quiet, json) {
   const r = await callFull(method, url, label, { quiet, json });
   return r.ok ? r.body : null;
@@ -1218,7 +1345,29 @@ $('btn-test-clear').onclick = async () => {
 };
 
 $('btn-refresh').onclick = () => loadStatus(false);
-$('btn-clear').onclick   = () => { $('log').innerHTML = ''; };
+$('btn-clear').onclick   = (e) => { e.stopPropagation(); $('log').innerHTML = ''; $('log-unread').classList.remove('on'); };
+
+// 로그 헤더 클릭으로 접기/펼치기 ([로그 지우기]·[크게] 는 전파를 끊는다)
+$('log-head').onclick = () => toggleLog();
+// 높이는 CSS 클래스가 아니라 인라인으로 준다 — 클래스로 하면 CDN 부트스트랩과 섞일 때
+// 계산값이 안 바뀌는 경우가 있었다. 인라인은 항상 이긴다.
+$('btn-log-tall').onclick = (e) => {
+  e.stopPropagation();
+  const tall = !$('log-card').classList.contains('tall');
+  $('log-card').classList.toggle('tall', tall);
+  $('log').style.height = tall ? '340px' : '170px';
+  $('btn-log-tall').textContent = tall ? '작게' : '크게';
+  if (tall) toggleLog(false);      // 크게 하려면 펼쳐져 있어야 한다
+  $('log').scrollTop = $('log').scrollHeight;
+};
+
+// 마지막으로 보던 탭과 로그 접힘 상태를 복원한다 — 시연 중 새로고침해도 자리를 잃지 않게.
+(function restoreUi() {
+  let tab = null, logc = null;
+  try { tab = localStorage.getItem(TAB_KEY); logc = localStorage.getItem('vcsim.log'); } catch (e) {}
+  showTab(tab && $(tab) ? tab : 'tab-pipeline', false);
+  if (logc === '1') toggleLog(true);
+})();
 
 // 환경 자동 프리셋(GET /api/v1/voice/config) — 서버가 OS·profile 로 정한 ROOT_DIR·브로커·로그 컬렉터·DB 를 받아 화면을 맞춘다.
 //   경로 input 은 renderDirs, 브로커 라디오는 renderTracks(현재 주소와 같은 프리셋이 선택), 로그 컬렉터 카드·DB 줄은 loadStatus 가 그린다.
