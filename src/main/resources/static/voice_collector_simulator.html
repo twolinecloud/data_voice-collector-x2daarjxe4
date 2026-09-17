@@ -401,13 +401,20 @@ let DIR_KEYS = [
 //   admin-fe 에서는 /api/v1/mock 이 커넥터로 가므로 수집기 API 는 /voice 프리픽스로 프록시된다.
 //   ?api=http://host:port 로 강제할 수 있고, 아니면 '' → '/voice' 순으로 살아 있는 쪽을 찾는다.
 let API_BASE = new URLSearchParams(location.search).get('api') || '';
+let API_DOWN = false;   // 두 후보 모두 응답이 없으면 true — 화면이 "왜 비어 있는지" 를 말해 준다
 async function detectApiBase() {
   if (new URLSearchParams(location.search).get('api')) return API_BASE;
+  let found = false;
   for (const base of ['', '/voice']) {
     try {
       const r = await fetch(base + '/api/v1/voice/status', { headers:{ 'Accept':'application/json' } });
-      if (r.ok) { API_BASE = base; break; }
+      if (r.ok) { API_BASE = base; found = true; break; }
     } catch (e) { /* 다음 후보 */ }
+  }
+  API_DOWN = !found;
+  if (API_DOWN) {
+    $('env-line').innerHTML = `<span class="text-danger"><b>수집기 API 응답 없음</b> — 시도: <code>${esc(location.origin)}/api/v1/voice/status</code> · <code>${esc(location.origin)}/voice/api/v1/voice/status</code>.
+      배포 환경이면 voice-collector 차트가 <code>data-pipeline</code> 에 배포됐는지(Service <code>voice-collector-x2daarjxe4:8080</code>), 로컬이면 8085 기동 여부를 확인. 아래 값은 서버 값이 아니라 빈 화면입니다.</span>`;
   }
   $('lnk-swagger').href = API_BASE + '/swagger-ui.html';
   return API_BASE;
@@ -1217,7 +1224,7 @@ $('btn-clear').onclick   = () => { $('log').innerHTML = ''; };
 //   경로 input 은 renderDirs, 브로커 라디오는 renderTracks(현재 주소와 같은 프리셋이 선택), 로그 컬렉터 카드·DB 줄은 loadStatus 가 그린다.
 async function loadConfig() {
   const c = await call('GET', '/api/v1/voice/config', '환경 설정 조회 (자동 프리셋)', true);
-  if (!c || !c.env) { $('env-line').textContent = '환경 정보를 받지 못했습니다'; return; }
+  if (!c || !c.env) { if (!API_DOWN) $('env-line').textContent = '환경 정보를 받지 못했습니다'; return; }
   const e = c.env;
   $('env-line').innerHTML = `환경 <b>${esc(e.kindLabel)}</b> · ${esc(e.os)} · profile ${esc((e.profiles||[]).join(','))}`
     + ` · ROOT_DIR <code>${esc(e.rootDir)}</code> <span class="text-secondary">(${esc(e.rootDirSource)})</span>`
