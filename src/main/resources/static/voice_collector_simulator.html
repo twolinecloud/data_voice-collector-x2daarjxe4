@@ -118,6 +118,9 @@
   .step-url .url-tag { font-weight:600; color:#495057; }
   .probe-ok  { color:#198754; font-weight:600; }
   .probe-bad { color:#dc3545; font-weight:600; }
+  .db-line { font-size:.74rem; color:#495057; font-family:var(--mono); word-break:break-all; }
+  .sim-files { font-family:var(--mono); font-size:.72rem; columns:2; column-gap:1.5rem; }
+  @media (max-width: 768px) { .sim-files { columns:1; } }
 
   /* ── 재처리 시나리오 ───────────────────────────────────────────────── */
   .tl { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.5rem; align-items:start; }
@@ -196,7 +199,8 @@
     <div class="card-body py-2">
       <div class="row g-3 mb-2" id="tracks"></div>
       <div class="row g-2" id="logc"></div>
-      <div class="hint mt-2" id="batch-line"></div>
+      <div class="db-line mt-2" id="db-line"></div>
+      <div class="hint mt-1" id="batch-line"></div>
       <div class="mt-2" id="warnings"></div>
       <div class="mt-2" id="probe-line"></div>
     </div>
@@ -206,7 +210,7 @@
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white py-2"><strong>② 제어</strong></div>
     <div class="card-body py-2" id="controls">
-      <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시연 Mock 은 총 12건(일배치 5·5 / 10분 주기 1·1)</div>
+      <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 5·전화 5 = 10건(트랙별 일배치 3 · 10분 주기 2)</div>
       <div class="d-flex flex-wrap gap-2 mb-2">
         <button class="btn btn-primary btn-sm"    id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
         <button class="btn btn-sm"  id="btn-phone" style="background:#6f42c1;border-color:#6f42c1;color:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
@@ -214,13 +218,15 @@
         <button class="btn btn-outline-primary btn-sm" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
       </div>
       <div class="d-flex flex-wrap gap-2 mb-2">
-        <button class="btn btn-warning btn-sm"  id="btn-reset" title="멱등 표식·수신 파일 삭제 + H2 Mock 보라미를 지금 시각 기준으로 재적재(접견 6·전화 6)">Mock 데이터 초기화 / 생성</button>
+        <button class="btn btn-warning btn-sm"  id="btn-reset" title="Complete Clean &amp; Seed — 멱등 표식·수신 파일 삭제 + DB 메타(접견 5·전화 5, 트랙별 일배치 3·주기 2) + XVARM 원본 더미 파일 생성">시뮬레이션 데이터 생성</button>
+        <button class="btn btn-outline-warning btn-sm" id="btn-sim-clean" title="Complete Clean — DB 의 시뮬레이션 메타 행(SIM 접두)과 더미 파일·멱등 표식을 전부 삭제">시뮬레이션 데이터 초기화</button>
         <button class="btn btn-outline-secondary btn-sm" id="btn-targets">처리 대상 미리보기</button>
         <button class="btn btn-outline-secondary btn-sm" id="btn-files">수신 파일 확인</button>
         <button class="btn btn-outline-secondary btn-sm" id="btn-outputs">STT 출력 확인 (최근 배치)</button>
         <button class="btn btn-outline-secondary btn-sm" id="btn-probe">브로커 연결 확인</button>
       </div>
 
+      <div id="sim-box" class="mb-2"></div>
       <div class="acc" id="adv-acc">
         <div class="acc-head" data-acc="adv-acc">
           <span class="grow small"><b>고급</b> — 대용량 Mock(OOM 방어) · 장애 주입(Chaos)</span>
@@ -240,7 +246,7 @@
                   <div class="col-4"><button class="btn btn-sm btn-dark w-100" id="btn-dataset">규모 적용</button></div>
                 </div>
                 <div class="d-flex flex-wrap gap-1 mt-2">
-                  <button class="btn btn-sm btn-outline-secondary preset" data-m="5"    data-p="5">기본 (5·5 + 주기 1·1)</button>
+                  <button class="btn btn-sm btn-outline-secondary preset" data-m="3"    data-p="3">기본 (일배치 3·3 + 주기 2·2)</button>
                   <button class="btn btn-sm btn-outline-secondary preset" data-m="500"  data-p="500">1,000건</button>
                   <button class="btn btn-sm btn-outline-secondary preset" data-m="2500" data-p="2500">5,000건</button>
                   <button class="btn btn-sm btn-outline-secondary preset" data-m="5000" data-p="5000">10,000건</button>
@@ -318,7 +324,7 @@
         <button class="btn btn-outline-primary btn-sm" id="rt-4">④ 재처리 배치 실행</button>
         <div class="form-check ms-auto mb-0">
           <input class="form-check-input" type="checkbox" id="rt-fresh" checked>
-          <label class="form-check-label hint" for="rt-fresh" title="① 전에 Mock 데이터 초기화(멱등 표식·수신 파일 삭제 + H2 재적재). 이미 처리된 대상은 건너뜀이 되어 실패 이력이 안 남습니다">실행 전 Mock 초기화</label>
+          <label class="form-check-label hint" for="rt-fresh" title="① 전에 시뮬레이션 데이터 생성(Clean &amp; Seed). 이미 처리된 대상은 건너뜀이 되어 실패 이력이 안 남습니다">실행 전 데이터 재생성</label>
         </div>
         <button class="btn btn-success btn-sm" id="rt-auto">🚀 원클릭 자동 실행 (①→④)</button>
         <button class="btn btn-outline-secondary btn-sm" id="rt-clear">타임라인 지우기</button>
@@ -380,7 +386,11 @@ const DIR_KEYS = [
   ['work',         '작업',        '복호화 산출물 · 멱등 표식'],
   ['outputMeet',   '출력 · 접견', 'STT 결과 {여기}/{execId}/'],
   ['outputPhone',  '출력 · 전화', 'STT 결과 {여기}/{execId}/'],
+  ['xvarmOriginalBase', 'XVARM 원본', '더미 음성 파일 {여기}/meet · /phone (시뮬레이션 데이터 생성이 쓴다)'],
 ];
+// 드롭다운 라벨 — 서버(/status 의 switchLabels)가 내려주고, 없으면 코드 그대로
+let SWITCH_LABELS = {};
+const lbl = (key, v) => (SWITCH_LABELS[key] && SWITCH_LABELS[key][v]) || v;
 
 // ── 로그 ────────────────────────────────────────────────────────────────
 function log(msg, cls='') {
@@ -534,11 +544,20 @@ function renderTracks(tracks) {
   document.querySelectorAll('input[data-url-radio]').forEach(r => {
     r.onchange = () => { if (r.checked) applyUrl(r.dataset.urlRadio, r.value); };
   });
+  document.querySelectorAll('input[data-mode-radio]').forEach(r => {
+    r.onchange = async () => {
+      if (!r.checked) return;
+      const key = r.dataset.modeRadio, val = r.value;
+      const d = await call('PUT', `/api/v1/mock/modes/${key}?value=${encodeURIComponent(val)}`, `${key} → ${lbl(key, val)}`);
+      if (d) log(`  └ ${key}: ${lbl(key, d.before)} → ${lbl(key, d.after)}`, 'ok');
+      await loadStatus(true);
+    };
+  });
   document.querySelectorAll('select[data-switch]').forEach(sel => {
     sel.onchange = async () => {
       const key = sel.dataset.switch, val = sel.value;
-      const d = await call('PUT', `/api/v1/mock/modes/${key}?value=${encodeURIComponent(val)}`, `모드 변경 ${key} → ${val}`);
-      if (d) log(`  └ ${key}: ${d.before} → ${d.after}`, 'ok');
+      const d = await call('PUT', `/api/v1/mock/modes/${key}?value=${encodeURIComponent(val)}`, `모드 변경 ${key} → ${lbl(key, val)}`);
+      if (d) log(`  └ ${key}: ${lbl(key, d.before)} → ${lbl(key, d.after)}`, 'ok');
       await loadStatus(true);
     };
   });
@@ -555,12 +574,12 @@ function trackCard(kind, tr) {
 function stepRow(s, no) {
   const mock = MOCKISH.includes(s.mode);
   const ctrl = s.switchKey
-    ? `<div class="step-sel"><select class="form-select form-select-sm" data-switch="${s.switchKey}">
-         ${(SWITCH_OPTS[s.switchKey]||[s.mode]).map(o => `<option ${o===s.mode?'selected':''}>${o}</option>`).join('')}
+    ? `<div class="step-sel"><select class="form-select form-select-sm" data-switch="${s.switchKey}" title="${esc(s.mode)}">
+         ${(SWITCH_OPTS[s.switchKey]||[s.mode]).map(o => `<option value="${o}" ${o===s.mode?'selected':''}>${esc(lbl(s.switchKey, o))}</option>`).join('')}
        </select></div>`
     : `<div class="step-fixed">${esc(s.mode||'')}</div>`;
   const tip = esc([s.note, s.endpoint ? '호출: ' + s.endpoint : ''].filter(Boolean).join(String.fromCharCode(10)));
-  const urlUi = s.urlKey ? stepUrlRadios(s) : '';
+  const urlUi = (s.urlKey ? stepUrlRadios(s) : '') + (s.radioKey ? stepModeRadios(s) : '');
   return `<div class="step ${mock?'is-mock':'is-real'}" title="${tip}">
       <div class="step-no">${no}</div>
       <div class="step-main">
@@ -587,6 +606,18 @@ function stepUrlRadios(s) {
             : `<div class="hint text-danger">주소가 비어 있습니다 — 프리셋을 고르십시오</div>`;
   return `<div class="step-url">${radios}${note}</div>`;
 }
+// 단계에 붙는 모드 라디오(예: 개발계 DB 모드의 XVARM 연동) — 고르는 즉시 PUT /mock/modes/{key}
+function stepModeRadios(s) {
+  const radios = (s.radioOptions||[]).map((o, i) => {
+    const id = `radio-${s.radioKey}-${i}`;
+    return `<div class="form-check">
+        <input class="form-check-input" type="radio" name="radio-${s.radioKey}" id="${id}" data-mode-radio="${s.radioKey}" value="${esc(o.value)}" ${o.value === s.radioValue ? 'checked' : ''}>
+        <label class="form-check-label" for="${id}" title="${esc(o.note||'')}"><span class="url-tag">${esc(o.label)}</span>
+          ${o.value === s.radioConfigured ? '<span class="hint">(Default)</span>' : ''}</label>
+      </div>`;
+  }).join('');
+  return `<div class="step-url">${radios}${s.radioNote ? `<div class="hint">${esc(s.radioNote)}</div>` : ''}</div>`;
+}
 function flagCard(label, on, detail) {
   return `<div class="col-12 col-md-6"><div class="card sw-card ${on?'is-real':'is-mock'} h-100">
       <div class="card-body py-1 px-3">
@@ -600,7 +631,12 @@ async function loadStatus(quiet) {
   const s = await call('GET', '/api/v1/voice/status', '현재 구성 조회', quiet);
   if (!s) return;
   STATUS = s;
+  SWITCH_LABELS = s.switchLabels || {};
   renderTracks(s.tracks);
+  if (s.db) {
+    $('db-line').innerHTML = `조회 DB <b>${esc(s.db.label)}</b> <span class="text-secondary">${esc(s.db.url||'')}</span><br>`
+      + `XVARM 연동 <b>${esc(lbl('xvarm', s.db.xvarmMode))}</b> · 테이블 ${esc(s.db.tables||'')}`;
+  }
   $('logc').innerHTML = flagCard('로그 컬렉터 (T1 · T2 COLLECT/ANALYZE · T4)', s.logCollector.enabled, s.logCollector.baseUrl || '주소 미설정');
   $('batch-line').innerHTML =
       `파일명 정책 <code>${esc(s.dirs.namingPolicy)}</code> · 스케줄 ${s.batch.scheduleEnabled?'켜짐':'꺼짐'} · 대상코드 <code>${(s.batch.speclMngSeCd||[]).join(',')}</code> · 1회 상한 ${s.batch.maxFilesPerRun}건`;
@@ -610,7 +646,7 @@ async function loadStatus(quiet) {
     $('ds-meet').value = s.dataset.meetCount;
     $('ds-phone').value = s.dataset.phoneCount;
     const extra = [];
-    if (s.dataset.total > 12) extra.push(`Mock 규모 ${s.dataset.total.toLocaleString()}건${s.dataset.bulk ? ' (대량)' : ''}`);
+    if (s.dataset.total > 10) extra.push(`Mock 규모 ${s.dataset.total.toLocaleString()}건${s.dataset.bulk ? ' (대량)' : ''}`);
     if (s.chaos?.enabled) extra.push(`장애 주입 ON ${s.chaos.failPercent}%/${s.chaos.delayPercent}%`);
     $('adv-sum').textContent = extra.join(' · ');
     $('adv-sum').className = 'hint' + (extra.length ? ' text-warning fw-semibold' : '');
@@ -644,6 +680,7 @@ function renderDirs(d) {
   document.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => applyDirPreset(b.dataset.preset));
   if (!$('dir-base').value) $('dir-base').value = d.baseDir || d.suggestedBaseDir || '';
   $('dir-rows').innerHTML = DIR_KEYS.map(([k, label, note]) => {
+    if (k === 'xvarmOriginalBase') note += ` → ${esc(d.xvarmOriginalMeet||'')} · ${esc(d.xvarmOriginalPhone||'')}`;
     const changed = cfg[k] !== undefined && cfg[k] !== d[k];
     return `<div class="col-12 col-md-6 col-xl-4 dir-row ${changed?'dir-changed':''}">
         <label for="dir-${k}">${esc(label)} <span class="text-secondary">— ${esc(note)}</span>${changed ? ' <span class="text-warning">· 설정값과 다름</span>' : ''}</label>
@@ -806,7 +843,7 @@ async function runBatchInner(path, label, kind, extraQuery) {
   if (s && s.tracks) {
     const ks = kind ? [kind.toLowerCase()] : ['meet','phone'];
     ks.forEach(k => { const tr = s.tracks[k]; if (!tr) return;
-      logRaw(`<span class="hd">▷ ${esc(tr.label)} 트랙</span> ` + (tr.steps||[]).map(st => `${esc(st.label)}=<b>${esc(st.mode)}</b>`).join(' → ')); });
+      logRaw(`<span class="hd">▷ ${esc(tr.label)} 트랙</span> ` + (tr.steps||[]).map(st => `${esc(st.label)}=<b>${esc(st.switchKey ? lbl(st.switchKey, st.mode) : st.mode)}</b>`).join(' → ')); });
   }
   // 시뮬레이터에서 돌리는 배치는 전부 시험이다 → EXEC_ID 가 ...TST... 로 채번된다.
   const url = `${path}?test=true` + (kind ? `&kinds=${kind}` : '') + (extraQuery ? '&' + extraQuery : '');
@@ -992,7 +1029,7 @@ $('rt-auto').onclick = async () => {
   log(`🚀 재처리 시나리오 자동 실행 — 단계 간 ${gap/1000}초`, 'hd');
   try {
     if ($('rt-fresh').checked) {
-      const d = await call('POST', '/api/v1/mock/reset', 'Mock 데이터 초기화 (재처리 시나리오 준비)');
+      const d = await call('POST', '/api/v1/mock/sim-data', '시뮬레이션 데이터 생성 (재처리 시나리오 준비)');
       if (d) log(`  └ ${d.message}`, 'ok');
       await sleep(Math.min(gap, 1000));
     }
@@ -1025,14 +1062,58 @@ $('btn-probe').onclick = async () => {
   if (d.error) log(`  └ ${d.error}`, 'er');
 };
 
+function renderSimResult(title, d, isSeed) {
+  const sim = d.sim || {};
+  const rows = sim.rows || {};
+  const files = sim.files || [];
+  const c = d.cleared || {};
+  const fd = sim.filesDeleted || {};
+  const rowLine = isSeed
+    ? `DB 메타 — 수용자 ${rows.inmates ?? 0} · 접견 ${rows.meet ?? 0}(re·im·sm·xvarm 1:1:1:1) · 전화 ${rows.phone ?? 0}(im 통화 + im 수용자 1:1)`
+    : `DB 메타 삭제 — ${Object.entries(sim.cleaned||{}).map(([k,v]) => `${k} ${v}`).join(' · ')}`;
+  const fileLine = isSeed
+    ? `더미 파일 ${files.length}개 — ${Object.entries(sim.dirs||{}).map(([k,v]) => `${k} ${v}`).join(' · ')}`
+    : `더미 파일 삭제 — 접견 ${fd.MEET ?? 0} · 전화 ${fd.PHONE ?? 0}`;
+  const wasOpen = $('sim-acc')?.classList.contains('open');
+  $('sim-box').innerHTML = `<div class="acc ${wasOpen ? 'open' : ''}" id="sim-acc">
+      <div class="acc-head" data-acc="sim-acc">
+        <span class="grow small"><b>${esc(title)}</b> <span class="text-secondary">— ${esc(sim.db||'')} · ${esc(rowLine)}</span></span>
+        <button class="acc-tgl" type="button">▼</button>
+      </div>
+      <div class="acc-body"><div class="acc-inner"><div class="pad small">
+        ${sim.ensured ? `<div class="hint mb-1">테이블: ${esc(sim.ensured)}</div>` : ''}
+        ${sim.tables ? `<div class="hint mb-1">조인: ${esc(sim.tables)}</div>` : ''}
+        ${sim.windows ? `<div class="hint mb-1">시간창: 일배치 ${esc(sim.windows.daily)} · 주기 ${esc(sim.windows.periodic)}</div>` : ''}
+        <div class="hint mb-1">로컬: 표식 ${c.idempotencyMarkers ?? 0} · 수신 접견 ${c.meetFiles ?? 0} · 수신 전화 ${c.phoneFiles ?? 0} · 작업 ${c.workFiles ?? 0} 삭제</div>
+        <div class="fw-semibold mt-2 mb-1">${esc(fileLine)}</div>
+        ${files.length ? `<div class="sim-files">${files.map(f => `<div>${f.written ? '✔' : '✖'} ${esc(f.path)} <span class="text-secondary">(${f.bytes ?? '-'}B)</span></div>`).join('')}</div>` : ''}
+        <details class="mt-2"><summary>Response JSON</summary>${jsonBox(d, { compact:true })}</details>
+      </div></div></div>
+    </div>`;
+}
 $('btn-reset').onclick = async () => {
-  const d = await call('POST', '/api/v1/mock/reset', 'Mock 데이터 초기화 / 생성');
+  const info = await callFull('POST', '/api/v1/mock/sim-data', '시뮬레이션 데이터 생성 (Clean & Seed)');
+  const d = info.ok ? info.body : null;
   if (!d) return;
   const c = d.cleared || {};
-  log(`  └ 표식 ${c.idempotencyMarkers} · 접견파일 ${c.meetFiles} · 전화파일 ${c.phoneFiles} · 작업파일 ${c.workFiles} 삭제`, 'ok');
-  const bm = d.boramiMock || {};
-  log(bm.reseeded ? `  └ H2 Mock 보라미 재적재 — ${Object.entries(bm.rows||{}).map(([k,v]) => `${k} ${v}`).join(' · ')}` : `  └ H2 재적재 건너뜀 — ${bm.reason||''}`, bm.reseeded ? 'ok' : 'wr');
+  log(`  └ 로컬 정리 — 표식 ${c.idempotencyMarkers} · 접견파일 ${c.meetFiles} · 전화파일 ${c.phoneFiles} · 작업파일 ${c.workFiles}`, 'ok');
+  const sim = d.sim || {};
+  log(`  └ ${sim.db} — ${sim.ensured || ''}`, 'ok');
+  log(`  └ DB 메타 ${Object.entries(sim.rows||{}).map(([k,v]) => `${k} ${v}`).join(' · ')} · 더미 파일 ${(sim.files||[]).length}개 (${Object.values(sim.dirs||{}).join(' · ')})`, 'ok');
   log(`  └ ${d.message}`, 'ok');
+  renderSimResult('시뮬레이션 데이터 생성', d, true);
+  $('targets-card').classList.add('d-none');
+  await loadStatus(true);
+};
+$('btn-sim-clean').onclick = async () => {
+  if (!confirm('DB 의 시뮬레이션 메타(SIM 접두 행)와 XVARM 원본 더미 파일, 멱등 표식을 전부 지웁니다. 계속할까요?')) return;
+  const info = await callFull('DELETE', '/api/v1/mock/sim-data', '시뮬레이션 데이터 초기화 (Complete Clean)');
+  const d = info.ok ? info.body : null;
+  if (!d) return;
+  const sim = d.sim || {};
+  log(`  └ DB 삭제 — ${Object.entries(sim.cleaned||{}).map(([k,v]) => `${k} ${v}`).join(' · ')} · 더미 파일 접견 ${sim.filesDeleted?.MEET ?? 0} · 전화 ${sim.filesDeleted?.PHONE ?? 0}`, 'ok');
+  log(`  └ ${d.message}`, 'ok');
+  renderSimResult('시뮬레이션 데이터 초기화', d, false);
   $('targets-card').classList.add('d-none');
   await loadStatus(true);
 };
@@ -1094,7 +1175,7 @@ $('btn-test-clear').onclick = async () => {
 $('btn-refresh').onclick = () => loadStatus(false);
 $('btn-clear').onclick   = () => { $('log').innerHTML = ''; };
 
-log('시뮬레이터 준비 완료. [Mock 데이터 초기화/생성] → [처리 대상 미리보기] → [접견만/전화만 실행] 순서를 권합니다. (시연 Mock 12건: 일배치 5·5 / 10분 주기 1·1)', 'hd');
+log('시뮬레이터 준비 완료. [시뮬레이션 데이터 생성] → [처리 대상 미리보기] → [접견만/전화만 실행] 순서를 권합니다. (접견 5·전화 5 = 10건: 트랙별 일배치 3 / 10분 주기 2)', 'hd');
 log('접견과 전화는 연동 경로가 완전히 다릅니다 — 전화는 XVARM·브로커를 타지 않습니다. STT 결과는 {출력}/{execId}/ 폴더에 남습니다.', 'hd');
 loadStatus(false);
 </script>

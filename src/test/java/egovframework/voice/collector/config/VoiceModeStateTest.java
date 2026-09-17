@@ -25,15 +25,17 @@ class VoiceModeStateTest {
         return new VoiceProperties(
                 new VoiceProperties.Source(VoiceProperties.SourceMode.MOCK, "", "",
                         new VoiceProperties.Schema("", "", "", ""),
-                        new VoiceProperties.Flag("Y", "Y", "N", "Y")),
+                        new VoiceProperties.Flag("Y", "Y", "N", "Y"),
+                        VoiceProperties.XvarmMode.MOCK_DEV, new VoiceProperties.XvarmMock("sm", "xvarm")),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.MOCK, "", java.util.List.of(), 100, 10),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 new VoiceProperties.Sync(10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
-                new VoiceProperties.Dirs("b", "m", "p", "w", "om", "op"),
+                new VoiceProperties.Dirs("b", "m", "p", "w", "om", "op", ""),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),
                 new VoiceProperties.Stt(VoiceProperties.SttMode.MOCK, "", 30),
                 new VoiceProperties.Batch("0 0 2 * * *", "0 */10 * * * *", 20, false,
-                        List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "UNSTRUCTURED", false));
+                        List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "UNSTRUCTURED", false),
+                new VoiceProperties.Sim(false));
     }
 
     @Test

@@ -23,7 +23,8 @@ public record VoiceProperties(
         @DefaultValue Dirs dirs,
         @DefaultValue Decrypt decrypt,
         @DefaultValue Stt stt,
-        @DefaultValue Batch batch
+        @DefaultValue Batch batch,
+        @DefaultValue Sim sim
 ) {
 
     /** 보라미 대상 조회 경로. */
@@ -34,7 +35,29 @@ public record VoiceProperties(
             /** 인터페이스ID — 표준 A 명명규칙 {@code IF_송신(3)_수신(3)_일련(3)}. 미확정이라 설정으로 뺀다. */
             @DefaultValue("") String interfaceId,
             @DefaultValue Schema schema,
-            @DefaultValue Flag flag
+            @DefaultValue Flag flag,
+            /**
+             * XVARM 연동 — DIRECT_JDBC(개발계 DB)에서 접견 4단 조인의 뒤 두 테이블을 어디서 볼지.
+             * <ul>
+             *   <li>{@code MOCK_DEV}(기본): 개발계 DB 에 누락된 공통파일기본·XVARM 테이블을 우리가 만들고
+             *       시딩한 {@link XvarmMock} 스키마의 테이블을 조인한다</li>
+             *   <li>{@code REAL}: {@link Schema#smsm()}·{@link Schema#xvarm()} 에 설정된 실제 테이블을 조인한다</li>
+             * </ul>
+             */
+            @DefaultValue("MOCK_DEV") XvarmMode xvarmMode,
+            @DefaultValue XvarmMock xvarmMock
+    ) {}
+
+    /**
+     * XVARM DB MOCK(개발계) — 개발계 borami-db(PostgreSQL)에 우리가 만드는 두 테이블이 놓일 스키마.
+     * 2026-09-12 확인 기준 borami-db 에는 공통파일기본(sm)과 XVARM 테이블이 없다.
+     * H2(로컬)는 스키마 없이 평평하므로 이 값을 쓰지 않는다.
+     */
+    public record XvarmMock(
+            /** 공통파일기본 {@code tb_smsm_cmfi_bs} 를 만들 스키마 */
+            @DefaultValue("sm") String schemaSmsm,
+            /** XVARM {@code asyscontentelement} 를 만들 스키마 */
+            @DefaultValue("xvarm") String schemaXvarm
     ) {}
 
     /**
@@ -159,7 +182,19 @@ public record VoiceProperties(
             /** 접견 STT 결과 출력 뿌리 — 실제 파일은 {@code {outputMeet}/{execId}/} 아래 */
             @DefaultValue("./work/xenon/voice") String outputMeet,
             /** 전화 STT 결과 출력 뿌리 — 실제 파일은 {@code {outputPhone}/{execId}/} 아래 */
-            @DefaultValue("./work/xenon/phone") String outputPhone
+            @DefaultValue("./work/xenon/phone") String outputPhone,
+            /**
+             * XVARM 원본 음성 파일 스토리지(보라미 쪽 원본을 흉내 내는 자리) 뿌리. 아래 {@code meet}/{@code phone} 가 생긴다.
+             * 비우면 OS 로 정한다 — Windows {@code C:/XVARM_ORIGINAL_VOICE_FILES}, 그 외 {@code /k8s/XVARM_ORIGINAL_VOICE_FILES}.
+             * 시뮬레이션 데이터 생성이 DB 메타의 파일명과 1:1 인 경량 더미 파일(0~1KB)을 여기에 쓴다.
+             */
+            @DefaultValue("") String xvarmOriginalBase
+    ) {}
+
+    /** 시뮬레이션 데이터(개발계 DB 메타 + 물리 더미 파일) 생성 정책. */
+    public record Sim(
+            /** 기동 시 자동 생성(Clean &amp; Seed). 로컬(H2)은 켜고, 개발계는 버튼으로만 한다. */
+            @DefaultValue("false") boolean seedOnStartup
     ) {}
 
     /** 복호화. 전화 건의 주체가 아직 확정되지 않아 기본은 SKIP 이다(계획서 11장 Q13). */
@@ -221,6 +256,9 @@ public record VoiceProperties(
     ) {}
 
     public enum SourceMode { MOCK, DIRECT_JDBC, ESB_HTTP2DB }
+
+    /** XVARM 연동 — MOCK_DEV(개발계 DB 에 우리가 만든 테이블) / REAL(실 XVARM DB·공통파일 테이블). */
+    public enum XvarmMode { MOCK_DEV, REAL }
 
     public enum BrokerMode { MOCK, REST }
 

@@ -37,6 +37,8 @@ public class VoiceDirState {
     private static final String REL_WORK = "voice_work";
     private static final String REL_OUTPUT_MEET = "xenon/voice";
     private static final String REL_OUTPUT_PHONE = "xenon/phone";
+    /** XVARM 원본 음성 스토리지 폴더명 — base(C:/ 또는 /k8s) 바로 아래. */
+    public static final String XVARM_ORIGINAL_DIR = "XVARM_ORIGINAL_VOICE_FILES";
 
     private final VoiceProperties props;
 
@@ -46,6 +48,8 @@ public class VoiceDirState {
     private volatile String work;
     private volatile String outputMeet;
     private volatile String outputPhone;
+    /** XVARM 원본 음성 스토리지 뿌리 — 아래에 meet/ · phone/ 가 있다. 시뮬레이션 더미 파일이 여기에 놓인다. */
+    private volatile String xvarmOriginalBase;
 
     @PostConstruct
     void init() {
@@ -56,8 +60,47 @@ public class VoiceDirState {
         this.work = norm(d.work());
         this.outputMeet = norm(d.outputMeet());
         this.outputPhone = norm(d.outputPhone());
-        log.info("[Dirs] 초기 경로 — base={} 수신(접견={} 전화={}) 작업={} 출력(접견={} 전화={})",
-                baseDir, receiveMeet, receivePhone, work, outputMeet, outputPhone);
+        this.xvarmOriginalBase = configuredXvarmOriginalBase();
+        log.info("[Dirs] 초기 경로 — base={} 수신(접견={} 전화={}) 작업={} 출력(접견={} 전화={}) XVARM원본={}",
+                baseDir, receiveMeet, receivePhone, work, outputMeet, outputPhone, xvarmOriginalBase);
+        ensureDirs();
+    }
+
+    /** 설정값이 비면 OS 로 정한다 — Windows {@code C:/XVARM_ORIGINAL_VOICE_FILES}, 그 외 {@code /k8s/XVARM_ORIGINAL_VOICE_FILES}. */
+    private String configuredXvarmOriginalBase() {
+        String v = norm(props.dirs().xvarmOriginalBase());
+        return v.isEmpty() ? defaultXvarmOriginalBase() : v;
+    }
+
+    public static String defaultXvarmOriginalBase() {
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        return (os.contains("win") ? "C:/" : "/k8s/") + XVARM_ORIGINAL_DIR;
+    }
+
+    /**
+     * 우리가 쓰는 폴더를 미리 만든다(CREATE_IF_NOT_EXISTS) — 수신·작업·출력·XVARM 원본.
+     * 못 만들어도 기동은 막지 않는다(권한·마운트 문제는 배치 때 사유와 함께 드러난다).
+     */
+    public void ensureDirs() {
+        for (String d : List.of(receiveMeet, receivePhone, work, outputMeet, outputPhone,
+                xvarmOriginalMeet(), xvarmOriginalPhone())) {
+            try {
+                java.nio.file.Files.createDirectories(Path.of(d));
+            } catch (Exception e) {
+                log.warn("[Dirs] 디렉터리 생성 실패 — {} ({})", d, e.getMessage());
+            }
+        }
+    }
+
+    public String xvarmOriginalBase() { return xvarmOriginalBase; }
+    /** 접견 원본 더미 파일 폴더 — {@code {xvarmOriginalBase}/meet}. */
+    public String xvarmOriginalMeet() { return xvarmOriginalBase + "/meet"; }
+    /** 전화 원본 더미 파일 폴더 — {@code {xvarmOriginalBase}/phone}. */
+    public String xvarmOriginalPhone() { return xvarmOriginalBase + "/phone"; }
+
+    /** 종류별 XVARM 원본 폴더. */
+    public Path xvarmOriginalDir(VoiceKind kind) {
+        return Path.of(kind == VoiceKind.MEET ? xvarmOriginalMeet() : xvarmOriginalPhone());
     }
 
     public String baseDir() { return baseDir; }
@@ -95,6 +138,9 @@ public class VoiceDirState {
         m.put("work", work);
         m.put("outputMeet", outputMeet);
         m.put("outputPhone", outputPhone);
+        m.put("xvarmOriginalBase", xvarmOriginalBase);
+        m.put("xvarmOriginalMeet", xvarmOriginalMeet());
+        m.put("xvarmOriginalPhone", xvarmOriginalPhone());
         return m;
     }
 
@@ -108,6 +154,10 @@ public class VoiceDirState {
         m.put("work", norm(d.work()));
         m.put("outputMeet", norm(d.outputMeet()));
         m.put("outputPhone", norm(d.outputPhone()));
+        String xb = configuredXvarmOriginalBase();
+        m.put("xvarmOriginalBase", xb);
+        m.put("xvarmOriginalMeet", xb + "/meet");
+        m.put("xvarmOriginalPhone", xb + "/phone");
         return m;
     }
 
@@ -127,6 +177,11 @@ public class VoiceDirState {
         m.put("work", b + "/" + REL_WORK);
         m.put("outputMeet", b + "/" + REL_OUTPUT_MEET);
         m.put("outputPhone", b + "/" + REL_OUTPUT_PHONE);
+        // XVARM 원본은 드라이브/마운트 뿌리 바로 아래 — C:/k8s → C:/XVARM_…, /k8s → /k8s/XVARM_…
+        String xb = (b.matches("^[A-Za-z]:(/.*)?$") ? b.substring(0, 3).replaceAll("/$", "") + "/" : b + "/") + XVARM_ORIGINAL_DIR;
+        m.put("xvarmOriginalBase", xb);
+        m.put("xvarmOriginalMeet", xb + "/meet");
+        m.put("xvarmOriginalPhone", xb + "/phone");
         return m;
     }
 
@@ -171,9 +226,12 @@ public class VoiceDirState {
         for (Map.Entry<String, String> e : values.entrySet()) {
             String key = e.getKey() == null ? "" : e.getKey().trim();
             String val = norm(e.getValue());
+            if (key.equals("xvarmOriginalMeet") || key.equals("xvarmOriginalPhone")) {
+                continue;   // 파생 경로 — base 로만 바꾼다
+            }
             if (!before.containsKey(key)) {
                 throw new IllegalArgumentException("알 수 없는 디렉터리 키: " + key
-                        + " (baseDir/receiveMeet/receivePhone/work/outputMeet/outputPhone)");
+                        + " (baseDir/receiveMeet/receivePhone/work/outputMeet/outputPhone/xvarmOriginalBase)");
             }
             if (val.isEmpty()) {
                 throw new IllegalArgumentException(key + " 경로가 비어 있다");
@@ -186,7 +244,9 @@ public class VoiceDirState {
         this.work = next.get("work");
         this.outputMeet = next.get("outputMeet");
         this.outputPhone = next.get("outputPhone");
+        this.xvarmOriginalBase = next.get("xvarmOriginalBase");
         log.info("[Dirs] 경로 변경 — {} → {}", before, snapshot());
+        ensureDirs();
         return before;
     }
 

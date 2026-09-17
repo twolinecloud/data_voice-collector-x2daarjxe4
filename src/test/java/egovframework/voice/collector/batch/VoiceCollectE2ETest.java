@@ -49,6 +49,7 @@ class VoiceCollectE2ETest {
         registry.add("voice.dirs.work", () -> tmp.resolve("work").toString());
         registry.add("voice.dirs.output-meet", () -> tmp.resolve("xenon/voice").toString());
         registry.add("voice.dirs.output-phone", () -> tmp.resolve("xenon/phone").toString());
+        registry.add("voice.dirs.xvarm-original-base", () -> tmp.resolve("xvarm_original").toString());
         registry.add("voice.sync.wait-timeout-sec", () -> "15");
         registry.add("voice.sync.stable-check-ms", () -> "50");
     }
@@ -74,10 +75,10 @@ class VoiceCollectE2ETest {
     void runsEndToEnd() {
         VoiceBatchResult result = service.run(wideWindow(), null, "TEST");
 
-        // 넓은 창 = 일배치용(접견 5·전화 5, 어제) + 주기배치용(접견 1·전화 1, 5분 전) = 12
-        assertThat(result.targetCnt()).as("Mock 대상 접견 6 + 전화 6").isEqualTo(12);
+        // 넓은 창 = 일배치용(접견 3·전화 3, 어제) + 주기배치용(접견 2·전화 2, 최근 10분) = 10
+        assertThat(result.targetCnt()).as("Mock 대상 접견 5 + 전화 5").isEqualTo(10);
         assertThat(result.failCnt()).as("실패 없이 전부 처리돼야 한다").isZero();
-        assertThat(result.successCnt()).isEqualTo(12);
+        assertThat(result.successCnt()).isEqualTo(10);
         assertThat(result.execStsCd()).isEqualTo("SUCCESS");
         assertThat(result.execId()).isNotBlank();
     }
@@ -124,8 +125,8 @@ class VoiceCollectE2ETest {
                 .containsExactly("COLLECT", "ANALYZE");
         assertThat(result.steps()).allSatisfy(st -> {
             assertThat(st.stepStsCd()).isEqualTo("SUCCESS");
-            assertThat(st.inCnt()).isEqualTo(12);
-            assertThat(st.outCnt()).isEqualTo(12);
+            assertThat(st.inCnt()).isEqualTo(10);
+            assertThat(st.outCnt()).isEqualTo(10);
             assertThat(st.errCnt()).isZero();
         });
     }
@@ -135,8 +136,8 @@ class VoiceCollectE2ETest {
     void reusesSourceSttWhenAvailable() {
         VoiceBatchResult result = service.run(wideWindow(), List.of(VoiceKind.PHONE), "TEST");
 
-        // Mock 전화 6건(일배치 5 + 주기 1) 중 1건이 기존 STT 보유 시나리오다. 그 건도 성공해야 한다.
-        assertThat(result.successCnt()).isEqualTo(6);
+        // Mock 전화 5건(일배치 3 + 주기 2) 중 1건이 기존 STT 보유 시나리오다. 그 건도 성공해야 한다.
+        assertThat(result.successCnt()).isEqualTo(5);
         assertThat(result.failCnt()).isZero();
     }
 
@@ -144,11 +145,11 @@ class VoiceCollectE2ETest {
     @DisplayName("두 번 돌려도 같은 건을 다시 처리하지 않는다 — 주기배치 창이 겹치기 때문")
     void isIdempotentAcrossRuns() {
         VoiceBatchResult first = service.run(wideWindow(), null, "TEST");
-        assertThat(first.successCnt()).isEqualTo(12);
+        assertThat(first.successCnt()).isEqualTo(10);
 
         VoiceBatchResult second = service.run(wideWindow(), null, "TEST");
 
-        assertThat(second.skippedCnt()).as("두 번째 실행은 전부 건너뛴다").isEqualTo(12);
+        assertThat(second.skippedCnt()).as("두 번째 실행은 전부 건너뛴다").isEqualTo(10);
         assertThat(second.successCnt()).isZero();
         assertThat(second.outcomes())
                 .allSatisfy(o -> assertThat(o.status()).isEqualTo(ProcStatus.SKIPPED));
@@ -162,7 +163,7 @@ class VoiceCollectE2ETest {
 
         VoiceBatchResult again = service.run(wideWindow(), null, "TEST");
 
-        assertThat(again.successCnt()).isEqualTo(12);
+        assertThat(again.successCnt()).isEqualTo(10);
         assertThat(again.skippedCnt()).isZero();
     }
 
@@ -171,13 +172,13 @@ class VoiceCollectE2ETest {
     void filtersByKind() {
         VoiceBatchResult meetOnly = service.run(wideWindow(), List.of(VoiceKind.MEET), "TEST");
 
-        assertThat(meetOnly.targetCnt()).isEqualTo(6);
+        assertThat(meetOnly.targetCnt()).isEqualTo(5);
         assertThat(meetOnly.outcomes())
                 .allSatisfy(o -> assertThat(o.target().kind()).isEqualTo(VoiceKind.MEET));
     }
 
     @Test
-    @DisplayName("시간창별 대상 — 일배치 창은 접견 5·전화 5, 10분 주기 창은 접견 1·전화 1 (총 12건, 10초 안에 끝난다)")
+    @DisplayName("시간창별 대상 — 일배치 창은 접견 3·전화 3, 10분 주기 창은 접견 2·전화 2 (총 10건, 10초 안에 끝난다)")
     void mockRespectsWindows() {
         LocalDateTime now = LocalDateTime.now();
         long t0 = System.currentTimeMillis();
@@ -185,13 +186,13 @@ class VoiceCollectE2ETest {
         VoiceBatchResult periodic = service.run(BatchWindow.periodic(now, 20), null, "TEST");
         long elapsed = System.currentTimeMillis() - t0;
 
-        assertThat(daily.targetCnt()).isEqualTo(10);
-        assertThat(daily.outcomes()).filteredOn(o -> o.target().kind() == VoiceKind.MEET).hasSize(5);
-        assertThat(daily.outcomes()).filteredOn(o -> o.target().kind() == VoiceKind.PHONE).hasSize(5);
-        assertThat(periodic.targetCnt()).isEqualTo(2);
-        assertThat(periodic.outcomes()).filteredOn(o -> o.target().kind() == VoiceKind.MEET).hasSize(1);
-        assertThat(periodic.outcomes()).filteredOn(o -> o.target().kind() == VoiceKind.PHONE).hasSize(1);
-        assertThat(daily.successCnt() + periodic.successCnt()).isEqualTo(12);
+        assertThat(daily.targetCnt()).isEqualTo(6);
+        assertThat(daily.outcomes()).filteredOn(o -> o.target().kind() == VoiceKind.MEET).hasSize(3);
+        assertThat(daily.outcomes()).filteredOn(o -> o.target().kind() == VoiceKind.PHONE).hasSize(3);
+        assertThat(periodic.targetCnt()).isEqualTo(4);
+        assertThat(periodic.outcomes()).filteredOn(o -> o.target().kind() == VoiceKind.MEET).hasSize(2);
+        assertThat(periodic.outcomes()).filteredOn(o -> o.target().kind() == VoiceKind.PHONE).hasSize(2);
+        assertThat(daily.successCnt() + periodic.successCnt()).isEqualTo(10);
         assertThat(elapsed).as("시연용 12건은 두 배치 합쳐 10초 안에 끝나야 한다").isLessThan(10_000L);
     }
 

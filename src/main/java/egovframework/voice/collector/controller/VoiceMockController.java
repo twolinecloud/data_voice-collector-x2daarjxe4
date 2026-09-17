@@ -64,54 +64,81 @@ public class VoiceMockController {
     private final FaultInjector faultInjector;
     private final VoiceDirState dirs;
     private final egovframework.voice.collector.stt.SttOutputStore outputStore;
-    private final egovframework.voice.collector.source.MockBoramiSeeder boramiSeeder;
+    private final egovframework.voice.collector.source.SimulationDataService sim;
     private final egovframework.voice.collector.logging.LogCollectorClient logCollector;
 
-    @Operation(summary = "Mock 데이터 초기화 / 생성",
+    @Operation(summary = "시뮬레이션 데이터 생성 (Complete Clean & Seed)",
             description = """
-                    시연을 처음부터 다시 하기 위한 초기화입니다.
+                    시연을 처음부터 다시 하기 위해 **전부 지우고 새로 만듭니다.**
 
                     1. **멱등 표식** — 이걸 지워야 같은 대상을 다시 처리할 수 있습니다
                     2. **수신 디렉터리의 파일** — 접견·전화 수신 폴더
                     3. **작업 디렉터리의 산출물** — 복호화 결과·Mock 기존 STT 텍스트
-                    4. **H2 Mock 보라미 재적재** — `data-borami-mock.sql` 을 **지금 시각 기준**으로 다시 깝니다
-                       (일배치용 접견 5·전화 5 = 어제 09시대, 주기배치용 접견 1·전화 1 = 5분 전. 총 12건).
-                       실DB(realdb)에 붙어 있으면 건너뜁니다
-                    5. **Mock 규모** 를 시연 기본(12건)으로 되돌립니다 — 대용량 시험으로 올려 둔 값이 남아
-                       10분 주기 배치가 수백 건을 돌던 문제를 막습니다
+                    4. **DB 메타 데이터** — 접견 5건(re·im·sm·xvarm 4단 1:1:1:1) · 전화 5건(im 통화내역 + im 특이수용자 1:1).
+                       트랙마다 3건은 어제(일배치 창), 2건은 최근 10분(주기배치 창). 로컬은 H2, 개발계는 borami-db(PostgreSQL)에 넣습니다.
+                       XVARM 모드가 `MOCK_DEV` 면 누락 테이블(`sm.tb_smsm_cmfi_bs` · `xvarm.asyscontentelement`)을 먼저 만듭니다
+                    5. **물리 더미 파일** — DB 파일명과 1:1 인 경량 파일(수십 byte)을 XVARM 원본 스토리지
+                       (`{xvarmOriginalBase}/meet` · `/phone`)에 씁니다
+                    6. **Mock 규모** 를 시연 기본(10건)으로 되돌립니다
 
-                    지운 뒤 현재 조회되는 대상 수를 함께 돌려줍니다.
+                    `POST /api/v1/mock/reset` 은 같은 동작의 옛 이름입니다.
                     """)
-    @PostMapping("/reset")
-    public Map<String, Object> reset() {
-        int markers = idempotency.clearAll();
-        int meetFiles = deleteFilesIn(dirs.receiveMeet());
-        int phoneFiles = deleteFilesIn(dirs.receivePhone());
-        int workFiles = deleteFilesIn(Path.of(dirs.work(), "mock_source_stt").toString());
+    @PostMapping({"/sim-data", "/reset"})
+    public Map<String, Object> createSimData() {
+        Map<String, Object> cleared = clearLocal();
         dataset.reset();
-        Map<String, Object> seed = boramiSeeder.reseed();
+        Map<String, Object> seed = sim.seed();
 
         List<VoiceTarget> targets = previewTargets();
         long meet = targets.stream().filter(t -> t.kind() == VoiceKind.MEET).count();
-        log.info("[Mock] 초기화 — 표식 {}건, 접견파일 {}건, 전화파일 {}건, 작업파일 {}건, 재적재={}",
-                markers, meetFiles, phoneFiles, workFiles, seed.get("reseeded"));
-
-        Map<String, Object> cleared = new LinkedHashMap<>();
-        cleared.put("idempotencyMarkers", markers);
-        cleared.put("meetFiles", meetFiles);
-        cleared.put("phoneFiles", phoneFiles);
-        cleared.put("workFiles", workFiles);
+        log.info("[Sim] 생성 — 로컬 {} · DB {}", cleared, seed.get("rows"));
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("cleared", cleared);
-        out.put("boramiMock", seed);
+        out.put("sim", seed);
         out.put("dataset", dataset.snapshot());
         out.put("targetCount", targets.size());
         out.put("targetMeet", meet);
         out.put("targetPhone", targets.size() - meet);
-        out.put("message", "초기화 완료 — 대상 %d건(접견 %d · 전화 %d)이 다시 처리 가능한 상태입니다"
-                .formatted(targets.size(), meet, targets.size() - meet));
+        out.put("message", "시뮬레이션 데이터 생성 완료 — 대상 %d건(접견 %d · 전화 %d) · 더미 파일 %d개"
+                .formatted(targets.size(), meet, targets.size() - meet,
+                        ((List<?>) seed.getOrDefault("files", List.of())).size()));
         return out;
+    }
+
+    @Operation(summary = "시뮬레이션 데이터 초기화 (Complete Clean)",
+            description = """
+                    시뮬레이션 데이터를 **전부 지웁니다** (만들지는 않습니다).
+
+                    - DB 의 시뮬레이션 메타 행(SIM 접두: 수용자·녹취·통화·공통파일·XVARM) 일괄 DELETE — 운영·다른 사람 행은 건드리지 않습니다
+                    - XVARM 원본 스토리지의 더미 파일(`mock_*`) 삭제
+                    - 멱등 표식 · 수신 파일 · 작업 산출물 삭제
+                    """)
+    @DeleteMapping("/sim-data")
+    public Map<String, Object> deleteSimData() {
+        Map<String, Object> cleared = clearLocal();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("cleared", cleared);
+        out.put("sim", sim.clean());
+        out.put("message", "시뮬레이션 데이터 초기화 완료 — DB 메타·더미 파일·멱등 표식을 지웠습니다");
+        return out;
+    }
+
+    @Operation(summary = "시뮬레이션 데이터 현황",
+            description = "DB 종류 · 조립된 테이블명 · SIM 행 수 · 원본 스토리지의 더미 파일 목록.")
+    @GetMapping("/sim-data")
+    public Map<String, Object> simDataStatus() {
+        return sim.status();
+    }
+
+    /** 멱등 표식 · 수신 파일 · Mock 작업 산출물 삭제 — 생성/초기화 공통. */
+    private Map<String, Object> clearLocal() {
+        Map<String, Object> cleared = new LinkedHashMap<>();
+        cleared.put("idempotencyMarkers", idempotency.clearAll());
+        cleared.put("meetFiles", deleteFilesIn(dirs.receiveMeet()));
+        cleared.put("phoneFiles", deleteFilesIn(dirs.receivePhone()));
+        cleared.put("workFiles", deleteFilesIn(Path.of(dirs.work(), "mock_source_stt").toString()));
+        return cleared;
     }
 
     @Operation(summary = "테스트 데이터 초기화 (TST 연쇄 삭제)",
@@ -130,6 +157,7 @@ public class VoiceMockController {
                        어떤 경우에도 걸리지 않습니다.
                     2. **로컬 산출물** — 멱등 표식·수신 파일·작업 파일 (Mock 초기화와 동일)
                     3. **STT 출력 폴더** — `{output}/{execId}/` 중 EXEC_ID 에 `TST` 가 든 폴더째
+                    4. 마지막으로 **시뮬레이션 데이터를 다시 생성**합니다(Clean & Seed) — 바로 다음 시연을 돌릴 수 있게
                     """)
     @DeleteMapping("/test-data")
     public Map<String, Object> deleteTestData() {
@@ -154,7 +182,7 @@ public class VoiceMockController {
         local.put("sttOutputDirs", outputStore.deleteTestOutputs());
         out.put("local", local);
         dataset.reset();
-        out.put("boramiMock", boramiSeeder.reseed());
+        out.put("sim", sim.seed());
 
         out.put("testJobId", props.batch().testJobId());
         out.put("message", "테스트(TST) 데이터 초기화 완료 — 운영 배치(VOC/STR/EXT)는 건드리지 않았습니다");
@@ -339,6 +367,7 @@ public class VoiceMockController {
         out.put("configured", modeState.configured());
         out.put("allowed", Map.of(
                 "source", List.of("MOCK", "DIRECT_JDBC", "ESB_HTTP2DB"),
+                "xvarm", List.of("MOCK_DEV", "REAL"),
                 "broker", List.of("MOCK", "REST"),
                 "phone", List.of("MOCK", "ESB"),
                 "decrypt", List.of("SKIP", "REAL"),
@@ -350,7 +379,8 @@ public class VoiceMockController {
             description = """
                     스위치 하나를 **즉시** 바꿉니다. 재시작이 필요 없습니다.
 
-                    - `source` : MOCK / DIRECT_JDBC / ESB_HTTP2DB
+                    - `source` : MOCK / DIRECT_JDBC(개발계 DB) / ESB_HTTP2DB(메타빌드)
+                    - `xvarm`  : MOCK_DEV(개발계 DB 에 우리가 만든 공통파일·XVARM 테이블) / REAL(실 테이블) — 개발계 DB 모드 전용
                     - `broker` : MOCK / REST — 접견 전용
                     - `phone`  : MOCK / ESB — 전화 전용. 브로커와 별개입니다
                     - `decrypt`: SKIP / REAL

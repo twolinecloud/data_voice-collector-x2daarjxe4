@@ -5,6 +5,7 @@ import egovframework.voice.collector.config.VoiceProperties.DecryptMode;
 import egovframework.voice.collector.config.VoiceProperties.PhoneMode;
 import egovframework.voice.collector.config.VoiceProperties.SourceMode;
 import egovframework.voice.collector.config.VoiceProperties.SttMode;
+import egovframework.voice.collector.config.VoiceProperties.XvarmMode;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -43,6 +44,11 @@ public class VoiceModeState {
     private volatile PhoneMode phone;
     private volatile DecryptMode decrypt;
     private volatile SttMode stt;
+    /**
+     * XVARM 연동 — 개발계 DB(DIRECT_JDBC)에서 접견 4단 조인의 공통파일·XVARM 테이블을 어디서 볼지.
+     * MOCK_DEV 는 우리가 개발계 DB 에 만들어 시딩한 테이블, REAL 은 설정된 실제 테이블.
+     */
+    private volatile XvarmMode xvarm;
 
     /**
      * XVARM 브로커 주소 — <b>모드가 아니라 주소지만 같은 곳에서 관리한다.</b>
@@ -60,9 +66,10 @@ public class VoiceModeState {
         this.phone = props.phone().mode();
         this.decrypt = props.decrypt().mode();
         this.stt = props.stt().mode();
+        this.xvarm = props.source().xvarmMode();
         this.brokerBaseUrl = nullToBlank(props.broker().baseUrl());
-        log.info("[Mode] 초기 모드 — 접견트랙(source={} broker={}) · 전화트랙(source={} phone={}) · 공통(decrypt={} stt={})",
-                source, broker, source, phone, decrypt, stt);
+        log.info("[Mode] 초기 모드 — 접견트랙(source={} xvarm={} broker={}) · 전화트랙(source={} phone={}) · 공통(decrypt={} stt={})",
+                source, xvarm, broker, source, phone, decrypt, stt);
     }
 
     public SourceMode source() {
@@ -84,6 +91,11 @@ public class VoiceModeState {
 
     public SttMode stt() {
         return stt;
+    }
+
+    /** XVARM 연동 모드 — DIRECT_JDBC 에서만 의미가 있다. */
+    public XvarmMode xvarm() {
+        return xvarm;
     }
 
     /** 현재 브로커 주소. 비어 있을 수 있다(REST 모드에서는 그 상태로 호출하면 실패한다). */
@@ -126,6 +138,7 @@ public class VoiceModeState {
         m.put("phone", phone.name());
         m.put("decrypt", decrypt.name());
         m.put("stt", stt.name());
+        m.put("xvarm", xvarm.name());
         return m;
     }
 
@@ -137,6 +150,7 @@ public class VoiceModeState {
         m.put("phone", props.phone().mode().name());
         m.put("decrypt", props.decrypt().mode().name());
         m.put("stt", props.stt().mode().name());
+        m.put("xvarm", props.source().xvarmMode().name());
         return m;
     }
 
@@ -172,8 +186,12 @@ public class VoiceModeState {
                 before = stt.name();
                 stt = parse(SttMode.class, val, key);
             }
+            case "xvarm" -> {
+                before = xvarm.name();
+                xvarm = parse(XvarmMode.class, val, key);
+            }
             default -> throw new IllegalArgumentException(
-                    "알 수 없는 스위치: " + name + " (source/broker/phone/decrypt/stt 중 하나여야 한다)");
+                    "알 수 없는 스위치: " + name + " (source/broker/phone/decrypt/stt/xvarm 중 하나여야 한다)");
         }
         log.info("[Mode] {} 변경 — {} → {}", key, before, val);
         return before;

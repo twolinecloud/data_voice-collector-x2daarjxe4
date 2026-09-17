@@ -3,15 +3,22 @@ package egovframework.voice.collector.source;
 import egovframework.voice.collector.model.BatchWindow;
 import egovframework.voice.collector.model.VoiceKind;
 import egovframework.voice.collector.model.VoiceTarget;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -28,13 +35,23 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>{@code FETCH FIRST n ROWS ONLY} 가 Oracle·PostgreSQL·H2 에서 모두 도는지.</li>
  * </ul>
  *
- * <p>샘플 데이터에 <b>걸러져야 할 행</b>을 일부러 섞어 두었다
- * (기대 결과는 {@code data-borami-mock.sql} 머리말 참조).</p>
+ * <p>유효 대상 10건은 {@link SimulationDataService} 가 만든다(기동 시 + 여기서 다시). <b>걸러져야 할 행</b>은
+ * {@code data-borami-mock.sql} 에 섞여 있다(기대 결과는 그 파일 머리말 참조).</p>
  */
 @SpringBootTest
 @ActiveProfiles("local")
 @TestPropertySource(properties = "voice.source.mode=DIRECT_JDBC")
 class BoramiSourceJdbcTest {
+
+    @TempDir
+    static Path tmp;
+
+    @DynamicPropertySource
+    static void dirs(DynamicPropertyRegistry registry) {
+        // 더미 파일이 실제 C:/XVARM_ORIGINAL_VOICE_FILES 를 건드리지 않게 임시 폴더로 돌린다
+        registry.add("voice.dirs.xvarm-original-base", () -> tmp.resolve("xvarm_original").toString());
+        registry.add("voice.dirs.work", () -> tmp.resolve("work").toString());
+    }
 
     private static final List<String> SPECL = List.of("0", "1", "2", "3", "5");
 
@@ -47,11 +64,16 @@ class BoramiSourceJdbcTest {
     private JdbcBoramiSourceClient jdbc;
 
     @Autowired
-    private MockBoramiSeeder seeder;
+    private SimulationDataService sim;
 
     private BatchWindow wide() {
         LocalDateTime now = LocalDateTime.now();
         return BatchWindow.manual(now.minusDays(2), now.plusDays(1));
+    }
+
+    @BeforeEach
+    void seed() {
+        sim.seed();   // Clean & Seed — 앞 테스트가 무엇을 했든 10건 + 더미 파일에서 시작한다
     }
 
     @Test
@@ -62,30 +84,30 @@ class BoramiSourceJdbcTest {
     }
 
     @Test
-    @DisplayName("접견 4단 조인 — 삭제·해제·대상외 코드를 걸러 6건(일배치 5 + 주기 1)만 나온다")
+    @DisplayName("접견 4단 조인 — 삭제·해제·대상외 코드를 걸러 시뮬레이션 5건(일배치 3 + 주기 2)만 나온다")
     void meetQueryFiltersProperly() {
         List<VoiceTarget> targets = source.findMeetTargets(wide(), SPECL, 100);
 
-        assertThat(targets).hasSize(6);
+        assertThat(targets).hasSize(5);
         assertThat(targets).extracting(VoiceTarget::idempotencyKey)
-                .containsExactlyInAnyOrder("MEET-001-0000000000000000", "MEET-002-0000000000000000",
-                        "MEET-003-0000000000000000", "MEET-004-0000000000000000",
-                        "MEET-005-0000000000000000", "MEET-006-0000000000000000");
+                .containsExactlyInAnyOrder("SIM-MEET-001", "SIM-MEET-002", "SIM-MEET-003", "SIM-MEET-004", "SIM-MEET-005");
         assertThat(targets).allSatisfy(t -> assertThat(t.kind()).isEqualTo(VoiceKind.MEET));
     }
 
     @Test
-    @DisplayName("접견 조회는 DOC_ID 와 XVARM FILEKEY 까지 끌어온다 — 브로커 호출에 둘 다 필요하다")
+    @DisplayName("접견 조회는 DOC_ID 와 XVARM FILEKEY(원본 더미 파일 경로)까지 끌어온다 — 브로커 호출에 둘 다 필요하다")
     void meetQueryResolvesXvarmKey() {
         List<VoiceTarget> targets = source.findMeetTargets(wide(), SPECL, 100);
 
         VoiceTarget first = targets.stream()
-                .filter(t -> t.idempotencyKey().startsWith("MEET-001"))
+                .filter(t -> t.idempotencyKey().equals("SIM-MEET-001"))
                 .findFirst().orElseThrow();
 
-        assertThat(first.docId()).isEqualTo("DOC0000000000001");
-        assertThat(first.fileKey()).isEqualTo("XVARM/2026/09/FILEKEY-0001");
+        assertThat(first.docId()).isEqualTo("SIMDOC0001");
+        assertThat(first.fileKey()).endsWith("/xvarm_original/meet/mock_meet_001.m4a");
+        assertThat(Files.isRegularFile(Path.of(first.fileKey()))).as("DB 파일키와 1:1 인 물리 더미 파일").isTrue();
         assertThat(first.encrypted()).isTrue();
+        assertThat(first.srcFileName()).isEqualTo("mock_meet_001.m4a");
     }
 
     @Test
@@ -94,48 +116,74 @@ class BoramiSourceJdbcTest {
         List<VoiceTarget> targets = source.findMeetTargets(wide(), SPECL, 100);
 
         VoiceTarget plain = targets.stream()
-                .filter(t -> t.idempotencyKey().startsWith("MEET-002"))
+                .filter(t -> t.idempotencyKey().equals("SIM-MEET-002"))
                 .findFirst().orElseThrow();
 
         assertThat(plain.encrypted()).isFalse();
     }
 
     @Test
-    @DisplayName("전화 조회 — 녹음 안 됨·삭제된 건을 걸러 6건(일배치 5 + 주기 1)만 나온다")
+    @DisplayName("전화 조회 — 녹음 안 됨·삭제된 건을 걸러 시뮬레이션 5건만 나온다")
     void phoneQueryFiltersProperly() {
         List<VoiceTarget> targets = source.findPhoneTargets(wide(), SPECL, 100);
 
-        assertThat(targets).hasSize(6);
+        assertThat(targets).hasSize(5);
         assertThat(targets).extracting(VoiceTarget::idempotencyKey)
-                .containsExactlyInAnyOrder("TUID-PHONE-001", "TUID-PHONE-002", "TUID-PHONE-003",
-                        "TUID-PHONE-004", "TUID-PHONE-005", "TUID-PHONE-006");
+                .containsExactlyInAnyOrder("SIM-PHONE-001", "SIM-PHONE-002", "SIM-PHONE-003", "SIM-PHONE-004", "SIM-PHONE-005");
     }
 
     @Test
-    @DisplayName("시간창별 대상 — 일배치 창은 접견 5·전화 5, 10분 주기 창은 접견 1·전화 1")
+    @DisplayName("시간창별 대상 — 일배치 창은 접견 3·전화 3, 10분 주기 창은 접견 2·전화 2")
     void seedMatchesBatchWindows() {
         LocalDateTime now = LocalDateTime.now();
         BatchWindow daily = BatchWindow.daily(now);
         BatchWindow periodic = BatchWindow.periodic(now, 20);
 
-        assertThat(source.findMeetTargets(daily, SPECL, 100)).hasSize(5);
-        assertThat(source.findPhoneTargets(daily, SPECL, 100)).hasSize(5);
+        assertThat(source.findMeetTargets(daily, SPECL, 100)).extracting(VoiceTarget::idempotencyKey)
+                .containsExactly("SIM-MEET-001", "SIM-MEET-002", "SIM-MEET-003");
+        assertThat(source.findPhoneTargets(daily, SPECL, 100)).hasSize(3);
         assertThat(source.findMeetTargets(periodic, SPECL, 100)).extracting(VoiceTarget::idempotencyKey)
-                .containsExactly("MEET-006-0000000000000000");
+                .containsExactly("SIM-MEET-004", "SIM-MEET-005");
         assertThat(source.findPhoneTargets(periodic, SPECL, 100)).extracting(VoiceTarget::idempotencyKey)
-                .containsExactly("TUID-PHONE-006");
+                .containsExactly("SIM-PHONE-004", "SIM-PHONE-005");
     }
 
     @Test
-    @DisplayName("재적재하면 시각이 지금 기준으로 다시 깔린다 — 기동 후 시간이 지나도 주기배치 창에 1·1 이 남는다")
-    void reseedRefreshesTimestamps() {
-        java.util.Map<String, Object> r = seeder.reseed();
+    @DisplayName("생성은 멱등(Clean & Seed) — 두 번 만들어도 10건, 더미 파일 11개(전화 기존 STT 1개 포함)")
+    void seedIsIdempotentAndWritesDummyFiles() {
+        Map<String, Object> r = sim.seed();
 
-        assertThat(r.get("reseeded")).isEqualTo(true);
-        BatchWindow periodic = BatchWindow.periodic(LocalDateTime.now(), 20);
-        assertThat(source.findMeetTargets(periodic, SPECL, 100)).hasSize(1);
-        assertThat(source.findPhoneTargets(periodic, SPECL, 100)).hasSize(1);
-        assertThat(source.findMeetTargets(wide(), SPECL, 100)).hasSize(6);
+        assertThat(source.findMeetTargets(wide(), SPECL, 100)).hasSize(5);
+        assertThat(source.findPhoneTargets(wide(), SPECL, 100)).hasSize(5);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> files = (List<Map<String, Object>>) r.get("files");
+        assertThat(files).hasSize(11);
+        assertThat(files).allSatisfy(f -> {
+            assertThat(f.get("written")).isEqualTo(true);
+            assertThat((Integer) f.get("bytes")).as("경량 더미 — 1KB 이하").isLessThanOrEqualTo(1024);
+            assertThat(Files.isRegularFile(Path.of((String) f.get("path")))).isTrue();
+        });
+        assertThat(Files.isRegularFile(tmp.resolve("xvarm_original/phone/mock_phone_003.wav"))).isTrue();
+    }
+
+    @Test
+    @DisplayName("초기화 — SIM 행과 더미 파일이 전부 사라지고, 필터 검증용 행(MOCKX)은 남는다")
+    void cleanRemovesRowsAndFiles() {
+        Map<String, Object> r = sim.clean();
+
+        assertThat(source.findMeetTargets(wide(), SPECL, 100)).isEmpty();
+        assertThat(source.findPhoneTargets(wide(), SPECL, 100)).isEmpty();
+        @SuppressWarnings("unchecked")
+        Map<String, Integer> deleted = (Map<String, Integer>) r.get("filesDeleted");
+        assertThat(deleted.get("MEET")).isEqualTo(5);
+        assertThat(deleted.get("PHONE")).isEqualTo(6);   // wav 5 + 기존 STT 텍스트 1
+        try (var s = Files.list(tmp.resolve("xvarm_original/meet"))) {
+            assertThat(s.count()).isZero();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+        // 필터 검증용 행은 남아 있어도 대상이 되지 않는다(전부 제외 조건)
+        assertThat(sim.status().get("rows")).isNotNull();
     }
 
     @Test
@@ -147,13 +195,16 @@ class BoramiSourceJdbcTest {
     }
 
     @Test
-    @DisplayName("기존 STT 가 있는 건은 sourceSttPath 가 채워져 온다(Q1 시나리오)")
+    @DisplayName("기존 STT 가 있는 건은 sourceSttPath 가 채워져 오고 그 파일이 실제로 있다(Q1 시나리오)")
     void phoneQueryDetectsExistingStt() {
         List<VoiceTarget> targets = source.findPhoneTargets(wide(), SPECL, 100);
 
         assertThat(targets).filteredOn(VoiceTarget::hasSourceStt)
                 .hasSize(1)
-                .allSatisfy(t -> assertThat(t.idempotencyKey()).isEqualTo("TUID-PHONE-003"));
+                .allSatisfy(t -> {
+                    assertThat(t.idempotencyKey()).isEqualTo("SIM-PHONE-003");
+                    assertThat(Files.isRegularFile(Path.of(t.sourceSttPath()))).isTrue();
+                });
     }
 
     @Test
@@ -175,11 +226,11 @@ class BoramiSourceJdbcTest {
     @Test
     @DisplayName("특별관리구분코드를 좁히면 대상이 줄어든다")
     void speclCodeFilterWorks() {
-        // 마약(1) 만 — MOCK0000000000001 한 명
+        // 마약(1) 만 — SIM00000000000001 한 명
         List<VoiceTarget> onlyDrug = source.findPhoneTargets(wide(), List.of("1"), 100);
 
         assertThat(onlyDrug).hasSize(1);
-        assertThat(onlyDrug.get(0).idempotencyKey()).isEqualTo("TUID-PHONE-001");
+        assertThat(onlyDrug.get(0).idempotencyKey()).isEqualTo("SIM-PHONE-001");
     }
 
     @Test
@@ -188,7 +239,13 @@ class BoramiSourceJdbcTest {
         int viaJoin = source.findPhoneTargets(wide(), SPECL, 100).size();
         int viaFlag = jdbc.countByFlagShortcut(wide(), 100);
 
-        // Mock 데이터에서는 일치한다. 실연동에서 어긋나면 플래그를 믿을 수 없다는 뜻이다(계획서 4.2).
+        // 시뮬레이션 데이터에서는 일치한다. 실연동에서 어긋나면 플래그를 믿을 수 없다는 뜻이다(계획서 4.2).
         assertThat(viaFlag).isEqualTo(viaJoin);
+    }
+
+    @Test
+    @DisplayName("H2 에서는 XVARM MOCK 테이블 생성이 건너뛰어진다 — 스키마 스크립트가 이미 만든다")
+    void ensureTablesSkipsOnH2() {
+        assertThat(sim.ensureXvarmMockTables()).contains("H2");
     }
 }

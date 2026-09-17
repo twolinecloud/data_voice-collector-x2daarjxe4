@@ -128,6 +128,12 @@ voice:
     work: ${VOICE_WORK_DIR:./work/voice_work}
     output-meet: ${VOICE_OUTPUT_MEET_DIR:${voice.dirs.base-dir}/xenon/voice}
     output-phone: ${VOICE_OUTPUT_PHONE_DIR:${voice.dirs.base-dir}/xenon/phone}
+    # XVARM 원본 더미 파일 — Windows 기본 C:/XVARM_ORIGINAL_VOICE_FILES/{meet,phone} (비우면 OS 로 정한다)
+    xvarm-original-base: ${VOICE_XVARM_ORIGINAL_DIR:}
+
+  # 로컬 H2 는 매 기동마다 비어 있으므로 시뮬레이션 데이터(접견 5·전화 5 + 더미 파일)를 기동 시 자동 생성한다.
+  sim:
+    seed-on-startup: ${VOICE_SIM_SEED_ON_STARTUP:true}
 
   batch:
     # 로컬에서는 스케줄을 끈다. 원치 않는 시점에 배치가 돌아 대상을 소진하면

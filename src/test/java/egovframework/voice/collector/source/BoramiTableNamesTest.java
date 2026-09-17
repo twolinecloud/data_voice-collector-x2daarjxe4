@@ -21,19 +21,51 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class BoramiTableNamesTest {
 
     private BoramiTableNames tables(String imsc, String rerd, String smsm, String xvarm) {
+        // 실 스키마 검증이 목적이라 XVARM 모드를 REAL 로, DB 를 PostgreSQL 로 고정한다
+        return tables(imsc, rerd, smsm, xvarm, VoiceProperties.XvarmMode.REAL, DbKindDetector.DbKind.POSTGRESQL);
+    }
+
+    private BoramiTableNames tables(String imsc, String rerd, String smsm, String xvarm,
+                                    VoiceProperties.XvarmMode xvarmMode, DbKindDetector.DbKind dbKind) {
         VoiceProperties p = new VoiceProperties(
                 new VoiceProperties.Source(VoiceProperties.SourceMode.DIRECT_JDBC, "", "",
                         new VoiceProperties.Schema(imsc, rerd, smsm, xvarm),
-                        new VoiceProperties.Flag("Y", "Y", "N", "Y")),
+                        new VoiceProperties.Flag("Y", "Y", "N", "Y"),
+                        xvarmMode, new VoiceProperties.XvarmMock("sm", "xvarm")),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.MOCK, "", java.util.List.of(), 100, 10),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 new VoiceProperties.Sync(10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
-                new VoiceProperties.Dirs("b", "m", "p", "w", "om", "op"),
+                new VoiceProperties.Dirs("b", "m", "p", "w", "om", "op", ""),
                 new VoiceProperties.Decrypt(VoiceProperties.DecryptMode.SKIP, ""),
                 new VoiceProperties.Stt(VoiceProperties.SttMode.MOCK, "", 30),
                 new VoiceProperties.Batch("0 0 2 * * *", "0 */10 * * * *", 20, false,
-                        List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "UNSTRUCTURED", false));
-        return new BoramiTableNames(p);
+                        List.of("0", "1"), 500, "VOICE_ANALYSIS", "TEST_BATCH", "UNSTRUCTURED", false),
+                new VoiceProperties.Sim(false));
+        egovframework.voice.collector.config.VoiceModeState mode = new egovframework.voice.collector.config.VoiceModeState(p);
+        mode.resetToConfigured();
+        return new BoramiTableNames(p, mode, DbKindDetector.fixed(dbKind));
+    }
+
+    @Test
+    @DisplayName("XVARM MOCK_DEV — 공통파일·XVARM 은 설정 스키마 대신 우리가 만든 sm / xvarm 을 본다")
+    void mockDevUsesOwnSchemas() {
+        BoramiTableNames t = tables("im", "re", "", "", VoiceProperties.XvarmMode.MOCK_DEV, DbKindDetector.DbKind.POSTGRESQL);
+
+        assertThat(t.smsmCmfiBs()).isEqualTo("sm.TB_SMSM_CMFI_BS");
+        assertThat(t.asysContentElement()).isEqualTo("xvarm.ASYSCONTENTELEMENT");
+        assertThat(t.imscPtprDt()).isEqualTo("im.TB_IMSC_PTPR_DT");
+        assertThat(t.isXvarmMock()).isTrue();
+    }
+
+    @Test
+    @DisplayName("H2 는 XVARM 모드와 무관하게 평평하다 — 스키마 스크립트가 만든 테이블을 그대로 쓴다")
+    void h2IsAlwaysFlat() {
+        BoramiTableNames t = tables("im", "re", "sm", "xvarm", VoiceProperties.XvarmMode.MOCK_DEV, DbKindDetector.DbKind.H2);
+
+        assertThat(t.smsmCmfiBs()).isEqualTo("TB_SMSM_CMFI_BS");
+        assertThat(t.asysContentElement()).isEqualTo("ASYSCONTENTELEMENT");
+        // 앞 두 단은 설정대로 — H2 에 스키마를 줬다면 그대로 붙는다(로컬 설정은 비워 둔다)
+        assertThat(t.imscPtprDt()).isEqualTo("im.TB_IMSC_PTPR_DT");
     }
 
     @Test

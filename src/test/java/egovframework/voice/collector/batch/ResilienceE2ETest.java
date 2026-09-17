@@ -57,6 +57,7 @@ class ResilienceE2ETest {
         registry.add("voice.dirs.work", () -> tmp.resolve("work").toString());
         registry.add("voice.dirs.output-meet", () -> tmp.resolve("xenon/voice").toString());
         registry.add("voice.dirs.output-phone", () -> tmp.resolve("xenon/phone").toString());
+        registry.add("voice.dirs.xvarm-original-base", () -> tmp.resolve("xvarm_original").toString());
         registry.add("voice.sync.wait-timeout-sec", () -> "15");
         registry.add("voice.sync.stable-check-ms", () -> "30");
         registry.add("log-collector.enabled", () -> "false");
@@ -74,8 +75,8 @@ class ResilienceE2ETest {
     @Autowired
     private MockDatasetState dataset;
 
-    /** Mock 기본 대상(넓은 창) — 일배치용 접견 5·전화 5 + 주기배치용 접견 1·전화 1. */
-    private static final int TOTAL = 12;
+    /** Mock 기본 대상(넓은 창) — 일배치용 접견 3·전화 3 + 주기배치용 접견 2·전화 2. */
+    private static final int TOTAL = 10;
 
     /**
      * 그중 1건(전화 3번)은 <b>보라미가 이미 가진 STT</b> 를 쓴다(계획서 Q1 시나리오).
@@ -84,7 +85,7 @@ class ResilienceE2ETest {
     private static final int SOURCE_STT = 1;
 
     /** STT 엔진을 실제로 타는 건수 = 장애 주입이 닿는 범위. */
-    private static final int STT_DEPENDENT = TOTAL - SOURCE_STT;   // 11
+    private static final int STT_DEPENDENT = TOTAL - SOURCE_STT;   // 9
 
     private BatchWindow wide() {
         LocalDateTime now = LocalDateTime.now();
@@ -200,9 +201,9 @@ class ResilienceE2ETest {
         VoiceBatchResult r = service.run(wide(), null, "TEST");
         long elapsed = System.currentTimeMillis() - t0;
 
-        // 일배치용 2·2 + 주기배치용 1·1
-        assertThat(r.successCnt()).isEqualTo(6);
-        assertThat(elapsed).as("건당 100ms 이상 지연이 실제로 걸렸다").isGreaterThanOrEqualTo(600L);
+        // 일배치용 2·2 + 주기배치용 2·2
+        assertThat(r.successCnt()).isEqualTo(8);
+        assertThat(elapsed).as("건당 100ms 이상 지연이 실제로 걸렸다").isGreaterThanOrEqualTo(800L);
         assertThat(faultInjector.injectedDelays()).isPositive();
     }
 
@@ -234,11 +235,11 @@ class ResilienceE2ETest {
 
         VoiceBatchResult r = service.run(wide(), null, "TEST");
 
-        assertThat(r.targetCnt()).isEqualTo(102);   // 일배치용 100 + 주기배치용 2
-        assertThat(r.successCnt()).isEqualTo(102);
+        assertThat(r.targetCnt()).isEqualTo(104);   // 일배치용 100 + 주기배치용 4
+        assertThat(r.successCnt()).isEqualTo(104);
         assertThat(residue()).isZero();
         // 대량 모드로 전환되어 Mock WAV 가 짧아진다(디스크 절약)
-        assertThat(dataset.isBulk()).isFalse();   // 102건은 임계(200) 미만
+        assertThat(dataset.isBulk()).isFalse();   // 104건은 임계(200) 미만
     }
 
     @Test
@@ -246,7 +247,7 @@ class ResilienceE2ETest {
     void switchesToBulkMode() {
         dataset.set(150, 150);
 
-        assertThat(dataset.total()).isEqualTo(302);
+        assertThat(dataset.total()).isEqualTo(304);
         assertThat(dataset.isBulk()).isTrue();
         assertThat(dataset.wavSeconds()).isEqualTo(1);
     }
