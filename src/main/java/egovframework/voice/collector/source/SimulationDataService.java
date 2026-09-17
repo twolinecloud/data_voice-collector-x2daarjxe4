@@ -1,5 +1,6 @@
 package egovframework.voice.collector.source;
 
+import egovframework.voice.collector.config.MockDatasetState;
 import egovframework.voice.collector.config.VoiceDirState;
 import egovframework.voice.collector.config.VoiceProperties;
 import egovframework.voice.collector.model.VoiceKind;
@@ -42,10 +43,13 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class SimulationDataService {
 
-    public static final int MEET_COUNT = 5;
-    public static final int PHONE_COUNT = 5;
-    /** 앞 3건은 일배치(어제), 뒤 2건은 주기배치(최근 10분). */
+    /** 시연 기본 — 트랙별 일배치 3건(어제) + 주기배치 2건(최근 10분) = 5건. */
     public static final int DAILY_PER_KIND = 3;
+    public static final int PERIODIC_PER_KIND = 2;
+    public static final int MEET_COUNT = DAILY_PER_KIND + PERIODIC_PER_KIND;
+    public static final int PHONE_COUNT = DAILY_PER_KIND + PERIODIC_PER_KIND;
+    /** 이 건수를 넘는 대용량 시딩은 더미 파일을 쓰지 않는다(파이프라인은 브로커·Mock 이 만든 파일을 쓴다). */
+    public static final int FILE_LIMIT = 200;
     /** 이 번호의 전화 건은 "보라미가 이미 STT 를 가지고 있는" 시나리오(계획서 Q1). */
     public static final int PHONE_WITH_SOURCE_STT = 3;
     /** 이 번호의 접견 건은 암호화되지 않은 파일 — 복호화가 통과(Noop)하는지 본다. */
@@ -60,6 +64,7 @@ public class SimulationDataService {
     private final DbKindDetector db;
     private final VoiceDirState dirs;
     private final VoiceProperties props;
+    private final MockDatasetState dataset;
 
     // ── 조회 ──────────────────────────────────────────────────────────────
 
@@ -88,40 +93,66 @@ public class SimulationDataService {
     // ── 생성 ──────────────────────────────────────────────────────────────
 
     /**
-     * Clean &amp; Seed — 기존 SIM 행·더미 파일을 지운 뒤 10건을 새로 만든다.
+     * Clean &amp; Seed — 기존 SIM 행·더미 파일을 지운 뒤 시연 기본 10건(트랙별 일배치 3 + 주기 2)을 새로 만든다.
      *
      * @return 결과 요약(테이블별 행 수 · 파일 목록 · 폴더)
      */
     @Transactional
     public Map<String, Object> seed() {
+        return seed(DAILY_PER_KIND, DAILY_PER_KIND);
+    }
+
+    /**
+     * Clean &amp; Seed — 일배치용 건수를 지정한다(대용량 시험). 주기배치용 2·2 는 늘 같다.
+     *
+     * <p><b>대용량(기본 10건 초과)은 로컬 H2 에서만</b> 허용한다 — 개발계 DB 에 수천 행을 넣으면 남의 시험을 방해한다.
+     * {@link #FILE_LIMIT} 을 넘으면 더미 파일은 쓰지 않는다.</p>
+     */
+    @Transactional
+    public Map<String, Object> seed(int dailyMeet, int dailyPhone) {
+        if (dailyMeet < 0 || dailyPhone < 0) {
+            throw new IllegalArgumentException("건수는 음수일 수 없다");
+        }
+        boolean bulk = dailyMeet > DAILY_PER_KIND || dailyPhone > DAILY_PER_KIND;
+        if (bulk && !db.isH2()) {
+            throw new IllegalStateException("대용량 시딩(일배치 " + dailyMeet + "·" + dailyPhone + ")은 로컬 H2 에서만 허용한다 — 지금 대상: " + db.label());
+        }
+        dataset.set(dailyMeet, dailyPhone);
+        int meetCount = dailyMeet + PERIODIC_PER_KIND;
+        int phoneCount = dailyPhone + PERIODIC_PER_KIND;
+        boolean writeFiles = meetCount + phoneCount <= FILE_LIMIT;
+
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("db", db.label());
+        out.put("target", db.target().name());
         out.put("ensured", ensureXvarmMockTables());
         Map<String, Object> cleaned = cleanRows();
         out.put("cleaned", cleaned);
 
         LocalDateTime now = LocalDateTime.now().withNano(0);
         Timestamp ts = Timestamp.valueOf(now);
-        // 특이수용자 5명 — 접견·전화가 같은 사람(001~005)을 쓴다
-        for (int i = 1; i <= 5; i++) {
-            jdbc.update("INSERT INTO " + tables.imscPtprDt()
-                    + " (CORR_NO, PTCR_PRSR_DTL_SN, SPECL_MNG_SE_CD, PTCR_PRSR_SE_CD, PTCR_PRSR_APNT_YMD, PTCR_PRSR_RMV_YMD,"
-                    + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    corrNo(i), 1, SPECL_CODES[i - 1], "A01", "20260101", null, ts, USR, ts, USR);
+        // 특이수용자 — 접견·전화가 같은 사람(001~)을 쓴다. 코드는 1/2/3/0/5 를 돌려 가며 준다
+        int inmates = Math.max(meetCount, phoneCount);
+        List<Object[]> inmateRows = new ArrayList<>();
+        for (int i = 1; i <= inmates; i++) {
+            inmateRows.add(new Object[] {corrNo(i), 1, SPECL_CODES[(i - 1) % SPECL_CODES.length], "A01", "20260101", null, ts, USR, ts, USR});
         }
+        jdbc.batchUpdate("INSERT INTO " + tables.imscPtprDt()
+                + " (CORR_NO, PTCR_PRSR_DTL_SN, SPECL_MNG_SE_CD, PTCR_PRSR_SE_CD, PTCR_PRSR_APNT_YMD, PTCR_PRSR_RMV_YMD,"
+                + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID) VALUES (?,?,?,?,?,?,?,?,?,?)", inmateRows);
 
         List<Map<String, Object>> files = new ArrayList<>();
         Path meetDir = dirs.xvarmOriginalDir(VoiceKind.MEET);
         Path phoneDir = dirs.xvarmOriginalDir(VoiceKind.PHONE);
 
-        // 접견 5건 — re → im → sm → xvarm
-        for (int i = 1; i <= MEET_COUNT; i++) {
-            LocalDateTime at = occurredAt(now, i);
+        // 접견 — re → im → sm → xvarm
+        for (int i = 1; i <= meetCount; i++) {
+            LocalDateTime at = occurredAt(now, i, dailyMeet);
             Timestamp crt = Timestamp.valueOf(at);
             String fileNm = meetFileName(i);
             Path file = meetDir.resolve(fileNm);
-            String cmfi = "SIMCMFI%04d".formatted(i);
-            String doc = "SIMDOC%04d".formatted(i);
+            String cmfi = "SIMCMFI" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i));
+            String doc = "SIMDOC" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i));
             jdbc.update("INSERT INTO " + tables.smsmCmfiBs()
                     + " (CMMN_FILE_ID, DOC_ID, FILE_NM, CORR_WRK_SE_CD, FILE_TY_CD, REG_DT, RPRS_YN, CMMN_FILE_ENC_YN, DEL_YN,"
                     + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -134,20 +165,22 @@ public class SimulationDataService {
                     + "  DEL_YN, RECRD_FILE_DEL_YN, RECRD_BKUP_FILE_DEL_YN, CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID)"
                     + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     meetKey(i), "CI00001", "01", ymd(at), i, corrNo(i), ymd(at),
-                    "SIMTRCD%04d".formatted(i), cmfi, fileNm, hms(at), hms(at.plusMinutes(10)), "1024", slash(meetDir),
+                    "SIMTRCD" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i)), cmfi, fileNm, hms(at), hms(at.plusMinutes(10)), "1024", slash(meetDir),
                     "N", "N", "N", crt, USR, crt, USR);
-            files.add(writeDummy(file, "m4a", meetKey(i)));
+            if (writeFiles) {
+                files.add(writeDummy(file, "m4a", meetKey(i)));
+            }
         }
 
-        // 전화 5건 — im 통화내역 → im 특이수용자
-        for (int i = 1; i <= PHONE_COUNT; i++) {
-            LocalDateTime at = occurredAt(now, i);
+        // 전화 — im 통화내역 → im 특이수용자
+        for (int i = 1; i <= phoneCount; i++) {
+            LocalDateTime at = occurredAt(now, i, dailyPhone);
             Timestamp crt = Timestamp.valueOf(at);
             String fileNm = phoneFileName(i);
             Path file = phoneDir.resolve(fileNm);
             String sttPath = null;
-            if (i == PHONE_WITH_SOURCE_STT) {
-                Path stt = phoneDir.resolve("mock_phone_%03d.stt.txt".formatted(i));
+            if (i == PHONE_WITH_SOURCE_STT && dailyPhone >= PHONE_WITH_SOURCE_STT) {
+                Path stt = phoneDir.resolve("mock_phone_" + seq(i) + ".stt.txt");
                 files.add(writeText(stt, "(보라미 기존 STT / 시뮬레이션) 여보세요 저 김수용입니다. 어머니 잘 계시죠.\n"
                         + "연락처 010-9876-5432 로 전화 주세요. 주민번호는 900101-1234567 입니다.\n"));
                 sttPath = slash(stt);
@@ -162,25 +195,29 @@ public class SimulationDataService {
                     phoneKey(i), "P001", "01", corrNo(i), "L001", "(시뮬레이션)수신자" + i, "(시뮬레이션)관계", "000-0000-000" + i,
                     dt14(at), dt14(at.plusSeconds(5)), dt14(at.plusMinutes(3)), 180, 5, "Y",
                     0, "Y", props.source().flag().ptcrYes(), 1, "CI00001", "(시뮬레이션)전화실",
-                    slash(phoneDir), fileNm, "SIMPHONEKEY%04d".formatted(i), sttPath, null,
+                    slash(phoneDir), fileNm, "SIMPHONEKEY" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i)), sttPath, null,
                     crt, USR, crt, USR);
-            files.add(writeDummy(file, "wav", phoneKey(i)));
+            if (writeFiles) {
+                files.add(writeDummy(file, "wav", phoneKey(i)));
+            }
         }
 
         Map<String, Object> rows = new LinkedHashMap<>();
-        rows.put("inmates", 5);
-        rows.put("meet", MEET_COUNT);
-        rows.put("phone", PHONE_COUNT);
-        rows.put("cmfi", MEET_COUNT);
-        rows.put("xvarm", MEET_COUNT);
+        rows.put("inmates", inmates);
+        rows.put("meet", meetCount);
+        rows.put("phone", phoneCount);
+        rows.put("cmfi", meetCount);
+        rows.put("xvarm", meetCount);
         out.put("rows", rows);
         out.put("files", files);
+        out.put("filesSkipped", !writeFiles);
         out.put("dirs", Map.of("meet", slash(meetDir), "phone", slash(phoneDir)));
         out.put("tables", tables.describe());
         out.put("windows", Map.of(
-                "daily", "접견 3 · 전화 3 (어제 09:10/09:20/09:30)",
-                "periodic", "접견 2 · 전화 2 (지금-6분 / 지금-3분)"));
-        log.info("[Sim] 시뮬레이션 데이터 생성 — {} · 파일 {}개 · {}", rows, files.size(), tables.describe());
+                "daily", "접견 %d · 전화 %d (어제 09:10 부터 10분 간격)".formatted(dailyMeet, dailyPhone),
+                "periodic", "접견 %d · 전화 %d (지금-6분 / 지금-3분)".formatted(PERIODIC_PER_KIND, PERIODIC_PER_KIND)));
+        log.info("[Sim] 시뮬레이션 데이터 생성 — {} · 파일 {}개{} · {}", rows, files.size(),
+                writeFiles ? "" : " (대용량 — 더미 파일 생략)", tables.describe());
         return out;
     }
 
@@ -289,19 +326,26 @@ public class SimulationDataService {
 
     // ── 내부 ──────────────────────────────────────────────────────────────
 
-    /** i 번째 건의 발생 시각 — 1~3 은 어제 09:10/09:20/09:30, 4~5 는 지금-6분/지금-3분. */
-    static LocalDateTime occurredAt(LocalDateTime now, int i) {
-        if (i <= DAILY_PER_KIND) {
-            return now.toLocalDate().minusDays(1).atTime(9, 0).plusMinutes(10L * i);
+    /**
+     * i 번째 건의 발생 시각 — 1~daily 는 어제 09:10 부터 10분 간격(하루 안에서 돈다), 그 뒤 2건은 지금-6분/지금-3분.
+     */
+    static LocalDateTime occurredAt(LocalDateTime now, int i, int daily) {
+        if (i <= daily) {
+            long minutes = 9 * 60 + ((10L * i) % (14 * 60));      // 09:10 ~ 22:59
+            return now.toLocalDate().minusDays(1).atStartOfDay().plusMinutes(minutes).plusSeconds((10L * i) / (14 * 60));
         }
-        return now.minusMinutes(3L * (MEET_COUNT - i + 1));   // 4 → -6분, 5 → -3분
+        int k = i - daily;                                      // 1, 2
+        return now.minusMinutes(3L * (PERIODIC_PER_KIND - k + 1));   // 1 → -6분, 2 → -3분
     }
 
+    /** 세 자리를 넘는 대용량은 자릿수를 늘린다 — 키 형식은 시연 10건(SIM-MEET-001…)과 같다. */
+    private static String seq(int i) { return i < 1000 ? "%03d".formatted(i) : "%05d".formatted(i); }
+
     public static String corrNo(int i) { return "SIM%014d".formatted(i); }
-    public static String meetKey(int i) { return "SIM-MEET-%03d".formatted(i); }
-    public static String phoneKey(int i) { return "SIM-PHONE-%03d".formatted(i); }
-    public static String meetFileName(int i) { return "mock_meet_%03d.m4a".formatted(i); }
-    public static String phoneFileName(int i) { return "mock_phone_%03d.wav".formatted(i); }
+    public static String meetKey(int i) { return "SIM-MEET-" + seq(i); }
+    public static String phoneKey(int i) { return "SIM-PHONE-" + seq(i); }
+    public static String meetFileName(int i) { return "mock_meet_" + seq(i) + ".m4a"; }
+    public static String phoneFileName(int i) { return "mock_phone_" + seq(i) + ".wav"; }
 
     private static String ymd(LocalDateTime t) { return "%04d%02d%02d".formatted(t.getYear(), t.getMonthValue(), t.getDayOfMonth()); }
     private static String hms(LocalDateTime t) { return "%02d%02d%02d".formatted(t.getHour(), t.getMinute(), t.getSecond()); }

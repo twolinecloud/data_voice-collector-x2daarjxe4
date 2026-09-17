@@ -199,7 +199,10 @@
     <div class="card-body py-2">
       <div class="row g-3 mb-2" id="tracks"></div>
       <div class="row g-2" id="logc"></div>
-      <div class="db-line mt-2" id="db-line"></div>
+      <div class="d-flex align-items-start gap-2 mt-2">
+        <div class="db-line grow" id="db-line" style="flex:1 1 auto"></div>
+        <button class="btn btn-sm btn-outline-secondary text-nowrap" id="btn-db-probe" title="지금 조회 모드가 가리키는 DB(로컬 H2 / 개발계 PostgreSQL)에 실제로 붙어 봅니다">DB 연결 확인</button>
+      </div>
       <div class="hint mt-1" id="batch-line"></div>
       <div class="mt-2" id="warnings"></div>
       <div class="mt-2" id="probe-line"></div>
@@ -559,6 +562,8 @@ function renderTracks(tracks) {
       const d = await call('PUT', `/api/v1/mock/modes/${key}?value=${encodeURIComponent(val)}`, `모드 변경 ${key} → ${lbl(key, val)}`);
       if (d) log(`  └ ${key}: ${lbl(key, d.before)} → ${lbl(key, d.after)}`, 'ok');
       await loadStatus(true);
+      // 조회 대상 DB 가 바뀌었다 — 개발계 DB 면 실제로 붙는지 바로 확인해 준다(포트포워딩 누락을 여기서 잡는다)
+      if (key === 'source' && (val === 'DIRECT_JDBC' || val === 'MOCK')) await probeDb(true);
     };
   });
 }
@@ -633,10 +638,7 @@ async function loadStatus(quiet) {
   STATUS = s;
   SWITCH_LABELS = s.switchLabels || {};
   renderTracks(s.tracks);
-  if (s.db) {
-    $('db-line').innerHTML = `조회 DB <b>${esc(s.db.label)}</b> <span class="text-secondary">${esc(s.db.url||'')}</span><br>`
-      + `XVARM 연동 <b>${esc(lbl('xvarm', s.db.xvarmMode))}</b> · 테이블 ${esc(s.db.tables||'')}`;
-  }
+  if (s.db) renderDbLine(s.db);
   $('logc').innerHTML = flagCard('로그 컬렉터 (T1 · T2 COLLECT/ANALYZE · T4)', s.logCollector.enabled, s.logCollector.baseUrl || '주소 미설정');
   $('batch-line').innerHTML =
       `파일명 정책 <code>${esc(s.dirs.namingPolicy)}</code> · 스케줄 ${s.batch.scheduleEnabled?'켜짐':'꺼짐'} · 대상코드 <code>${(s.batch.speclMngSeCd||[]).join(',')}</code> · 1회 상한 ${s.batch.maxFilesPerRun}건`;
@@ -662,6 +664,28 @@ async function loadStatus(quiet) {
     ? `<div class="alert alert-danger py-2 px-3 mb-0" style="font-size:.8rem"><b>배치 전 확인</b><ul class="mb-0 ps-3">${ws.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : '';
   if (!quiet) ws.forEach(w => log(`⚠ ${w}`, 'er'));
 }
+
+// 조회 DB 한 줄 — 어느 DB 를 보는지 + 마지막 연결 확인 결과
+function renderDbLine(db) {
+  const p = db.lastProbe;
+  const badge = !p ? '<span class="badge text-bg-light text-secondary">연결 미확인</span>'
+    : p.reachable ? `<span class="badge text-bg-success">연결됨 ${esc(p.product||'')} · ${p.elapsedMs}ms</span>`
+    : `<span class="badge text-bg-danger">연결 안 됨</span> <span class="text-danger">${esc(p.error||'')}</span>`;
+  const target = db.target === 'DIRECT' ? '개발계 DB' : '로컬 H2';
+  $('db-line').innerHTML = `조회 DB <b>${esc(db.label)}</b> <span class="text-secondary">(${target} · ${esc(db.url||'')})</span> ${badge}<br>`
+    + `XVARM 연동 <b>${esc(lbl('xvarm', db.xvarmMode))}</b> · 테이블 ${esc(db.tables||'')}`;
+}
+async function probeDb(quiet) {
+  const d = await call('GET', '/api/v1/mock/db/probe', 'DB 연결 확인', quiet);
+  if (!d) return null;
+  log(d.reachable ? `  └ ${d.label} 연결됨 — ${d.product||''} (${d.elapsedMs}ms)` : `  └ ${d.label} 연결 안 됨 — ${d.error||''}`, d.reachable ? 'ok' : 'er');
+  if (!d.reachable && d.target === 'DIRECT') {
+    log('  └ 로컬에서는 포트포워딩이 필요합니다: kubectl port-forward -n data-pipeline svc/borami-db-gijoxearrw 15433:5432 (계정 BORAMI_DB_USER / BORAMI_DB_PASSWORD)', 'wr');
+  }
+  await loadStatus(true);
+  return d;
+}
+$('btn-db-probe').onclick = () => probeDb(false);
 
 // ── 서브헤더: 디렉터리 ──────────────────────────────────────────────────
 let DIRS = null;

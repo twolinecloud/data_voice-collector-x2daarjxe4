@@ -18,27 +18,13 @@ spring:
 
   # DB 시간 표준 = KST. 로그 컬렉터와 같은 시계를 봐야 한 배치의 T1·T4 가 어긋나지 않는다.
   # (Main.main 에서 JVM 기본 타임존도 고정한다)
-  datasource:
-    # 기본은 H2 인메모리 Mock 보라미다. 개발계에서 4단 조인 SQL 자체를 검증하려고 둔다.
-    #   · voice.source.mode=MOCK      → DB 를 쓰지 않는다(이 DataSource 는 놀고 있다)
-    #   · voice.source.mode=DIRECT_JDBC → 아래 H2 의 Mock 보라미를 조회한다
-    #   · 실제 보라미(Oracle) 는 prod 프로파일에서 덮어쓴다
-    url: ${DB_URL:jdbc:h2:mem:borami;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}
-    driver-class-name: ${DB_DRIVER:org.h2.Driver}
-    username: ${DB_USER:sa}
-    password: ${DB_PASSWORD:}
-    hikari:
-      maximum-pool-size: ${DB_POOL_MAX:10}
-      minimum-idle: ${DB_POOL_MIN:2}
-      connection-timeout: ${DB_POOL_TIMEOUT_MS:30000}
-
+  #
+  # ⚠ spring.datasource / spring.sql.init 은 쓰지 않는다. 보라미 DataSource 는 두 개(로컬 H2 · 개발계 DB)를
+  #   BoramiDataSourceConfig 가 만들고 조회 모드로 라우팅한다(voice.source.local-h2 / direct-db).
+  #   H2 Mock 스키마 적재도 그 설정이 H2 에만 한다 — sql.init 을 라우터에 걸면 DROP TABLE 이 실DB 로 갈 수 있다.
   sql:
     init:
-      # Mock 보라미 스키마·샘플. 실제 보라미에 붙을 때는 반드시 never 로 둔다.
-      mode: ${SQL_INIT_MODE:always}
-      schema-locations: classpath:schema-borami-mock.sql
-      data-locations: classpath:data-borami-mock.sql
-      continue-on-error: false
+      mode: never
 
 server:
   port: ${SERVER_PORT:8080}
@@ -91,6 +77,22 @@ voice:
       rerd: ${VOICE_SCHEMA_RERD:}            # 녹취파일내역
       smsm: ${VOICE_SCHEMA_SMSM:}            # 공통파일기본 (REAL 모드에서만 쓴다)
       xvarm: ${VOICE_SCHEMA_XVARM:}          # XVARM 콘텐츠 메타 (REAL 모드에서만 쓴다)
+
+    # ── 조회 대상 DB 두 개 — 드롭다운이 곧 어느 DB 에 붙는지 ─────────────────
+    #   MOCK (로컬 H2)  → local-h2  : 인메모리 H2 Mock 보라미 (기동 시 스키마·필터 검증 행 + 시뮬레이션 10건)
+    #   개발계 DB       → direct-db : 개발계 borami-db(PostgreSQL). 로컬은 포트포워딩(15433) 전제.
+    #                                 기동 시 붙어 보지 않고 첫 사용 때 붙는다 — 없으면 [DB 연결 확인] 이 사유를 보여준다
+    local-h2:
+      url: jdbc:h2:mem:borami;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+      username: sa
+      password: ""
+    direct-db:
+      url: ${BORAMI_DB_URL:${DB_URL:jdbc:postgresql://localhost:15433/borami}}
+      driver-class-name: ${BORAMI_DB_DRIVER:${DB_DRIVER:}}
+      username: ${BORAMI_DB_USER:${DB_USER:${POSTGRES_USERNAME:borami}}}
+      password: ${BORAMI_DB_PASSWORD:${DB_PASSWORD:${POSTGRES_PASSWORD:}}}
+      connect-timeout-ms: ${BORAMI_DB_CONNECT_TIMEOUT_MS:3000}
+      max-pool-size: ${BORAMI_DB_POOL_MAX:5}
 
     # ── XVARM 연동 (개발계 DB 모드 전용) ─────────────────────────────────────
     #   MOCK_DEV(기본): 개발계 borami-db 에 없는 공통파일기본·XVARM 테이블을 우리가 xvarm-mock 스키마에

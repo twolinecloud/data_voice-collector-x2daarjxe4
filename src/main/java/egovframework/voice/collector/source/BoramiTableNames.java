@@ -39,12 +39,17 @@ public class BoramiTableNames {
 
     /** 특이수용자상세 — 실제 {@code im.TB_IMSC_PTPR_DT} */
     public String imscPtprDt() {
-        return qualify(schema().imsc(), "TB_IMSC_PTPR_DT");
+        return qualify(realSchema(schema().imsc()), "TB_IMSC_PTPR_DT");
+    }
+
+    /** H2(로컬 Mock)는 항상 평평하다 — 설정 스키마(im/re/sm)는 개발계·운영 DB 에만 붙는다. */
+    private String realSchema(String configured) {
+        return db.isH2() ? "" : configured;
     }
 
     /** 녹취파일내역 — 실제 {@code re.TB_RERD_TFIN_DS} */
     public String rerdTfinDs() {
-        return qualify(schema().rerd(), "TB_RERD_TFIN_DS");
+        return qualify(realSchema(schema().rerd()), "TB_RERD_TFIN_DS");
     }
 
     /** 공통파일기본 — 실제 {@code sm.TB_SMSM_CMFI_BS} (2026-09-12 기준 borami-db 에 없음) */
@@ -74,7 +79,7 @@ public class BoramiTableNames {
 
     /** 사용자통화내역 — 특이수용자와 같은 {@code im} 스키마에 있다 */
     public String imphUcdrDs() {
-        return qualify(schema().imsc(), "TB_IMPH_UCDR_DS");
+        return qualify(realSchema(schema().imsc()), "TB_IMPH_UCDR_DS");
     }
 
     /** XVARM 콘텐츠 메타 — 실제 스키마 미확인 (borami-db 에 없음) */

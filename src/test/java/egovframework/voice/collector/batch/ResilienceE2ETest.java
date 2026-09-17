@@ -75,6 +75,9 @@ class ResilienceE2ETest {
     @Autowired
     private MockDatasetState dataset;
 
+    @Autowired
+    private egovframework.voice.collector.source.SimulationDataService sim;
+
     /** Mock 기본 대상(넓은 창) — 일배치용 접견 3·전화 3 + 주기배치용 접견 2·전화 2. */
     private static final int TOTAL = 10;
 
@@ -111,8 +114,8 @@ class ResilienceE2ETest {
 
     @BeforeEach
     void reset() {
+        sim.seed();              // H2 를 시연 기본 10건으로 되돌린다(앞 테스트가 대용량으로 늘렸을 수 있다)
         idempotency.clearAll();
-        dataset.reset();
         faultInjector.configure(false, 10, 10, 2_000L);
         faultInjector.resetCounters();
     }
@@ -195,7 +198,7 @@ class ResilienceE2ETest {
     @DisplayName("지연이 주입돼도 배치는 완료된다")
     void survivesInjectedDelay() {
         faultInjector.configure(true, 0, 100, 100L);
-        dataset.set(2, 2);
+        sim.seed(2, 2);          // 일배치 2·2 + 주기 2·2 = 8 (전화 기존 STT 건 없음 → 전부 STT 를 탄다)
 
         long t0 = System.currentTimeMillis();
         VoiceBatchResult r = service.run(wide(), null, "TEST");
@@ -231,7 +234,7 @@ class ResilienceE2ETest {
     @Test
     @DisplayName("대용량으로 늘려도 건별 처리가 유지된다 — 스트리밍·청크 구조 확인")
     void handlesLargerDataset() {
-        dataset.set(50, 50);
+        sim.seed(50, 50);        // 로컬 H2 에 일배치 50·50 시딩
 
         VoiceBatchResult r = service.run(wide(), null, "TEST");
 

@@ -147,11 +147,14 @@ public class VoiceBatchController {
         out.put("switchLabels", switchLabels());
         // 지금 붙어 있는 DB — 개발계 DB 모드에서 "어디를 보는지" 를 화면에 그대로 보여준다
         Map<String, Object> dbInfo = new LinkedHashMap<>();
+        dbInfo.put("target", db.target().name());
         dbInfo.put("kind", db.kind().name());
         dbInfo.put("label", db.label());
         dbInfo.put("url", db.url());
         dbInfo.put("tables", tables.describe());
         dbInfo.put("xvarmMode", modeState.xvarm().name());
+        // 마지막 연결 확인 결과(있으면). 상태 조회가 커넥션을 열어 느려지지 않게 캐시만 싣는다
+        dbInfo.put("lastProbe", db.lastProbe());
         out.put("db", dbInfo);
         out.put("configuredModes", modeState.configured());
         out.put("logCollector", logc);

@@ -63,7 +63,9 @@ class RestXvarmBrokerClientTest {
                 new VoiceProperties.Source(VoiceProperties.SourceMode.MOCK, "", "",
                         new VoiceProperties.Schema("", "", "", ""),
                         new VoiceProperties.Flag("Y", "Y", "N", "Y"),
-                        VoiceProperties.XvarmMode.MOCK_DEV, new VoiceProperties.XvarmMock("sm", "xvarm")),
+                        VoiceProperties.XvarmMode.MOCK_DEV, new VoiceProperties.XvarmMock("sm", "xvarm"),
+                        new VoiceProperties.LocalH2("jdbc:h2:mem:t", "sa", ""),
+                        new VoiceProperties.DirectDb("jdbc:postgresql://localhost:1/x", "", "u", "", 1000, 1)),
                 // 폴링 간격을 짧게 — 테스트가 몇 초씩 잡고 있을 이유가 없다
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.REST, BASE, java.util.List.of(), 10, 3),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),

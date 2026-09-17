@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest
 @ActiveProfiles("local")
-@TestPropertySource(properties = "voice.source.mode=DIRECT_JDBC")
+@TestPropertySource(properties = "voice.source.mode=MOCK")   // MOCK (로컬 H2) — JDBC 로 H2 를 조회한다
 class BoramiSourceJdbcTest {
 
     @TempDir
@@ -77,10 +77,11 @@ class BoramiSourceJdbcTest {
     }
 
     @Test
-    @DisplayName("DIRECT_JDBC 모드에서는 라우터가 JDBC 구현으로 위임한다")
+    @DisplayName("MOCK(로컬 H2) 모드도 JDBC 구현으로 위임한다 — DataSource 라우터가 H2 로 붙여 준다")
     void usesJdbcImplementation() {
         assertThat(source).isInstanceOf(BoramiSourceRouter.class);
-        assertThat(source.mode()).isEqualTo("DIRECT_JDBC");
+        assertThat(source.mode()).isEqualTo("MOCK");
+        assertThat(jdbc.mode()).isEqualTo("DIRECT_JDBC");
     }
 
     @Test

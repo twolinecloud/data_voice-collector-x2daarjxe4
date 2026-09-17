@@ -65,6 +65,7 @@ public class VoiceMockController {
     private final VoiceDirState dirs;
     private final egovframework.voice.collector.stt.SttOutputStore outputStore;
     private final egovframework.voice.collector.source.SimulationDataService sim;
+    private final egovframework.voice.collector.source.DbKindDetector dbKind;
     private final egovframework.voice.collector.logging.LogCollectorClient logCollector;
 
     @Operation(summary = "시뮬레이션 데이터 생성 (Complete Clean & Seed)",
@@ -129,6 +130,18 @@ public class VoiceMockController {
     @GetMapping("/sim-data")
     public Map<String, Object> simDataStatus() {
         return sim.status();
+    }
+
+    @Operation(summary = "DB 연결 확인",
+            description = """
+                    지금 조회 모드가 가리키는 DB(MOCK → 로컬 H2 · 개발계 DB → PostgreSQL)에 실제로 붙어 봅니다.
+
+                    개발계 DB 는 로컬에서 포트포워딩(`kubectl port-forward -n data-pipeline svc/borami-db-gijoxearrw 15433:5432`)이
+                    없으면 닿지 않습니다 — 그 경우 사유(connection refused 등)를 그대로 돌려줍니다.
+                    """)
+    @GetMapping("/db/probe")
+    public Map<String, Object> dbProbe() {
+        return dbKind.probe();
     }
 
     /** 멱등 표식 · 수신 파일 · Mock 작업 산출물 삭제 — 생성/초기화 공통. */
@@ -458,10 +471,13 @@ public class VoiceMockController {
     public Map<String, Object> setDataset(
             @RequestParam(defaultValue = "5") int meet,
             @RequestParam(defaultValue = "5") int phone) {
-        dataset.set(meet, phone);
+        // 로컬 H2 에 일배치용 행을 그 건수만큼 시딩한다(주기용 2·2 는 그대로). 개발계 DB 에서는 거절된다.
+        Map<String, Object> seed = sim.seed(meet, phone);
+        idempotency.clearAll();
         Map<String, Object> out = new LinkedHashMap<>(dataset.snapshot());
-        out.put("message", "일배치용 접견 %d · 전화 %d (+주기 1·1) 로 설정했습니다. 멱등 표식을 지운 뒤 일배치를 실행하세요"
-                .formatted(meet, phone));
+        out.put("sim", seed);
+        out.put("message", "일배치용 접견 %d · 전화 %d (+주기 2·2) 를 %s 에 시딩했습니다. [전체 실행 (일배치)] 로 돌리세요"
+                .formatted(meet, phone, seed.get("db")));
         return out;
     }
 
@@ -512,6 +528,33 @@ public class VoiceMockController {
      * <p>기본 처리에 맡기면 화면에 "Internal Server Error" 만 남아, 스키마 설정이 틀린 것인지
      * 테이블이 없는 것인지 로그를 뒤져야 알 수 있다. 시연 중에는 그럴 여유가 없다.</p>
      */
+    /**
+     * DB 에 붙지 못했거나 SQL 이 실패한 경우 — <b>어느 DB 였고 왜 실패했는지</b>를 그대로 보여 준다.
+     *
+     * <p>개발계 DB 모드에서 포트포워딩이 없으면 "Connection refused" 가 나는데, 기본 처리에 맡기면
+     * "Internal Server Error" 만 남아 H2 를 본 것인지 개발계를 본 것인지조차 알 수 없다.</p>
+     */
+    @ExceptionHandler({org.springframework.dao.DataAccessException.class,
+            org.springframework.transaction.TransactionException.class})
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public Map<String, Object> handleDataAccess(Exception e) {
+        Throwable root = e;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        String reason = root.getMessage() == null ? root.getClass().getSimpleName() : root.getMessage().replaceAll("\s+", " ").trim();
+        log.error("[Mock] DB 오류 — {} ({})", dbKind.label(), reason);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("error", "DB_ERROR");
+        out.put("db", dbKind.label());
+        out.put("url", dbKind.url());
+        out.put("message", dbKind.label() + " 접근 실패 — " + reason
+                + (dbKind.target() == egovframework.voice.collector.config.BoramiDbRouter.DbTarget.DIRECT
+                    ? " (로컬이면 포트포워딩 확인: kubectl port-forward -n data-pipeline svc/borami-db-gijoxearrw 15433:5432 · 계정 BORAMI_DB_USER/BORAMI_DB_PASSWORD)"
+                    : ""));
+        return out;
+    }
+
     @ExceptionHandler(IllegalStateException.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Map<String, Object> handleIllegalState(IllegalStateException e) {

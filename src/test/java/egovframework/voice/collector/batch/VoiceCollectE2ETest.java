@@ -60,6 +60,9 @@ class VoiceCollectE2ETest {
     @Autowired
     private IdempotencyGuard idempotency;
 
+    @Autowired
+    private egovframework.voice.collector.source.SimulationDataService sim;
+
     private BatchWindow wideWindow() {
         LocalDateTime now = LocalDateTime.now();
         return BatchWindow.manual(now.minusDays(2), now.plusDays(1));
@@ -67,6 +70,7 @@ class VoiceCollectE2ETest {
 
     @BeforeEach
     void resetIdempotency() {
+        sim.seed();              // H2 를 시연 기본 10건으로
         idempotency.clearAll();
     }
 

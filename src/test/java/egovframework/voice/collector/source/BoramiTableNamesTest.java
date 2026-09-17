@@ -31,7 +31,9 @@ class BoramiTableNamesTest {
                 new VoiceProperties.Source(VoiceProperties.SourceMode.DIRECT_JDBC, "", "",
                         new VoiceProperties.Schema(imsc, rerd, smsm, xvarm),
                         new VoiceProperties.Flag("Y", "Y", "N", "Y"),
-                        xvarmMode, new VoiceProperties.XvarmMock("sm", "xvarm")),
+                        xvarmMode, new VoiceProperties.XvarmMock("sm", "xvarm"),
+                        new VoiceProperties.LocalH2("jdbc:h2:mem:t", "sa", ""),
+                        new VoiceProperties.DirectDb("jdbc:postgresql://localhost:1/x", "", "u", "", 1000, 1)),
                 new VoiceProperties.Broker(VoiceProperties.BrokerMode.MOCK, "", java.util.List.of(), 100, 10),
                 new VoiceProperties.Phone(VoiceProperties.PhoneMode.MOCK),
                 new VoiceProperties.Sync(10, 5, EsbFileNamingPolicy.Policy.ORIGINAL),
@@ -58,14 +60,15 @@ class BoramiTableNamesTest {
     }
 
     @Test
-    @DisplayName("H2 는 XVARM 모드와 무관하게 평평하다 — 스키마 스크립트가 만든 테이블을 그대로 쓴다")
+    @DisplayName("H2 는 XVARM 모드·설정 스키마와 무관하게 전부 평평하다 — 스키마(im/re/sm)는 개발계 DB 에만 붙는다")
     void h2IsAlwaysFlat() {
         BoramiTableNames t = tables("im", "re", "sm", "xvarm", VoiceProperties.XvarmMode.MOCK_DEV, DbKindDetector.DbKind.H2);
 
         assertThat(t.smsmCmfiBs()).isEqualTo("TB_SMSM_CMFI_BS");
         assertThat(t.asysContentElement()).isEqualTo("ASYSCONTENTELEMENT");
-        // 앞 두 단은 설정대로 — H2 에 스키마를 줬다면 그대로 붙는다(로컬 설정은 비워 둔다)
-        assertThat(t.imscPtprDt()).isEqualTo("im.TB_IMSC_PTPR_DT");
+        assertThat(t.imscPtprDt()).isEqualTo("TB_IMSC_PTPR_DT");
+        assertThat(t.rerdTfinDs()).isEqualTo("TB_RERD_TFIN_DS");
+        assertThat(t.imphUcdrDs()).isEqualTo("TB_IMPH_UCDR_DS");
     }
 
     @Test

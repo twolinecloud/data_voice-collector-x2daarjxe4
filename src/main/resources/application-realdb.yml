@@ -25,23 +25,19 @@
 # ══════════════════════════════════════════════════════════════════════════
 
 spring:
-  datasource:
-    url: ${BORAMI_DB_URL:jdbc:postgresql://localhost:15433/borami}
-    driver-class-name: org.postgresql.Driver
-    username: ${BORAMI_DB_USER:borami}
-    password: ${BORAMI_DB_PASSWORD:}
-    hikari:
-      maximum-pool-size: 5
-      minimum-idle: 1
-
   sql:
     init:
-      # ⚠ 절대 always 로 두지 말 것. schema-borami-mock.sql 에 DROP TABLE 이 있다.
       mode: never
 
+# 이제 local 만으로도 드롭다운 [개발계 DB] 로 붙을 수 있다(direct-db). 이 프로파일은
+# "기동부터 개발계 DB 를 본다" + 실DB 플래그 값을 한 번에 켜는 편의 묶음이다.
 voice:
   source:
     mode: DIRECT_JDBC
+    direct-db:
+      url: ${BORAMI_DB_URL:jdbc:postgresql://localhost:15433/borami}
+      username: ${BORAMI_DB_USER:borami}
+      password: ${BORAMI_DB_PASSWORD:}
 
     # 실제 보라미 스키마 배치
     schema:

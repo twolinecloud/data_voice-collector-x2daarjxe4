@@ -45,7 +45,37 @@ public record VoiceProperties(
              * </ul>
              */
             @DefaultValue("MOCK_DEV") XvarmMode xvarmMode,
-            @DefaultValue XvarmMock xvarmMock
+            @DefaultValue XvarmMock xvarmMock,
+            /** {@code MOCK (로컬 H2)} 가 보는 인메모리 DB. 기동 시 Mock 스키마·필터 검증 행을 깔고 시뮬레이션 데이터를 시딩한다. */
+            @DefaultValue LocalH2 localH2,
+            /** {@code 개발계 DB}(DIRECT_JDBC) 가 보는 실제 DB — 개발계 borami-db(PostgreSQL) 또는 운영 보라미(Oracle). */
+            @DefaultValue DirectDb directDb
+    ) {}
+
+    /**
+     * 로컬 H2 Mock 보라미. 이름이 같은 인메모리 DB 는 JVM 안에서 공유된다({@code DB_CLOSE_DELAY=-1}).
+     * 스키마 적재는 Spring 의 sql.init 이 아니라 {@code BoramiDataSourceConfig} 가 <b>이 DataSource 에만</b> 한다 —
+     * 라우팅 DataSource 에 sql.init 을 걸면 DROP TABLE 이 실DB 로 갈 수 있다.
+     */
+    public record LocalH2(
+            @DefaultValue("jdbc:h2:mem:borami;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE") String url,
+            @DefaultValue("sa") String username,
+            @DefaultValue("") String password
+    ) {}
+
+    /**
+     * DIRECT_JDBC(개발계 DB) 대상. 드롭다운을 {@code 개발계 DB} 로 바꾸는 순간 조회·시딩이 여기로 간다.
+     *
+     * <p>기동 시 붙어 있지 않아도 뜬다({@code initialization-fail-timeout=-1}) — 로컬은 포트포워딩이 없을 때가 많다.
+     * 붙지 못하면 {@code connect-timeout-ms} 뒤에 사유와 함께 실패하고 시뮬레이터 [DB 연결 확인] 이 그것을 보여준다.</p>
+     */
+    public record DirectDb(
+            @DefaultValue("jdbc:postgresql://localhost:15433/borami") String url,
+            @DefaultValue("") String driverClassName,
+            @DefaultValue("borami") String username,
+            @DefaultValue("") String password,
+            @DefaultValue("3000") long connectTimeoutMs,
+            @DefaultValue("5") int maxPoolSize
     ) {}
 
     /**

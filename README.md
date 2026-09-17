@@ -39,7 +39,7 @@
 
 | 스위치 | 값 | 기본 (`local`) | 실물 전환 조건 |
 |---|---|---|---|
-| `voice.source.mode` | `MOCK` / `DIRECT_JDBC` / `ESB_HTTP2DB` — 화면 표기 `MOCK (로컬 H2)` / `개발계 DB` / `메타빌드 (ESB)` | MOCK (**DIRECT_JDBC**) | 인터페이스ID(Q2)·I/F 테이블(Q15) |
+| `voice.source.mode` | `MOCK` / `DIRECT_JDBC` / `ESB_HTTP2DB` — 화면 표기 `MOCK (로컬 H2)` / `개발계 DB` / `메타빌드 (ESB)`. **드롭다운이 곧 어느 DB 에 붙는지**다: MOCK → 로컬 H2, 개발계 DB → `voice.source.direct-db`(PostgreSQL) | MOCK (MOCK) | 인터페이스ID(Q2)·I/F 테이블(Q15) |
 | `voice.source.xvarm-mode` | `MOCK_DEV` / `REAL` — 화면 표기 `XVARM DB MOCK (개발계)` / `실 XVARM DB` (개발계 DB 모드 라디오) | **MOCK_DEV** | 실 XVARM·공통파일 테이블 확보 |
 | `voice.broker.mode` | `MOCK` / `REST` — 접견 전용 | MOCK (**REST**) | XVARM 사양(Q3), 브로커 배포 |
 | `voice.phone.mode` | `MOCK` / `ESB` — 전화 전용 | MOCK (MOCK) | ESB 전화 연계 프로바이더 구성 |
@@ -210,13 +210,26 @@ curl      "http://localhost:8085/api/v1/voice/status"           # 현재 구성
 
 > `/api/v1/mock/**` 는 **시연 전용**이다. 운영 배포 시 인그레스·게이트웨이에서 차단한다.
 
+### 조회 DB 라우팅 — 드롭다운이 곧 DataSource
+
+보라미 DataSource 는 **두 개**이고 조회 모드가 어느 쪽을 쓸지 정한다(`BoramiDbRouter`, MyBatis·JdbcTemplate·트랜잭션 공통).
+
+| 드롭다운 | 붙는 DB | 설정 |
+|---|---|---|
+| `MOCK (로컬 H2)` | 인메모리 H2 Mock 보라미 — 기동 시 스키마·필터 검증 행 + 시뮬레이션 10건 자동 | `voice.source.local-h2` |
+| `개발계 DB` | 개발계 borami-db(PostgreSQL). 로컬은 포트포워딩(15433) 전제 | `voice.source.direct-db` (`BORAMI_DB_URL` / `BORAMI_DB_USER` / `BORAMI_DB_PASSWORD`) |
+| `메타빌드 (ESB)` | DB 를 쓰지 않는다 — ESB HTTP2DB | `voice.source.esb-base-url` |
+
+- 예전에는 DataSource 가 하나라 `개발계 DB` 를 골라도 H2 를 봤다(생성 완료인데 DBeaver 에는 아무것도 없던 이유).
+  지금은 드롭다운을 바꾸는 즉시 조회·시뮬레이션 데이터 생성·초기화가 그 DB 로 간다. ① 카드의 **조회 DB** 줄과
+  [DB 연결 확인](`GET /api/v1/mock/db/probe`)이 어느 DB 에 붙어 있는지, 붙는지(사유 포함)를 보여 준다
+- 개발계 DB 는 기동 시 붙어 보지 않는다(포트포워딩 없이도 뜬다). 붙지 못하면 `DB_ERROR` 와 함께 포트포워딩 안내가 응답에 실린다
+- H2 Mock 스키마 적재(`schema-borami-mock.sql`, DROP TABLE 포함)는 **H2 DataSource 에만** 한다 — `spring.sql.init` 은 쓰지 않는다(라우터에 걸면 실DB 로 갈 수 있다)
+- 스키마 접두(im/re/sm/xvarm)는 개발계·운영 DB 에만 붙고 H2 는 늘 평평하다
+
 ### 4단 조인 SQL 검증 (H2 Mock)
 
-H2 에 보라미 Mock 스키마가 올라간다. `voice.source.mode=DIRECT_JDBC` 로 바꾸면 실제 조회가 돈다.
-
-```bash
-mvn spring-boot:run -Dspring-boot.run.profiles=local -Dspring-boot.run.arguments="--voice.source.mode=DIRECT_JDBC"
-```
+H2 에 보라미 Mock 스키마가 올라간다. `MOCK (로컬 H2)` 모드가 이 DB 를 JDBC 로 조회한다(MyBatis SQL 이 실제로 돈다).
 
 `data-borami-mock.sql` 에는 **걸러져야 할 행**만 있다(삭제된 녹취, 해제된 특이수용자, 대상 아닌 관리코드,
 녹음 안 된 통화 — 대상이 되지 않아 배치 시간에는 영향이 없다). 유효 대상 10건은 시뮬레이션 데이터 생성이 만든다.
@@ -224,20 +237,23 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local -Dspring-boot.run.arguments
 **DIRECT_JDBC 원본 쿼리**(접견 4단 조인 · 전화 조인 · 전화 지름길)를 스키마·테이블명과 값을 풀어
 DBeaver 에서 바로 실행할 수 있게 [`ref/borami_direct_jdbc_queries.sql`](ref/borami_direct_jdbc_queries.sql) 에 두었다.
 
-### 실제 borami-db 조회 (`realdb` 프로파일)
+### 개발계 borami-db 조회
 
-포트포워딩 후 `local` 과 **겹쳐서** 띄운다.
+포트포워딩을 열고 드롭다운을 `개발계 DB` 로 바꾸면 된다(재기동 불필요). 계정은 환경변수로.
 
 ```bash
 kubectl port-forward -n data-pipeline svc/borami-db-gijoxearrw 15433:5432
+BORAMI_DB_USER=borami BORAMI_DB_PASSWORD=... mvn spring-boot:run
 ```
+
+기동부터 개발계 DB 를 보고 실DB 플래그 값(`ptcr-yes=0`)까지 맞추려면 `realdb` 프로파일을 겹친다:
 
 ```bash
 mvn spring-boot:run -Dspring-boot.run.profiles=local,realdb
 ```
 
-> `realdb` 프로파일이 `sql.init` 을 끄고 스키마·플래그 값을 실DB 에 맞춘다.
-> **`local` 단독으로 datasource 만 바꾸면 안 된다** — Mock 스키마의 `DROP TABLE` 이 실DB 에서 실행된다.
+> 개발계 DB 에 [시뮬레이션 데이터 생성] 을 누르면 XVARM 모드가 `MOCK_DEV` 일 때 누락 테이블(`sm.tb_smsm_cmfi_bs` · `xvarm.asyscontentelement`)을
+> 먼저 만들고 10건을 넣는다. [시뮬레이션 데이터 초기화] 가 `SIM` 접두 행만 지운다. 대용량(10건 초과) 시딩은 로컬 H2 에서만 허용한다.
 
 로그 컬렉터용 DB는 별도다(네임스페이스가 다르니 `-n` 을 빠뜨리지 말 것).
 

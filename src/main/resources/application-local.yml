@@ -19,9 +19,7 @@ server:
 spring:
   sql:
     init:
-      # H2 Mock 보라미 스키마·샘플을 매 기동 시 적재한다.
-      # 로컬 기본 voice.source.mode=DIRECT_JDBC 가 이 데이터를 실제로 조회한다(접견 2 · 전화 3건).
-      mode: always
+      mode: never   # H2 적재는 BoramiDataSourceConfig 가 H2 에만 한다
 
 # ── 로그 컬렉터 (T1·T2·T4) ────────────────────────────────────────────────
 #   K8s 의 DB 만 포트포워딩하고 컬렉터 앱은 로컬에서 직접 띄우는 구성.
@@ -53,19 +51,26 @@ log-collector:
 
 voice:
   # ── 5개 스위치 ────────────────────────────────────────────────────────────
-  #   로컬 기본값: 보라미 조회 DIRECT_JDBC(H2 Mock 보라미) · 브로커 REST(8082 의 로컬 브로커)
-  #   · 전화 MOCK · 복호화 SKIP · STT MOCK.
+  #   로컬 기본값: 보라미 조회 MOCK(로컬 H2) · 브로커 REST(8082 의 로컬 브로커) · 전화 MOCK · 복호화 SKIP · STT MOCK.
   #   기동 후 시뮬레이터 화면이나 PUT /api/v1/mock/modes/{name} 으로 재시작 없이 바꿀 수 있다.
+  #
+  #   조회를 [개발계 DB] 로 올리면 direct-db(기본 localhost:15433 = borami-db 포트포워딩)에 붙는다:
+  #     kubectl port-forward -n data-pipeline svc/borami-db-gijoxearrw 15433:5432
+  #   계정은 BORAMI_DB_USER / BORAMI_DB_PASSWORD 환경변수로 준다. 스키마(im/re/sm)는 개발계 DB 에만 붙고 H2 는 평평하다.
   #
   #   ⚠ 브로커가 REST 라서 8082 에 브로커가 떠 있지 않으면 접견 배치가 바로 실패한다(의도된 동작 —
   #     Fail-fast). 브로커 없이 돌리려면 화면에서 브로커를 MOCK 으로 내리거나 VOICE_BROKER_MODE=MOCK.
   source:
-    mode: ${VOICE_SOURCE_MODE:DIRECT_JDBC}   # MOCK | DIRECT_JDBC(H2 Mock 보라미) | ESB_HTTP2DB
-    # H2 Mock 은 스키마가 평평하다 — 비워 둔다. 실DB 는 realdb 프로파일이 채운다.
+    mode: ${VOICE_SOURCE_MODE:MOCK}          # MOCK(로컬 H2) | DIRECT_JDBC(개발계 DB) | ESB_HTTP2DB(메타빌드)
+    direct-db:
+      url: ${BORAMI_DB_URL:jdbc:postgresql://localhost:15433/borami}
+      username: ${BORAMI_DB_USER:borami}
+      password: ${BORAMI_DB_PASSWORD:}
+    # 개발계 borami-db 의 실제 스키마 배치(2026-09-12 확인). H2 에는 붙지 않는다.
     schema:
-      imsc: ${VOICE_SCHEMA_IMSC:}
-      rerd: ${VOICE_SCHEMA_RERD:}
-      smsm: ${VOICE_SCHEMA_SMSM:}
+      imsc: ${VOICE_SCHEMA_IMSC:im}
+      rerd: ${VOICE_SCHEMA_RERD:re}
+      smsm: ${VOICE_SCHEMA_SMSM:sm}
       xvarm: ${VOICE_SCHEMA_XVARM:}
   # ── XVARM 브로커 ────────────────────────────────────────────────────────
   #   MOCK : 내부 Mock 컴포넌트가 수신 폴더에 더미 파일을 만든다(외부 의존 없음)

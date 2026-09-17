@@ -14,7 +14,8 @@ import java.util.Map;
 /**
  * 보라미 조회 라우터 — 현재 모드에 맞는 구현으로 <b>호출 시점에</b> 위임한다.
  *
- * <p>세 구현이 전부 빈으로 떠 있고, 어느 것을 쓸지는 {@link VoiceModeState} 가 정한다.
+ * <p>어느 것을 쓸지는 {@link VoiceModeState} 가 정한다. {@code MOCK (로컬 H2)} 와 {@code 개발계 DB}(DIRECT_JDBC) 는
+ * 둘 다 JDBC 구현이고, <b>어느 DB 에 붙는지는 DataSource 라우터가 모드로 정한다</b>(MOCK → H2, DIRECT_JDBC → 개발계).
  * 그래서 재시작 없이 MOCK → DIRECT_JDBC → ESB_HTTP2DB 로 옮겨 갈 수 있다.</p>
  */
 @Log4j2
@@ -37,7 +38,9 @@ public class BoramiSourceRouter implements BoramiSourceClient {
     }
 
     private BoramiSourceClient current() {
-        String mode = state.source().name();
+        // MOCK(로컬 H2)도 JDBC 로 조회한다 — 라우터가 H2 로 붙여 준다
+        String mode = state.source() == egovframework.voice.collector.config.VoiceProperties.SourceMode.MOCK
+                ? "DIRECT_JDBC" : state.source().name();
         BoramiSourceClient impl = byMode.get(mode);
         if (impl == null) {
             throw new IllegalStateException("보라미 조회 구현이 없다: " + mode + " (등록: " + byMode.keySet() + ")");
