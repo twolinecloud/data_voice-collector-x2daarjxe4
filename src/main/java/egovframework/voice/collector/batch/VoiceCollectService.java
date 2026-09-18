@@ -76,6 +76,7 @@ public class VoiceCollectService {
     private final IdempotencyGuard idempotency;
     private final InmatePidGenerator pidGenerator;
     private final BatchProgress progress;
+    private final egovframework.voice.collector.transfer.AgentConnectorClient agentConnector;
 
     /**
      * 배치를 1회 실행한다.
@@ -165,6 +166,14 @@ public class VoiceCollectService {
                     collectOut - analyzeErr, success, sendErr, ctx.sendMs));
         }
 
+        // ── 이관 — 1차 저장({ROOT}/xenon/…)이 끝난 뒤 에이전트 커넥터로 넘긴다 ──────────
+        //   실패해도 배치를 실패로 돌리지 않는다. 우리 구간의 산출물은 이미 디스크에 있고,
+        //   못 넘긴 것은 폴더를 보고 다시 넘기면 된다 — 이관 때문에 STT 를 다시 도는 것은 낭비다.
+        var transfer = agentConnector.send(execId, ctx.toTransfer);
+        if (transfer.enabled() && !transfer.success()) {
+            log.warn("[Batch] 커넥터 이관 미완료 — execId={} {} (1차 저장은 정상)", execId, transfer.message());
+        }
+
         // T4 — 파일 1건 = 1행. 정합성 대사(T1.SUCCESS_CNT == Σ T3·T4·T5)의 근거다.
         logCollector.createFileProcs(execId, toFileProcReqs(outcomes));
 
@@ -197,6 +206,8 @@ public class VoiceCollectService {
         long collectMs;
         long analyzeMs;
         long sendMs;
+        /** 이관에 넘길 산출물 — 1차 저장이 끝난 건만 담는다. */
+        final List<egovframework.voice.collector.transfer.AgentConnectorClient.Output> toTransfer = new ArrayList<>();
 
         RunContext(String execId) {
             this.execId = execId;
@@ -343,6 +354,9 @@ public class VoiceCollectService {
             beginSend(ctx);
             SttOutputStore.Saved saved = outputStore.save(ctx.execId, target, stt, fileSize);
             ctx.sendMs += System.currentTimeMillis() - tAnalyzed;
+            // 이관은 배치 끝에 한 번에 넘긴다 — 건마다 부르면 커넥터가 죽어 있을 때 건당 대기가 쌓인다.
+            ctx.toTransfer.add(new egovframework.voice.collector.transfer.AgentConnectorClient.Output(
+                    target.kind(), saved.textFile().getFileName().toString(), stt.text()));
 
             idempotency.markProcessed(target);
             return FileProcOutcome.success(target, fileSize, stt.charCount(),
