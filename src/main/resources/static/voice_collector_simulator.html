@@ -1284,6 +1284,25 @@ async function runBatchInner(path, label, kind, extraQuery) {
     ks.forEach(k => { const tr = s.tracks[k]; if (!tr) return;
       logRaw(`<span class="hd">▷ ${esc(tr.label)} 트랙</span> ` + (tr.steps||[]).map(st => `${esc(st.label)}=<b>${esc(st.switchKey ? lbl(st.switchKey, st.mode) : st.mode)}</b>`).join(' → ')); });
   }
+  // 접견이 섞인 배치는 브로커에 먼저 물어본다.
+  //   REST 인데 브로커가 없으면 전건이 COLLECT 에서 깨진 뒤에야 알게 된다 — 개발계에 브로커
+  //   파드가 안 떠 있을 때 실제로 5건이 통째로 날아갔다. 짧은 프로브 한 번으로 먼저 말해 준다.
+  //   막지는 않는다: 경고를 보고도 돌려 보고 싶을 수 있고, 프로브가 틀릴 수도 있다.
+  if (kind !== 'PHONE' && s?.tracks?.meet) {
+    const brokerStep = (s.tracks.meet.steps || []).find(st => st.switchKey === 'broker');
+    if (brokerStep && brokerStep.mode === 'REST') {
+      const p = await call('GET', '/api/v1/voice/broker/probe', '', true);
+      if (p && !p.reachable) {
+        log(`⚠ 브로커에 닿지 못합니다 — ${esc(p.baseUrl || '')} · 접견 건은 전부 COLLECT 에서 실패합니다`, 'er');
+        // 사유는 서버 메시지를 그대로 쓴다 — 여기서 또 풀어 쓰면 같은 말이 두 번 나온다.
+        log(`  └ ${esc(p.error || '응답 없음')}`, 'wr');
+        log('  └ 접견 없이 나머지를 보려면 [전화만 실행] 을 쓰십시오', 'wr');
+      } else if (p && !p.pathMatched) {
+        log(`⚠ ${esc(p.verdict || '브로커 출력 경로가 우리 수신 폴더와 다릅니다')}`, 'wr');
+      }
+    }
+  }
+
   // 시뮬레이터에서 돌리는 배치는 전부 시험이다 → EXEC_ID 가 ...TST... 로 채번된다.
   const url = `${path}?test=true` + (kind ? `&kinds=${kind}` : '') + (extraQuery ? '&' + extraQuery : '');
   progStart();

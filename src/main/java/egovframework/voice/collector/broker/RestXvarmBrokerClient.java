@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
@@ -159,9 +160,29 @@ public class RestXvarmBrokerClient implements XvarmBrokerClient {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
-        ResponseEntity<JsonNode> res =
-                voiceRestTemplate.exchange(url, method, new HttpEntity<>(body, headers), JsonNode.class);
-        return res.getBody();
+        try {
+            ResponseEntity<JsonNode> res =
+                    voiceRestTemplate.exchange(url, method, new HttpEntity<>(body, headers), JsonNode.class);
+            return res.getBody();
+        } catch (ResourceAccessException e) {
+            // 붙지 못한 것 — 스프링 기본 메시지는 'I/O error on POST request for "…": null' 이라
+            // 무엇이 잘못됐는지 말해 주지 않는다. 접견 배치가 전건 실패하면 이 한 줄이 T4 에 그대로
+            // 남으므로, 읽는 사람이 다음에 무엇을 볼지 알 수 있게 바꿔 적는다.
+            throw new IllegalStateException(unreachableMessage(url, e), e);
+        }
+    }
+
+    /** 브로커에 닿지 못한 이유를 사람이 읽을 수 있게 — 원인 예외의 클래스명까지 살려 둔다. */
+    private static String unreachableMessage(String url, ResourceAccessException e) {
+        Throwable cause = e.getCause() == null ? e : e.getCause();
+        String detail = cause.getMessage();
+        if (!StringUtils.hasText(detail)) {
+            detail = cause.getClass().getSimpleName();
+        }
+        String hint = cause instanceof java.net.UnknownHostException
+                ? "주소를 찾지 못했습니다 — 서비스명·네임스페이스를 확인하십시오"
+                : "브로커가 응답하지 않습니다 — 파드가 떠 있는지(K8s Service 에 엔드포인트가 붙었는지) 확인하십시오";
+        return "XVARM 브로커에 붙지 못했습니다 (%s) — %s. [%s]".formatted(url, hint, detail);
     }
 
     private static String nullSafe(String s) {
