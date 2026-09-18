@@ -136,7 +136,7 @@ class BoramiSourceJdbcTest {
     }
 
     @Test
-    @DisplayName("시간창별 대상 — 일배치 창은 접견 5·전화 5, 10분 주기 창은 접견 2·전화 2 (총 14건)")
+    @DisplayName("시간창별 대상 — 일배치 창은 접견 5·전화 5, 20분 주기 창은 접견 2·전화 2 (총 14건)")
     void seedMatchesBatchWindows() {
         LocalDateTime now = LocalDateTime.now();
         BatchWindow daily = BatchWindow.daily(now);
@@ -145,10 +145,28 @@ class BoramiSourceJdbcTest {
         assertThat(source.findMeetTargets(daily, SPECL, 100)).extracting(VoiceTarget::idempotencyKey)
                 .containsExactly("SIM-MEET-001", "SIM-MEET-002", "SIM-MEET-003", "SIM-MEET-004", "SIM-MEET-005");
         assertThat(source.findPhoneTargets(daily, SPECL, 100)).hasSize(5);
+        // 007 이 먼저다 — 조회는 CRT_DT 오름차순이고 007(지금-18분)이 006(지금-6분)보다 오래됐다.
+        // 007 은 10분 창을 벗어난 지연 건이라 20분 창에서만 잡힌다(아래 periodicNarrowWindowMissesLagged 참고).
         assertThat(source.findMeetTargets(periodic, SPECL, 100)).extracting(VoiceTarget::idempotencyKey)
-                .containsExactly("SIM-MEET-006", "SIM-MEET-007");
+                .containsExactly("SIM-MEET-007", "SIM-MEET-006");
         assertThat(source.findPhoneTargets(periodic, SPECL, 100)).extracting(VoiceTarget::idempotencyKey)
-                .containsExactly("SIM-PHONE-006", "SIM-PHONE-007");
+                .containsExactly("SIM-PHONE-007", "SIM-PHONE-006");
+    }
+
+    @Test
+    @DisplayName("10분 창이면 지연 건(접견 -18분·전화 -16분)을 놓친다 — 20분 창이 있어야 주워 온다")
+    void periodicNarrowWindowMissesLagged() {
+        LocalDateTime now = LocalDateTime.now();
+
+        // 10분만 봤다면 각 트랙에서 최근 1건만 잡힌다
+        assertThat(source.findMeetTargets(BatchWindow.periodic(now, 10), SPECL, 100))
+                .extracting(VoiceTarget::idempotencyKey).containsExactly("SIM-MEET-006");
+        assertThat(source.findPhoneTargets(BatchWindow.periodic(now, 10), SPECL, 100))
+                .extracting(VoiceTarget::idempotencyKey).containsExactly("SIM-PHONE-006");
+
+        // 20분(periodic-lag-min 기본값)이면 지연 건까지 2건
+        assertThat(source.findMeetTargets(BatchWindow.periodic(now, 20), SPECL, 100)).hasSize(2);
+        assertThat(source.findPhoneTargets(BatchWindow.periodic(now, 20), SPECL, 100)).hasSize(2);
     }
 
     @Test

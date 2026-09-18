@@ -26,8 +26,15 @@ import java.util.stream.Stream;
 /**
  * 시뮬레이션 데이터 — <b>DB 메타(보라미·XVARM) + 물리 더미 음성 파일</b>을 한 번에 만들고 지운다.
  *
- * <p><b>구성 (접견 7 · 전화 7 = 14건)</b>: 트랙마다 5건은 <b>어제 09:10~09:50</b>(일배치 창), 2건은
- * <b>지금-6분 / 지금-3분</b>(10분 주기 창). 접견은 4단(re·im·sm·xvarm) 1:1:1:1, 전화는 im 통화내역 + im 특이수용자 1:1 로
+ * <p><b>구성 (접견 7 · 전화 7 = 14건)</b>
+ * <ul>
+ *   <li><b>일배치용 10건</b>(트랙별 5) — 어제 <b>00:00:00~23:59:59</b> 에 고르게. 첫 건과 마지막 건이 일배치 창
+ *       {@code [어제 00:00, 오늘 00:00)} 의 양 끝에 놓여 경계까지 같이 본다.</li>
+ *   <li><b>주기배치용 4건</b>(트랙별 2) — 접견 <b>지금-6분 / -18분</b>, 전화 <b>지금-4분 / -16분</b>.
+ *       주기배치는 10분마다 돌지만 창은 20분({@code voice.batch.periodic-lag-min})이라,
+ *       뒤엣것은 <b>10분 창만 봤다면 놓쳤을 지연 건</b>이다 — 20분 창이 실제로 주워 오는지 보는 표본.</li>
+ * </ul>
+ * 접견은 4단(re·im·sm·xvarm) 1:1:1:1, 전화는 im 통화내역 + im 특이수용자 1:1 로
  * 조인이 서는 유효 메타를 넣고, DB 의 파일명과 1:1 인 경량 더미 파일(0~1KB)을 XVARM 원본 스토리지에 쓴다.</p>
  *
  * <p><b>같은 코드가 H2(로컬)와 개발계 PostgreSQL 을 상대한다.</b> 테이블명은 {@link BoramiTableNames} 가 스키마를 붙여 주고,
@@ -43,9 +50,21 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class SimulationDataService {
 
-    /** 시연 기본 — 트랙별 일배치 5건(어제) + 주기배치 2건(최근 10분) = 7건, 합계 14건. */
+    /** 시연 기본 — 트랙별 일배치 5건(어제 하루) + 주기배치 2건(10분 창 1 · 10~20분 1) = 7건, 합계 14건. */
     public static final int DAILY_PER_KIND = 5;
     public static final int PERIODIC_PER_KIND = 2;
+    /**
+     * 주기배치용 2건을 <b>지금부터 몇 분 전</b>에 둘지 — 트랙별.
+     *
+     * <p>앞엣것은 10분 창 안, 뒤엣것은 10~20분 사이다. 주기배치는 10분마다 돌면서 <b>20분</b>
+     * ({@code voice.batch.periodic-lag-min})을 훑으므로, 뒤엣것은 "10분 창만 봤다면 놓쳤을 건"이다.
+     * 접견·전화를 서로 다른 분에 두어 로그에서 어느 트랙의 건인지 바로 읽힌다.</p>
+     */
+    private static final Map<VoiceKind, int[]> PERIODIC_OFFSET_MIN = Map.of(
+            VoiceKind.MEET, new int[] {6, 18},
+            VoiceKind.PHONE, new int[] {4, 16});
+    /** 하루 = 86400초. 일배치용 건을 어제 00:00:00~23:59:59 에 고르게 펼 때 쓴다. */
+    private static final long DAY_SECONDS = 24L * 60 * 60;
     public static final int MEET_COUNT = DAILY_PER_KIND + PERIODIC_PER_KIND;
     public static final int PHONE_COUNT = DAILY_PER_KIND + PERIODIC_PER_KIND;
     /** 이 건수를 넘는 대용량 시딩은 더미 파일을 쓰지 않는다(파이프라인은 브로커·Mock 이 만든 파일을 쓴다). */
@@ -156,7 +175,7 @@ public class SimulationDataService {
 
         // 접견 — re → im → sm → xvarm
         for (int i = 1; i <= meetCount; i++) {
-            LocalDateTime at = occurredAt(now, i, dailyMeet);
+            LocalDateTime at = occurredAt(now, i, dailyMeet, VoiceKind.MEET);
             Timestamp crt = Timestamp.valueOf(at);
             String fileNm = meetFileName(i);
             Path file = meetDir.resolve(fileNm);
@@ -183,7 +202,7 @@ public class SimulationDataService {
 
         // 전화 — im 통화내역 → im 특이수용자
         for (int i = 1; i <= phoneCount; i++) {
-            LocalDateTime at = occurredAt(now, i, dailyPhone);
+            LocalDateTime at = occurredAt(now, i, dailyPhone, VoiceKind.PHONE);
             Timestamp crt = Timestamp.valueOf(at);
             String fileNm = phoneFileName(i);
             Path file = phoneDir.resolve(fileNm);
@@ -223,8 +242,18 @@ public class SimulationDataService {
         out.put("dirs", Map.of("meet", slash(meetDir), "phone", slash(phoneDir)));
         out.put("tables", tables.describe());
         out.put("windows", Map.of(
-                "daily", "접견 %d · 전화 %d (어제 09:10 부터 10분 간격)".formatted(dailyMeet, dailyPhone),
-                "periodic", "접견 %d · 전화 %d (지금-6분 / 지금-3분)".formatted(PERIODIC_PER_KIND, PERIODIC_PER_KIND)));
+                "daily", "접견 %d · 전화 %d (어제 00:00:00~23:59:59 에 고르게)".formatted(dailyMeet, dailyPhone),
+                "periodic", "접견 %s · 전화 %s (분 단위, 지금 기준)".formatted(
+                        offsetText(VoiceKind.MEET), offsetText(VoiceKind.PHONE))));
+        // 화면 팝업이 쓰는 건수 — 일배치용/주기용을 나눠 센다. rows 는 테이블별이라 이 구분이 나오지 않는다.
+        out.put("counts", Map.of(
+                "daily", Map.of("meet", dailyMeet, "phone", dailyPhone, "total", dailyMeet + dailyPhone),
+                "periodic", Map.of("meet", PERIODIC_PER_KIND, "phone", PERIODIC_PER_KIND,
+                        "total", PERIODIC_PER_KIND * 2,
+                        "offsetMin", Map.of("meet", PERIODIC_OFFSET_MIN.get(VoiceKind.MEET),
+                                "phone", PERIODIC_OFFSET_MIN.get(VoiceKind.PHONE))),
+                "total", meetCount + phoneCount,
+                "files", files.size()));
         trace.into(out);
         log.info("[Sim] 시뮬레이션 데이터 생성 — {} · 파일 {}개{} · SQL {}문장 · {}", rows, files.size(),
                 writeFiles ? "" : " (대용량 — 더미 파일 생략)", trace.total, tables.describe());
@@ -240,8 +269,14 @@ public class SimulationDataService {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("db", db.label());
         out.put("dirsEnsured", dirs.ensureDirs());
-        out.put("cleaned", cleanRows(trace));
-        out.put("filesDeleted", deleteDummyFiles());
+        Map<String, Object> cleaned = cleanRows(trace);
+        Map<String, Integer> filesDeleted = deleteDummyFiles();
+        out.put("cleaned", cleaned);
+        out.put("filesDeleted", filesDeleted);
+        // 화면 팝업이 쓰는 합계. 테이블이 없어 건너뛴 항목("skip: …")은 숫자가 아니므로 빼고 센다.
+        out.put("counts", Map.of(
+                "dbRows", cleaned.values().stream().filter(Integer.class::isInstance).mapToInt(v -> (Integer) v).sum(),
+                "dummyFiles", filesDeleted.values().stream().mapToInt(Integer::intValue).sum()));
         trace.into(out);
         log.info("[Sim] 시뮬레이션 데이터 초기화 — {}", out);
         return out;
@@ -436,15 +471,36 @@ public class SimulationDataService {
     // ── 내부 ──────────────────────────────────────────────────────────────
 
     /**
-     * i 번째 건의 발생 시각 — 1~daily 는 어제 09:10 부터 10분 간격(하루 안에서 돈다), 그 뒤 2건은 지금-6분/지금-3분.
+     * i 번째 건의 발생 시각.
+     *
+     * <p><b>일배치용(1~daily)</b>은 <b>어제 00:00:00 ~ 23:59:59</b> 에 고르게 편다. 첫 건과 마지막 건이
+     * 창의 양 끝에 정확히 놓이므로 일배치 창 {@code [어제 00:00, 오늘 00:00)} 의 경계 포함/제외까지 같이 본다.
+     * 예전에는 09:10 부터 10분 간격이라 하루의 앞뒤가 비어 있었다.</p>
+     *
+     * <p><b>주기배치용(그 뒤 2건)</b>은 {@link #PERIODIC_OFFSET_MIN} 대로 <b>10분 창 안 1건 · 10~20분 사이 1건</b>
+     * 이다. 주기배치는 10분마다 돌지만 창은 20분({@code periodic-lag-min})이라, 뒤엣것은 <b>10분 창만 봤다면
+     * 놓쳤을 지연 건</b>이 된다 — 20분 창이 실제로 주워 오는지 확인하는 표본이다. 트랙마다 분을 다르게 둬서
+     * 로그에서 접견·전화가 섞이지 않는다.</p>
      */
-    static LocalDateTime occurredAt(LocalDateTime now, int i, int daily) {
+    static LocalDateTime occurredAt(LocalDateTime now, int i, int daily, VoiceKind kind) {
         if (i <= daily) {
-            long minutes = 9 * 60 + ((10L * i) % (14 * 60));      // 09:10 ~ 22:59
-            return now.toLocalDate().minusDays(1).atStartOfDay().plusMinutes(minutes).plusSeconds((10L * i) / (14 * 60));
+            // 마지막 건이 23:59:59 에 닿도록 (daily-1) 등분한다. 1건이면 00:00:00.
+            long sec = daily <= 1 ? 0 : ((long) (i - 1) * (DAY_SECONDS - 1)) / (daily - 1);
+            return now.toLocalDate().minusDays(1).atStartOfDay().plusSeconds(sec);
         }
-        int k = i - daily;                                      // 1, 2
-        return now.minusMinutes(3L * (PERIODIC_PER_KIND - k + 1));   // 1 → -6분, 2 → -3분
+        int[] offsets = PERIODIC_OFFSET_MIN.get(kind);
+        int k = Math.min(i - daily, offsets.length);            // 1, 2
+        return now.minusMinutes(offsets[k - 1]);
+    }
+
+    /** "지금-6분 / 지금-18분" 처럼 트랙의 주기배치 오프셋을 읽을 수 있게 적는다. */
+    private static String offsetText(VoiceKind kind) {
+        int[] o = PERIODIC_OFFSET_MIN.get(kind);
+        StringBuilder sb = new StringBuilder();
+        for (int m : o) {
+            sb.append(sb.length() == 0 ? "" : " / ").append("지금-").append(m).append("분");
+        }
+        return sb.toString();
     }
 
     /** 세 자리를 넘는 대용량은 자릿수를 늘린다 — 키 형식은 시연 10건(SIM-MEET-001…)과 같다. */
