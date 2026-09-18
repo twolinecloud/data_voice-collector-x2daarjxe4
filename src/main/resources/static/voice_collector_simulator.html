@@ -150,6 +150,23 @@
   .sim-files { font-family:var(--mono); font-size:.72rem; columns:2; column-gap:1.5rem; }
   @media (max-width: 768px) { .sim-files { columns:1; } }
 
+  /* ── 결과 알림 팝업 ─────────────────────────────────────────────────── */
+  .pop-backdrop { position:fixed; inset:0; background:rgba(33,37,41,.45); z-index:1080;
+                  display:flex; align-items:center; justify-content:center; padding:1rem; }
+  .pop-backdrop[hidden] { display:none; }
+  .pop-card { background:#fff; border-radius:.5rem; box-shadow:0 .75rem 2rem rgba(0,0,0,.25);
+              width:min(32rem, 100%); max-height:85vh; display:flex; flex-direction:column;
+              animation:popin .16s ease; }
+  @keyframes popin { from { opacity:0; transform:translateY(-6px) scale(.99); } to { opacity:1; transform:none; } }
+  .pop-head { display:flex; align-items:center; gap:.5rem; padding:.6rem .85rem; border-bottom:1px solid #e9ecef; }
+  .pop-head strong { flex:1 1 auto; font-size:.95rem; }
+  .pop-body { padding:.85rem; overflow:auto; font-size:.86rem; }
+  .pop-body ul { margin:.45rem 0 0; padding-left:1.15rem; }
+  .pop-body li { margin:.25rem 0; }
+  .pop-body .sub { color:#6c757d; font-size:.77rem; }
+  .pop-body .n { font-weight:700; color:#0d6efd; }
+  .pop-foot { padding:.55rem .85rem; border-top:1px solid #e9ecef; text-align:right; }
+
   /* ── 아키텍처 흐름도 ───────────────────────────────────────────────── */
   .flow { max-width:52rem; }
   .flow-node { border:1px solid #dee2e6; border-left:4px solid #0d6efd; border-radius:.4rem;
@@ -489,6 +506,18 @@
   </div>
 </div>
 
+<!-- 결과 알림 팝업 — Bootstrap 은 CSS 만 올리므로(JS 번들 없음) 직접 만든다 -->
+<div class="pop-backdrop" id="pop" hidden>
+  <div class="pop-card" role="dialog" aria-modal="true" aria-labelledby="pop-title">
+    <div class="pop-head">
+      <strong id="pop-title">&#8212;</strong>
+      <button type="button" class="btn-close" id="pop-x" aria-label="닫기"></button>
+    </div>
+    <div class="pop-body" id="pop-body"></div>
+    <div class="pop-foot"><button type="button" class="btn btn-sm btn-primary" id="pop-ok">확인</button></div>
+  </div>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
 
@@ -589,6 +618,55 @@ function logRaw(html) {
   line.innerHTML = `<span class="t">[${t}]</span> ${html}`;
   logAppend(line);
 }
+// ── 결과 알림 팝업 ──────────────────────────────────────────────────────
+// Bootstrap JS 번들을 올리지 않아 직접 띄운다. alert() 는 줄바꿈만 되고 건수를 강조할 수 없어
+// "무엇이 몇 건" 을 한눈에 보여 줘야 하는 이 용도에는 모자란다.
+function showPopup(title, html) {
+  $('pop-title').textContent = title;
+  $('pop-body').innerHTML = html;
+  $('pop').hidden = false;
+  $('pop-ok').focus();
+}
+function closePopup() { $('pop').hidden = true; }
+$('pop-ok').onclick = closePopup;
+$('pop-x').onclick = closePopup;
+$('pop').onclick = (e) => { if (e.target === $('pop')) closePopup(); };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('pop').hidden) closePopup(); });
+
+/** 생성 결과 — 일배치용/주기용을 나눠 보여 준다. 건수는 서버가 센 것(sim.counts)을 그대로 쓴다. */
+function seedPopupHtml(sim) {
+  const c = sim.counts || {}, d = c.daily || {}, p = c.periodic || {}, off = p.offsetMin || {};
+  const mins = (a) => (a || []).map(m => m + '분 전').join(' · ');
+  return `<div>시뮬레이션 데이터가 생성되었습니다.</div>
+    <ul>
+      <li>일배치용: <span class="n">${d.total ?? 0}</span>건 (접견 ${d.meet ?? 0}, 전화 ${d.phone ?? 0})
+        <div class="sub">어제 00:00:00 ~ 23:59:59 에 고르게 — 첫 건과 마지막 건이 일배치 창의 양 끝입니다</div></li>
+      <li>10분 주기용: <span class="n">${p.total ?? 0}</span>건 (접견 ${p.meet ?? 0}, 전화 ${p.phone ?? 0})
+        <div class="sub">접견 ${mins(off.meet)} · 전화 ${mins(off.phone)}
+          &mdash; 뒤엣것은 10분 창 밖이라 <b>20분 창(periodic-lag-min)</b> 에서만 잡힙니다</div></li>
+      <li>합계: <span class="n">${c.total ?? 0}</span>건 · 더미 파일 ${c.files ?? 0}개</li>
+    </ul>
+    <div class="sub mt-2">대상 DB — ${esc(sim.db || '')}</div>`;
+}
+
+/** 초기화 결과 — DB 행과 파일을 나눠 센다. 파일은 XVARM 원본 더미 + 로컬 수신·작업 파일의 합이다. */
+function cleanPopupHtml(d) {
+  const sim = d.sim || {}, c = sim.counts || {}, l = d.local || {}, fd = sim.filesDeleted || {};
+  const localFiles = ['meetFiles', 'phoneFiles', 'workFiles'].reduce((n, k) => n + (Number(l[k]) || 0), 0);
+  const dummy = c.dummyFiles ?? 0;
+  const detail = Object.entries(sim.cleaned || {}).map(([k, v]) => k + ' ' + v).join(' · ');
+  return `<div>시뮬레이션 데이터가 초기화되었습니다.</div>
+    <ul>
+      <li>삭제된 DB 레코드: <span class="n">${c.dbRows ?? 0}</span>건
+        <div class="sub">${esc(detail)}</div></li>
+      <li>삭제된 디렉토리 파일: <span class="n">${dummy + localFiles}</span>건
+        <div class="sub">XVARM 원본 더미 ${dummy} (접견 ${fd.MEET ?? 0} · 전화 ${fd.PHONE ?? 0})
+          · ESB 수신·작업 파일 ${localFiles}</div></li>
+      <li>그 외: 멱등 표식 ${l.idempotencyMarkers ?? 0}건 · STT 출력 폴더 ${l.sttOutputDirs ?? 0}개</li>
+    </ul>
+    <div class="sub mt-2">대상 DB — ${esc(sim.db || '')}</div>`;
+}
+
 // 시딩에 쓴 SQL 을 콘솔에 그대로 뿌린다 — DBeaver 에 붙여 넣어 대조할 수 있게.
 // 서버가 보내는 문장은 값이 끼워진 '표시용 사본'이다(실행은 바인딩으로 한다).
 function logSqls(sim) {
@@ -1383,6 +1461,7 @@ $('btn-reset').onclick = async () => {
   renderSimResult('시뮬레이션 데이터 생성', d, true);
   $('targets-card').classList.add('d-none');
   await loadStatus(true);
+  showPopup('시뮬레이션 데이터 생성 완료', seedPopupHtml(sim));
 };
 $('btn-dataset').onclick = async () => {
   const m = Number($('ds-meet').value||0), p = Number($('ds-phone').value||0);
@@ -1444,6 +1523,7 @@ $('btn-test-clear').onclick = async () => {
   LAST = null;
   $('targets-card').classList.add('d-none');
   await loadStatus(true);
+  showPopup('시뮬레이션 데이터 초기화 완료', cleanPopupHtml(d));
 };
 
 $('btn-refresh').onclick = () => loadStatus(false);
