@@ -61,7 +61,7 @@ voice:
   #   ⚠ 브로커가 REST 라서 8082 에 브로커가 떠 있지 않으면 접견 배치가 바로 실패한다(의도된 동작 —
   #     Fail-fast). 브로커 없이 돌리려면 화면에서 브로커를 MOCK 으로 내리거나 VOICE_BROKER_MODE=MOCK.
   source:
-    mode: ${VOICE_SOURCE_MODE:MOCK}          # MOCK(로컬 H2) | DIRECT_JDBC(개발계 DB) | ESB_HTTP2DB(메타빌드)
+    mode: ${VOICE_SOURCE_MODE:DIRECT_JDBC}          # MOCK(로컬 H2) | DIRECT_JDBC(개발계 DB) | ESB_HTTP2DB(메타빌드)
     direct-db:
       url: ${BORAMI_DB_URL:jdbc:postgresql://localhost:15433/borami}
       username: ${BORAMI_DB_USER:borami}

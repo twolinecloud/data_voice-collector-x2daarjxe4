@@ -27,6 +27,7 @@
   #log .er { color:#e06c75; }
   #log .wr { color:#e5c07b; }
   #log .hd { color:#61afef; font-weight:600; }
+  #log .sqlq { color:#c8b6ff; }
   .tgt-table { font-size:.8rem; }
   .tgt-table td, .tgt-table th { padding:.3rem .5rem; }
   .busy { pointer-events:none; }
@@ -149,6 +150,22 @@
   .sim-files { font-family:var(--mono); font-size:.72rem; columns:2; column-gap:1.5rem; }
   @media (max-width: 768px) { .sim-files { columns:1; } }
 
+  /* ── 아키텍처 흐름도 ───────────────────────────────────────────────── */
+  .flow { max-width:52rem; }
+  .flow-node { border:1px solid #dee2e6; border-left:4px solid #0d6efd; border-radius:.4rem;
+               background:#fff; padding:.45rem .7rem; }
+  .flow-node.internal { border-left-color:#6f42c1; background:#faf9ff; border-style:dashed; }
+  .flow-node .no { font-weight:700; color:#0d6efd; margin-right:.3rem; }
+  .flow-node.internal .no { color:#6f42c1; }
+  .flow-node .ttl { font-size:.84rem; font-weight:600; }
+  .flow-node .pth { font-family:var(--mono); font-size:.73rem; color:#495057; word-break:break-all; margin-top:.15rem; }
+  .flow-node .pth .k { color:#adb5bd; }
+  .flow-node .out { font-size:.73rem; color:#6c757d; margin-top:.2rem; }
+  /* 노드 사이 연결선 — 왼쪽 세로줄 + ▼ */
+  .flow-link { display:flex; align-items:center; gap:.45rem; padding:.1rem 0; margin-left:1.05rem; }
+  .flow-link .bar { width:2px; height:1.35rem; background:#ced4da; flex:0 0 2px; }
+  .flow-link .cap { font-size:.72rem; color:#868e96; }
+
   /* ── 재처리 시나리오 ───────────────────────────────────────────────── */
   .tl { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:.5rem; align-items:start; }
   @media (max-width: 992px) { .tl { grid-template-columns:repeat(2, minmax(0,1fr)); } }
@@ -196,15 +213,29 @@
 
   <!-- 탭 -->
   <ul class="nav nav-tabs sim-tabs mb-3" id="sim-tabs">
-    <li class="nav-item"><button type="button" class="nav-link active" data-tab="tab-pipeline">1. 파이프라인 제어 &amp; 검증</button></li>
-    <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-env">2. 환경 &amp; 디렉터리 설정</button></li>
+    <li class="nav-item"><button type="button" class="nav-link active" data-tab="tab-env">1. 환경 &amp; 디렉터리 설정</button></li>
+    <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-pipeline">2. 파이프라인 제어 &amp; 검증</button></li>
     <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-fault">3. 장애 &amp; 재처리 시나리오 <span class="hint" id="adv-sum"></span></button></li>
     <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-perf">4. 성능 테스트</button></li>
   </ul>
 
   <div id="tab-panes">
 
-  <div class="tabp active" id="tab-pipeline">
+  <div class="tabp active" id="tab-env">
+  <!-- 시스템 아키텍처 및 데이터 흐름 개요 -->
+  <div class="acc mb-3" id="arch-acc">
+    <div class="acc-head" data-acc="arch-acc">
+      <span class="grow small"><b>시스템 아키텍처 및 데이터 흐름 개요</b>
+        <span class="text-secondary">— 원본 음성이 최종 STT 결과가 되기까지 거치는 5단계와 실제 폴더</span></span>
+      <button class="acc-tgl" type="button">&#9660;</button>
+    </div>
+    <div class="acc-body"><div class="acc-inner"><div class="pad">
+      <div class="flow" id="arch-flow"></div>
+      <div class="hint mt-2">경로는 아래 <b>디렉터리</b> 의 <b>현재 설정값</b>을 그대로 보여 줍니다 — ROOT_DIR 을 바꾸면 이 그림도 같이 바뀝니다.
+        접견(<span class="text-primary fw-semibold">MEET</span>)과 전화(<span style="color:#6f42c1" class="fw-semibold">PHONE</span>)는 &#9313; 까지 경로가 다릅니다 — 전화는 XVARM 브로커를 타지 않습니다.</div>
+    </div></div></div>
+  </div>
+
   <!-- ① 모드 전환 -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
@@ -218,65 +249,6 @@
     </div>
   </div>
 
-  <!-- ② 제어 -->
-  <div class="card shadow-sm mb-3">
-    <div class="card-header bg-white py-2"><strong>② 제어</strong></div>
-    <div class="card-body py-2" id="controls">
-      <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 7·전화 7 = 14건(트랙별 일배치 5 · 10분 주기 2)</div>
-      <div class="d-flex flex-wrap gap-2 mb-2">
-        <button class="btn btn-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
-        <button class="btn btn-primary btn-sm" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
-        <button class="btn btn-outline-primary btn-sm" id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
-        <button class="btn btn-sm" id="btn-phone" style="color:#6f42c1;border-color:#6f42c1;background:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
-      </div>
-      <div class="d-flex flex-wrap gap-2 mb-2">
-        <button class="btn btn-outline-secondary btn-sm" id="btn-targets">처리 대상 미리보기</button>
-        <button class="btn btn-outline-secondary btn-sm" id="btn-files">수신 파일 확인</button>
-        <button class="btn btn-outline-secondary btn-sm" id="btn-outputs">STT 출력 확인 (최근 배치)</button>
-      </div>
-
-      <div id="sim-box" class="mb-2"></div>
-      <div class="hint mt-2">같은 배치를 <b>두 번</b> 실행하면 두 번째는 <code>건너뜀</code>으로 잡힙니다 — 주기배치 창이 겹쳐도 같은 음성을 다시 처리하지 않습니다.</div>
-    </div>
-  </div>
-
-  <!-- ③ 결과 -->
-  <div class="card shadow-sm mb-3">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
-      <strong>③ 최근 배치 결과</strong>
-      <span class="small text-secondary font-monospace" id="last-exec">—</span>
-    </div>
-    <div class="card-body py-2">
-      <div class="row row-cols-2 row-cols-md-5 g-0 mb-2" id="stats"></div>
-      <div id="result-acc-wrap">
-        <div class="hint">아직 실행한 배치가 없습니다. ② 의 배치 버튼을 누르면 호출한 API 와 응답이 여기에 요약 바로 남습니다.</div>
-      </div>
-      <div class="mt-2" id="files-acc-wrap"></div>
-    </div>
-  </div>
-
-  <!-- 대상 미리보기 -->
-  <div class="card shadow-sm mb-3 d-none" id="targets-card">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
-      <strong>처리 대상</strong>
-      <button class="btn-close btn-sm" id="btn-close-targets" aria-label="닫기"></button>
-    </div>
-    <div class="card-body p-0">
-      <div class="table-responsive" style="max-height:300px">
-        <table class="table table-sm table-hover mb-0 tgt-table">
-          <thead class="table-light sticky-top">
-            <tr><th>종류</th><th>키</th><th>파일명</th><th>발생 시각</th>
-                <th class="text-center">암호화</th><th class="text-center">기존 STT</th><th class="text-center">처리됨</th></tr>
-          </thead>
-          <tbody id="targets-body"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  </div>
-
-  <div class="tabp" id="tab-env">
   <!-- 서브헤더: 디렉터리 경로 (콤팩트) -->
   <div class="subhead mb-3 acc" id="dirs-acc">
     <div class="d-flex align-items-center flex-wrap gap-2">
@@ -325,6 +297,65 @@
       <div class="mt-2" id="probe-line"></div>
     </div>
   </div>
+  </div>
+
+  <div class="tabp" id="tab-pipeline">
+  <!-- ② 제어 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white py-2"><strong>② 제어</strong></div>
+    <div class="card-body py-2" id="controls">
+      <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 7·전화 7 = 14건(트랙별 일배치 5 · 10분 주기 2)</div>
+      <div class="d-flex flex-wrap gap-2 mb-2">
+        <button class="btn btn-primary btn-sm" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
+        <button class="btn btn-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
+        <button class="btn btn-outline-primary btn-sm" id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
+        <button class="btn btn-sm" id="btn-phone" style="color:#6f42c1;border-color:#6f42c1;background:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
+      </div>
+      <div class="d-flex flex-wrap gap-2 mb-2">
+        <button class="btn btn-outline-secondary btn-sm" id="btn-targets">처리 대상 미리보기</button>
+        <button class="btn btn-outline-secondary btn-sm" id="btn-files">수신 파일 확인</button>
+        <button class="btn btn-outline-secondary btn-sm" id="btn-outputs">STT 출력 확인 (최근 배치)</button>
+      </div>
+
+      <div id="sim-box" class="mb-2"></div>
+      <div class="hint mt-2">같은 배치를 <b>두 번</b> 실행하면 두 번째는 <code>건너뜀</code>으로 잡힙니다 — 주기배치 창이 겹쳐도 같은 음성을 다시 처리하지 않습니다.</div>
+    </div>
+  </div>
+
+  <!-- ③ 결과 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+      <strong>③ 최근 배치 결과</strong>
+      <span class="small text-secondary font-monospace" id="last-exec">—</span>
+    </div>
+    <div class="card-body py-2">
+      <div class="row row-cols-2 row-cols-md-5 g-0 mb-2" id="stats"></div>
+      <div id="result-acc-wrap">
+        <div class="hint">아직 실행한 배치가 없습니다. ② 의 배치 버튼을 누르면 호출한 API 와 응답이 여기에 요약 바로 남습니다.</div>
+      </div>
+      <div class="mt-2" id="files-acc-wrap"></div>
+    </div>
+  </div>
+
+  <!-- 대상 미리보기 -->
+  <div class="card shadow-sm mb-3 d-none" id="targets-card">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
+      <strong>처리 대상</strong>
+      <button class="btn-close btn-sm" id="btn-close-targets" aria-label="닫기"></button>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive" style="max-height:300px">
+        <table class="table table-sm table-hover mb-0 tgt-table">
+          <thead class="table-light sticky-top">
+            <tr><th>종류</th><th>키</th><th>파일명</th><th>발생 시각</th>
+                <th class="text-center">암호화</th><th class="text-center">기존 STT</th><th class="text-center">처리됨</th></tr>
+          </thead>
+          <tbody id="targets-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   </div>
 
   <div class="tabp" id="tab-fault">
@@ -529,6 +560,18 @@ function logRaw(html) {
   line.innerHTML = `<span class="t">[${t}]</span> ${html}`;
   logAppend(line);
 }
+// 시딩에 쓴 SQL 을 콘솔에 그대로 뿌린다 — DBeaver 에 붙여 넣어 대조할 수 있게.
+// 서버가 보내는 문장은 값이 끼워진 '표시용 사본'이다(실행은 바인딩으로 한다).
+function logSqls(sim) {
+  const sqls = (sim || {}).sqls || [];
+  if (!sqls.length) return;
+  const total = sim.sqlTotal ?? sqls.length;
+  log(`  └ 시딩 SQL ${total}문장 — 대상: ${sim.db || ''}`, 'ok');
+  sqls.forEach(q => logRaw(`<span class="sqlq">${esc(q)}</span>`));
+  if (sim.sqlTruncated) {
+    log(`  └ … 이하 ${total - sqls.length}문장은 같은 형태라 생략했습니다 (표시 상한 ${sqls.length})`, 'wr');
+  }
+}
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -544,12 +587,9 @@ function showTab(id, remember = true) {
   document.querySelectorAll('#sim-tabs .nav-link').forEach(b => b.classList.toggle('active', b === btn));
   document.querySelectorAll('#tab-panes .tabp').forEach(p => p.classList.toggle('active', p.id === id));
   if (remember) { try { localStorage.setItem(TAB_KEY, id); } catch (e) {} }
-  // 환경 탭은 경로를 보러 오는 곳이라 디렉터리 편집칸을 처음 한 번 펼쳐 준다.
-  if (id === 'tab-env' && !showTab._envOpened) {
-    showTab._envOpened = true;
-    accToggle('dirs-acc', true);
-    const t = $('btn-dir-toggle'); if (t) t.textContent = '접기 ▴';
-  }
+  // 환경 탭에서는 하단 로그를 감춘다 — 여기서 하는 일(경로 대조·연결 확인)의 결과는
+  // 카드 안에 그대로 남으므로 콘솔이 화면을 먹을 이유가 없다. 다른 탭으로 옮기면 다시 나온다.
+  $('log-card').classList.toggle('d-none', id === 'tab-env');
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('#sim-tabs [data-tab]');
@@ -845,8 +885,33 @@ $('btn-db-probe').onclick = () => probeDb(false);
 // ── 서브헤더: 디렉터리 ──────────────────────────────────────────────────
 let DIRS = null;
 function shortPath(p) { return (p||'').length > 34 ? '…' + p.slice(-33) : (p||''); }
+// 아키텍처 흐름도 — 5단계. 경로는 하드코딩하지 않고 지금 설정된 디렉터리를 그대로 쓴다.
+// ROOT_DIR 을 바꾸면 그림도 같이 바뀌어야 "그림과 실제가 다르다" 는 사고가 안 난다.
+function renderArchFlow(d) {
+  const box = $('arch-flow'); if (!box || !d) return;
+  const pair = (meet, phone) => `<span class="k">접견</span> ${esc(meet||'—')}<br><span class="k">전화</span> ${esc(phone||'—')}`;
+  const steps = [
+    ['①', 'XVARM 원본 음성', esc(d.xvarmOriginal||'—'), '암호화된 음성 파일', ''],
+    ['②', 'XVARM 브로커 추출 · ESB 수신', pair(d.receiveMeet, d.receivePhone),
+     '수집기가 수신한 원본 오디오 파일 — 전화는 브로커를 타지 않고 ESB 전화 프로바이더가 직접 떨굽니다', ''],
+    ['③', '복호화 작업', esc(d.work||'—'), 'R플레이어 / ARIA 모듈로 복호화된 순수 오디오 파일', ''],
+    ['④', '수집기 내부 STT 엔진 호출', '(내부 처리 — 디스크에 남지 않습니다)',
+     '복호화된 오디오를 텍스트로 변환 · 보라미에 기존 STT 가 있으면 이 단계를 건너뜁니다', 'internal'],
+    ['⑤', '최종 결과 저장', pair((d.outputMeet||'') + '/{execId}', (d.outputPhone||'') + '/{execId}'),
+     '최종 변환된 .txt / .json 결과 파일', ''],
+  ];
+  box.innerHTML = steps.map(([no, ttl, pth, out, cls], i) => `
+    <div class="flow-node ${cls}">
+      <div class="ttl"><span class="no">${no}</span>${esc(ttl)}</div>
+      <div class="pth">${pth}</div>
+      <div class="out">↳ ${esc(out)}</div>
+    </div>
+    ${i < steps.length - 1 ? '<div class="flow-link"><span class="bar"></span><span class="cap">▼</span></div>' : ''}`).join('');
+}
+
 function renderDirs(d) {
   DIRS = d;
+  renderArchFlow(d);
   if (Array.isArray(d.labels) && d.labels.length) DIR_KEYS = d.labels;
   const cfg = d.configured || {};
   $('dir-paths').innerHTML = DIR_KEYS.map(([k, label]) => {
@@ -1272,7 +1337,10 @@ function renderSimResult(title, d, isSeed) {
       </div></div></div>
     </div>`;
 }
+// 상단 툴바 버튼은 어느 탭에서나 눌린다. 그런데 결과 카드(#sim-box)도 SQL 로그도 파이프라인 탭에 있어
+// 환경 탭에서 누르면 아무 일도 안 일어난 것처럼 보인다 — 결과가 있는 곳으로 데려간다.
 $('btn-reset').onclick = async () => {
+  showTab('tab-pipeline');
   const info = await callFull('POST', '/api/v1/mock/sim-data', '시뮬레이션 데이터 생성 (Clean & Seed)');
   const d = info.ok ? info.body : null;
   if (!d) return;
@@ -1281,6 +1349,7 @@ $('btn-reset').onclick = async () => {
   const sim = d.sim || {};
   log(`  └ ${sim.db} — ${sim.ensured || ''}`, 'ok');
   log(`  └ DB 메타 ${Object.entries(sim.rows||{}).map(([k,v]) => `${k} ${v}`).join(' · ')} · 더미 파일 ${(sim.files||[]).length}개 (${Object.values(sim.dirs||{}).join(' · ')})`, 'ok');
+  logSqls(sim);
   log(`  └ ${d.message}`, 'ok');
   renderSimResult('시뮬레이션 데이터 생성', d, true);
   $('targets-card').classList.add('d-none');
@@ -1322,8 +1391,11 @@ $('btn-files').onclick = async () => {
   log(`  └ 접견 ${m}개 · 전화 ${p}개`, m+p>0 ? 'ok' : 'wr');
 };
 
+// 상단 툴바 버튼은 어느 탭에서나 눌린다. 그런데 결과 카드(#sim-box)도 SQL 로그도 파이프라인 탭에 있어
+// 환경 탭에서 누르면 아무 일도 안 일어난 것처럼 보인다 — 결과가 있는 곳으로 데려간다.
 $('btn-test-clear').onclick = async () => {
   if (!confirm('테스트 이력(EXEC_ID 작업코드 TST 의 로그·STT 출력)과 시뮬레이션 데이터(DB 메타 SIM 행·XVARM 원본 더미 파일·멱등 표식)를 모두 지웁니다. 운영 배치(VOC·STR·EXT)는 지워지지 않습니다. 계속할까요?')) return;
+  showTab('tab-pipeline');
   const info = await callFull('DELETE', '/api/v1/mock/test-data', '시뮬레이션 데이터 초기화 (테스트 이력 + DB 메타 + 더미 파일)');
   const d = info.ok ? info.body : null;
   if (!d) return;
@@ -1334,6 +1406,7 @@ $('btn-test-clear').onclick = async () => {
   log(`  └ 로컬 — 표식 ${l.idempotencyMarkers} · 접견파일 ${l.meetFiles} · 전화파일 ${l.phoneFiles} · 작업파일 ${l.workFiles} · STT 출력 폴더 ${l.sttOutputDirs}`, 'ok');
   const sim = d.sim || {};
   log(`  └ DB 메타 삭제 — ${Object.entries(sim.cleaned||{}).map(([k,v]) => `${k} ${v}`).join(' · ')} · 더미 파일 접견 ${sim.filesDeleted?.MEET ?? 0} · 전화 ${sim.filesDeleted?.PHONE ?? 0}`, 'ok');
+  logSqls(sim);
   log(`  └ ${d.message}`, 'ok');
   renderSimResult('시뮬레이션 데이터 초기화', d, false);
   $('stats').innerHTML = ''; $('last-exec').textContent = '—';
@@ -1365,7 +1438,7 @@ $('btn-log-tall').onclick = (e) => {
 (function restoreUi() {
   let tab = null, logc = null;
   try { tab = localStorage.getItem(TAB_KEY); logc = localStorage.getItem('vcsim.log'); } catch (e) {}
-  showTab(tab && $(tab) ? tab : 'tab-pipeline', false);
+  showTab(tab && $(tab) ? tab : 'tab-env', false);
   if (logc === '1') toggleLog(true);
 })();
 

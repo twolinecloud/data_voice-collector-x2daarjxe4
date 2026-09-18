@@ -31,7 +31,7 @@ log-collector:
 voice:
   # ── 4개 스위치 — 준비되는 순서대로 환경변수로 전환 ──────────────────────
   source:
-    mode: ${VOICE_SOURCE_MODE:MOCK}          # MOCK(파드 안 H2) → DIRECT_JDBC(개발계 borami-db) → ESB_HTTP2DB (Q2·Q15 확정 후)
+    mode: ${VOICE_SOURCE_MODE:DIRECT_JDBC}          # MOCK(파드 안 H2) → DIRECT_JDBC(개발계 borami-db) → ESB_HTTP2DB (Q2·Q15 확정 후)
     # 개발계 DB — 같은 네임스페이스(data-pipeline)의 borami-db 서비스. 계정은 차트가 Backing secret 에서
     # POSTGRES_USERNAME·POSTGRES_PASSWORD 로 넣어 준다(DB_USER/DB_PASSWORD 를 명시하면 그게 이긴다).
     direct-db:
