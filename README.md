@@ -123,9 +123,10 @@ DB 파일명과 1:1 인 **경량 더미 음성 파일**(수십 byte)을 한 번�
 | `MOCK_DEV` (기본) | XVARM DB MOCK (개발계) | 개발계 DB 에 `sm.tb_smsm_cmfi_bs` · `xvarm.asyscontentelement` 를 **자동 생성**(`CREATE … IF NOT EXISTS`, `src/main/resources/sql/xvarm_mock_tables_postgres.sql`)하고 시뮬레이션 데이터를 시딩해 4단 조인이 돈다. 스키마는 `voice.source.xvarm-mock.schema-smsm/schema-xvarm` |
 | `REAL` | 실 XVARM DB | `voice.source.schema.smsm/xvarm` 의 실 테이블을 직접 조인한다 — 없으면 조회가 사유와 함께 실패한다 |
 
-DBeaver 에서 손으로 만들려면 [`ref/borami_missing_tables.sql`](ref/borami_missing_tables.sql)(DDL + 시딩 + 확인 쿼리 + 정리).
+DBeaver 에서 손으로 만들려면 [`docs/borami_missing_tables.sql`](docs/borami_missing_tables.sql)(DDL + 시딩 + 확인 쿼리 + 정리).
 컬럼 정의 근거는 `ref/c9uviulsfMXZ-비정형-140926-020258.pdf`(테이블 정의서, TB_SMSM_CMFI_BS 17컬럼)이고,
 `ref/(발췌)교정청_표준인터페이스_설계서.pdf` 는 ESB 연계 규약이라 테이블 정의는 없다. XVARM 테이블은 솔루션 소유라 조인 키(ELEMENTID·FILEKEY)만 둔다.
+> `ref/` 는 출처 자료를 두는 **로컬 폴더로 형상관리 대상이 아니다**(`.gitignore` 의 `/ref`). 공유하는 산출물은 `docs/` 에 있다.
 
 > **브로커 출력 경로가 어긋나면** 브로커는 "추출 완료" 를 돌려주지만 우리 수신 폴더는 비어 있다.
 > 브로커 응답의 `filePath`(절대경로)에 파일이 **실제로 있는데** 수신 폴더 밖이면 5분을 기다리지 않고
@@ -250,7 +251,7 @@ H2 에 보라미 Mock 스키마가 올라간다. `MOCK (로컬 H2)` 모드가 �
 녹음 안 된 통화 — 대상이 되지 않아 배치 시간에는 영향이 없다). 유효 대상 14건은 시뮬레이션 데이터 생성이 만든다.
 
 **DIRECT_JDBC 원본 쿼리**(접견 4단 조인 · 전화 조인 · 전화 지름길)를 스키마·테이블명과 값을 풀어
-DBeaver 에서 바로 실행할 수 있게 [`ref/borami_direct_jdbc_queries.sql`](ref/borami_direct_jdbc_queries.sql) 에 두었다.
+DBeaver 에서 바로 실행할 수 있게 [`docs/borami_direct_jdbc_queries.sql`](docs/borami_direct_jdbc_queries.sql) 에 두었다.
 
 ### 개발계 borami-db 조회
 
