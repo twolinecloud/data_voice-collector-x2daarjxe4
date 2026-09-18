@@ -517,22 +517,34 @@ let DIR_KEYS = [
 //   ?api=http://host:port 로 강제할 수 있고, 아니면 '' → '/voice' 순으로 살아 있는 쪽을 찾는다.
 let API_BASE = new URLSearchParams(location.search).get('api') || '';
 let API_DOWN = false;   // 두 후보 모두 응답이 없으면 true — 화면이 "왜 비어 있는지" 를 말해 준다
-// Swagger 주소는 <b>API base 를 그대로 따라간다</b> — 호스트명(localhost/도메인)으로 분기하지 않는다.
-// 어느 호스트인지가 아니라 "수집기 API 가 어디에 있는가" 가 답이고, 그건 detectApiBase 가 이미 푼 문제다.
-//   · 수집기가 직접 서빙(로컬 8085 · kubectl port-forward) → API_BASE ''       → <origin>/swagger-ui/index.html
-//   · admin-fe(nginx) 가 서빙                              → API_BASE '/voice' → <origin>/voice/swagger-ui/index.html
-//   · ?api=http://host:port 로 강제                        → 그 주소의 /swagger-ui/index.html
-// /swagger-ui.html 대신 /swagger-ui/index.html 로 바로 간다. 앞의 것은 302 로 뒤의 것을 가리키는데,
-// 프록시를 한 번 더 타는 데다 리다이렉트 Location 에서 /voice 프리픽스가 떨어져 엉뚱한 Swagger 로 새는 일이 있다.
+// ── Swagger 링크 — 접속 호스트로 분기한다 ───────────────────────────────
+//   1) 로컬(localhost·127.0.0.1) : 지금 이 페이지를 서빙한 수집기. 기본 8085 이지만 포트를
+//      고정하지 않고 API base(?api= 로 준 절대주소) → location.origin 순으로 따라간다.
+//      포트를 박아 두면 18085 로 검증 기동했을 때 8085 를 가리키는 거짓 링크가 된다.
+//   2) 배포(kcais-admin…)       : admin-fe(nginx) 프록시(/voice/swagger-ui/…)로 보내지 않고
+//      포트포워딩 전용 주소로 고정한다. 아래 SWAGGER_PORTFORWARD 를 바꾸면 그대로 반영된다.
+//      → kubectl -n data-pipeline port-forward svc/voice-collector-x2daarjxe4 18085:8080
+//      로컬 8085 는 IntelliJ 수집기가 쓰고 있어 포워딩 포트를 18085 로 둔다.
+// /swagger-ui.html 은 302 로 /swagger-ui/index.html 을 가리키므로 처음부터 그리로 간다.
+const SWAGGER_PORTFORWARD = 'http://localhost:18085/swagger-ui/index.html';
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0'];
+function isLocalHost(h) { return LOCAL_HOSTS.includes(h) || h.endsWith('.localhost'); }
 function setSwaggerLink() {
   const a = $('lnk-swagger'); if (!a) return;
-  const base = (API_BASE || '').replace(/\/+$/, '');
-  a.href = base + '/swagger-ui/index.html';
-  a.title = 'OpenAPI 문서 — ' + a.href
-    + (API_BASE === '/voice'
-        ? '\nadmin-fe(nginx) 프록시 경유입니다. nginx 의 /voice/ 블록이 X-Forwarded-Prefix: /voice 를 넘겨야 열립니다.'
-        : '');
+  if (isLocalHost(location.hostname)) {
+    let origin = location.origin;
+    // ?api=http://host:port 로 백엔드를 따로 지정했으면 Swagger 도 그쪽이다
+    try { if (/^https?:\/\//i.test(API_BASE)) origin = new URL(API_BASE).origin; } catch (e) { /* 형식이 아니면 현재 오리진 */ }
+    a.href = origin + '/swagger-ui/index.html';
+    a.title = 'OpenAPI 문서 (로컬 수집기) — ' + a.href;
+  } else {
+    a.href = SWAGGER_PORTFORWARD;
+    a.title = 'OpenAPI 문서 — ' + SWAGGER_PORTFORWARD
+      + '\n배포 화면에서는 nginx 프록시를 타지 않고 포트포워딩으로만 엽니다.'
+      + '\nkubectl -n data-pipeline port-forward svc/voice-collector-x2daarjxe4 18085:8080';
+  }
 }
+setSwaggerLink();   // API 감지를 기다리지 않는다 — 감지가 실패해도 버튼은 맞는 곳을 가리켜야 한다
 
 async function detectApiBase() {
   if (new URLSearchParams(location.search).get('api')) { setSwaggerLink(); return API_BASE; }
