@@ -44,6 +44,7 @@ public class VoiceBatchController {
 
     private final VoiceCollectService service;
     private final VoiceBatchScheduler scheduler;
+    private final egovframework.voice.collector.batch.BatchProgress progress;
     private final IdempotencyGuard idempotency;
     private final VoiceProperties props;
     private final VoiceDirState dirs;
@@ -89,6 +90,21 @@ public class VoiceBatchController {
                                      @RequestParam(defaultValue = "false") boolean test) {
         return service.run(BatchWindow.periodic(LocalDateTime.now(), props.batch().periodicLagMin()),
                 kinds, "MANUAL", test);
+    }
+
+    @Operation(summary = "배치 진행률",
+            description = """
+                    지금 도는 배치가 **몇 건 중 몇 번째**인지. 화면 진행률 바가 짧은 주기로 폴링합니다.
+
+                    배치 REST 는 동기라 전건이 끝나야 응답이 옵니다. 그동안 무엇을 하고 있는지 보려면
+                    이 엔드포인트를 따로 읽어야 합니다. 배치가 끝나도 **마지막 상태를 지우지 않습니다** —
+                    화면이 100% 를 한 번은 봐야 하고, 끝난 뒤에도 직전 배치 요약을 읽을 수 있어야 합니다.
+
+                    `running=false` 이고 `total=0` 이면 이 프로세스에서 아직 배치가 돈 적이 없습니다.
+                    """)
+    @GetMapping("/batches/progress")
+    public Map<String, Object> progress() {
+        return progress.snapshot();
     }
 
     @Operation(summary = "구간 지정 실행 (재처리)",

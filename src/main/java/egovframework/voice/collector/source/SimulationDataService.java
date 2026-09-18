@@ -73,11 +73,6 @@ public class SimulationDataService {
     public static final int PHONE_WITH_SOURCE_STT = 3;
     /** 이 번호의 접견 건은 암호화되지 않은 파일 — 복호화가 통과(Noop)하는지 본다. */
     public static final int MEET_UNENCRYPTED = 2;
-    /**
-     * 화면에 돌려줄 SQL 문장 수 상한. 대용량 시딩은 수천 문장이 되는데 그걸 전부 JSON 에 실으면
-     * 응답이 메가 단위로 붓고 로그 콘솔이 잠긴다. 넘치면 앞에서부터 이만큼만 싣고 총 건수를 따로 알린다.
-     */
-    public static final int SQL_TRACE_LIMIT = 150;
 
     private static final String USR = "simadm";
     /** 특이수용자 코드 — 001 만 마약(1) 이라 코드 필터 테스트의 기준이 된다. */
@@ -408,34 +403,85 @@ public class SimulationDataService {
      * 값만 끼워 넣은 사본을 만든다. 그래서 문자열 값은 따옴표를 겹쳐 이스케이프한다 — SQL 주입 경로가
      * 아니라 <b>보이는 문장이 실제로 실행된 것과 달라지지 않게</b> 하려는 것이다.</p>
      *
-     * <p>{@link #SQL_TRACE_LIMIT} 를 넘으면 더 담지 않고 총 건수만 센다.</p>
+     * <p>같은 형태의 문장은 <b>테이블 종류별로 한 번만</b> 싣는다 — 14건이면 INSERT 만 40문장이 되는데
+     * 전부 실으면 응답이 붓고 콘솔이 잠긴다. 생략한 건수는 요약 주석으로 알린다.</p>
      */
     private static final class SqlTrace {
 
         private static final java.time.format.DateTimeFormatter TS_FMT =
                 java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-        private final List<String> lines = new ArrayList<>();
+        /** 같은 (동사, 테이블) 로 묶은 한 덩어리 — 대표 문장 1건과 전체 건수. */
+        private static final class Group {
+            final String sample;
+            int count;
+            String note;
+
+            Group(String sample) {
+                this.sample = sample;
+            }
+        }
+
+        /** 삽입 순서를 지키는 묶음 — 키는 "INSERT INTO im.TB_IMSC_PTPR_DT" 처럼 동사+테이블. */
+        private final Map<String, Group> groups = new LinkedHashMap<>();
         private int total;
 
         void add(String sql, Object... args) {
             total++;
-            if (lines.size() < SQL_TRACE_LIMIT) {
-                lines.add(render(sql, args));
-            }
+            String one = sql.replaceAll("\s+", " ").trim();
+            Group g = groups.computeIfAbsent(key(one), k -> new Group(render(one, args)));
+            g.count++;
         }
 
-        /** 앞 문장에 붙는 한 줄 메모(실패 사유 등). 총 건수에는 넣지 않는다. */
+        /** 마지막 묶음에 붙는 메모(실패 사유 등). 총 건수에는 넣지 않는다. */
         void mark(String note) {
-            if (lines.size() < SQL_TRACE_LIMIT) {
-                lines.add(note);
-            }
+            groups.values().stream().reduce((a, b) -> b).ifPresent(g -> g.note = note);
         }
 
+        /**
+         * 화면에 뿌릴 줄을 만든다 — <b>테이블 종류별 대표 1건</b> 과 요약 주석.
+         *
+         * <p>14건이면 INSERT 만 네 테이블에 흩어져 40문장이 나온다. 전부 찍으면 콘솔이 잠기고
+         * 정작 "어느 테이블에 무엇이 들어갔나" 가 안 읽힌다. 형태가 같은 문장은 한 번만 보이면 된다.</p>
+         */
         void into(Map<String, Object> out) {
+            List<String> lines = new ArrayList<>();
+            for (Group g : groups.values()) {
+                lines.add(g.sample);
+                if (g.count > 1) {
+                    lines.add("-- (해당 테이블 %d건 중 1건 표시 / %d건 생략)".formatted(g.count, g.count - 1));
+                }
+                if (g.note != null) {
+                    lines.add(g.note);
+                }
+            }
             out.put("sqls", List.copyOf(lines));
             out.put("sqlTotal", total);
-            out.put("sqlTruncated", total > lines.size());
+            out.put("sqlGroups", groups.size());
+            out.put("sqlTruncated", total > groups.size());
+        }
+
+        /**
+         * 묶음 키 — 동사와 테이블명까지만 자른다.
+         * {@code INSERT INTO x (…) VALUES (…)} → {@code INSERT INTO x},
+         * {@code DELETE FROM x WHERE …} → {@code DELETE FROM x}. 나머지(DDL 등)는 문장 전체가 키다.
+         */
+        private static String key(String one) {
+            for (String verb : new String[] {"INSERT INTO ", "DELETE FROM ", "UPDATE "}) {
+                if (one.regionMatches(true, 0, verb, 0, verb.length())) {
+                    int from = verb.length();
+                    int end = one.length();
+                    for (int i = from; i < end; i++) {
+                        char c = one.charAt(i);
+                        if (c == ' ' || c == '(') {
+                            end = i;
+                            break;
+                        }
+                    }
+                    return one.substring(0, verb.length()) + one.substring(from, end);
+                }
+            }
+            return one;
         }
 
         private static String render(String sql, Object... args) {

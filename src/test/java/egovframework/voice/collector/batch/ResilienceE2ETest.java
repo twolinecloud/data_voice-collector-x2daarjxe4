@@ -256,16 +256,17 @@ class ResilienceE2ETest {
     }
 
     @Test
-    @DisplayName("T2 단계 요약 — STT 가 전부 실패하면 COLLECT 는 SUCCESS, ANALYZE 는 PARTIAL(기존 STT 1건만 통과)")
+    @DisplayName("T2 단계 요약 — STT 가 전부 실패하면 COLLECT 는 SUCCESS, ANALYZE 는 PARTIAL, SEND 는 통과분만")
     void stepSummaryReflectsWhereItFailed() {
         faultInjector.configure(true, 100, 0, 0L);
 
         VoiceBatchResult r = service.run(wide(), null, "TEST");
 
         assertThat(r.steps()).extracting(VoiceBatchResult.StepLog::stepTypeCd)
-                .containsExactly("COLLECT", "ANALYZE");
+                .containsExactly("COLLECT", "ANALYZE", "SEND");
         VoiceBatchResult.StepLog collect = r.steps().get(0);
         VoiceBatchResult.StepLog analyze = r.steps().get(1);
+        VoiceBatchResult.StepLog send = r.steps().get(2);
         assertThat(collect.stepStsCd()).isEqualTo("SUCCESS");
         assertThat(collect.inCnt()).isEqualTo(TOTAL);
         assertThat(collect.outCnt()).isEqualTo(TOTAL);
@@ -273,6 +274,11 @@ class ResilienceE2ETest {
         assertThat(analyze.outCnt()).isEqualTo(SOURCE_STT);
         assertThat(analyze.errCnt()).isEqualTo(STT_DEPENDENT);
         assertThat(analyze.stepStsCd()).isEqualTo("PARTIAL");
+        // STT 를 통과한 것만 저장 구간으로 넘어간다 — 저장 자체는 깨지지 않았으므로 SUCCESS
+        assertThat(send.inCnt()).isEqualTo(SOURCE_STT);
+        assertThat(send.outCnt()).isEqualTo(SOURCE_STT);
+        assertThat(send.errCnt()).isZero();
+        assertThat(send.stepStsCd()).isEqualTo("SUCCESS");
         assertThat(r.outcomes()).filteredOn(o -> o.status() == ProcStatus.FAIL)
                 .allSatisfy(o -> assertThat(o.failedStep()).isEqualTo(FileProcOutcome.STEP_ANALYZE));
         // 컬렉터 미연동(log-collector.enabled=false) — 요약은 만들되 적재는 안 된 것으로 표시

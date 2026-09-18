@@ -150,6 +150,21 @@
   .sim-files { font-family:var(--mono); font-size:.72rem; columns:2; column-gap:1.5rem; }
   @media (max-width: 768px) { .sim-files { columns:1; } }
 
+  /* ── 배치 진행률 ────────────────────────────────────────────────────── */
+  #prog-wrap { border:1px solid #dee2e6; border-radius:.45rem; padding:.5rem .7rem; background:#fbfcfd; }
+  #prog-bar-outer { height:.85rem; background:#e9ecef; border-radius:.45rem; overflow:hidden; }
+  #prog-bar { height:100%; width:0; border-radius:.45rem; background:linear-gradient(90deg,#0d6efd,#4dabf7);
+              transition:width .25s ease; }
+  #prog-wrap.done #prog-bar { background:linear-gradient(90deg,#198754,#51cf66); }
+  #prog-wrap.has-fail #prog-bar { background:linear-gradient(90deg,#dc3545,#ff8787); }
+  #prog-head { display:flex; align-items:baseline; gap:.5rem; flex-wrap:wrap; font-size:.8rem; margin-bottom:.35rem; }
+  #prog-head .pct { font-weight:700; color:#0d6efd; font-family:var(--mono); }
+  #prog-wrap.done #prog-head .pct { color:#198754; }
+  #prog-cur { font-family:var(--mono); font-size:.75rem; color:#495057; margin-top:.35rem;
+              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #prog-cur .tag { font-weight:700; }
+  #prog-cur .tag.MEET { color:#0d6efd; } #prog-cur .tag.PHONE { color:#6f42c1; }
+
   /* ── 결과 알림 팝업 ─────────────────────────────────────────────────── */
   .pop-backdrop { position:fixed; inset:0; background:rgba(33,37,41,.45); z-index:1080;
                   display:flex; align-items:center; justify-content:center; padding:1rem; }
@@ -340,6 +355,18 @@
         <button class="btn btn-outline-secondary btn-sm" id="btn-targets">처리 대상 미리보기</button>
         <button class="btn btn-outline-secondary btn-sm" id="btn-files">수신 파일 확인</button>
         <button class="btn btn-outline-secondary btn-sm" id="btn-outputs">STT 출력 확인 (최근 배치)</button>
+      </div>
+
+      <!-- 진행률 — 배치가 도는 동안만 보인다. 배치 REST 는 동기라 서버 진행 상태를 따로 폴링한다. -->
+      <div id="prog-wrap" class="mb-2 d-none">
+        <div id="prog-head">
+          <strong>진행률</strong>
+          <span class="pct" id="prog-pct">0%</span>
+          <span class="font-monospace" id="prog-cnt">0/0건</span>
+          <span class="hint ms-auto" id="prog-sum"></span>
+        </div>
+        <div id="prog-bar-outer"><div id="prog-bar"></div></div>
+        <div id="prog-cur">대기 중…</div>
       </div>
 
       <div id="sim-box" class="mb-2"></div>
@@ -695,13 +722,11 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // ── 탭 ──────────────────────────────────────────────────────────────────
 // 탭을 옮겨도 DOM 은 그대로 살아 있다(display 만 바뀐다). 화면 렌더는 전부 id 로
 // 꽂히므로, 지금 안 보이는 탭에 있는 카드도 loadStatus() 가 정상으로 채운다.
-const TAB_KEY = 'vcsim.tab';
-function showTab(id, remember = true) {
+function showTab(id) {
   const btn = document.querySelector(`#sim-tabs [data-tab="${id}"]`);
   if (!btn) return;
   document.querySelectorAll('#sim-tabs .nav-link').forEach(b => b.classList.toggle('active', b === btn));
   document.querySelectorAll('#tab-panes .tabp').forEach(p => p.classList.toggle('active', p.id === id));
-  if (remember) { try { localStorage.setItem(TAB_KEY, id); } catch (e) {} }
   // 환경 탭에서는 하단 로그를 감춘다 — 여기서 하는 일(경로 대조·연결 확인)의 결과는
   // 카드 안에 그대로 남으므로 콘솔이 화면을 먹을 이유가 없다. 다른 탭으로 옮기면 다시 나온다.
   $('log-card').classList.toggle('d-none', id === 'tab-env');
@@ -1199,6 +1224,59 @@ async function runBatch(path, label, kind, btnId) {
   try { return await runBatchInner(path, label, kind); }
   finally { setBatchRunning(btnId, false); }
 }
+// ── 배치 진행률 ────────────────────────────────────────────────────────
+// 배치 REST 는 동기다 — 한 번 호출하면 전건이 끝나야 응답이 온다. 그동안 무엇을 하고 있는지
+// 보여 주려면 서버의 진행 상태(GET /batches/progress)를 따로 읽는 수밖에 없다.
+const PROG_POLL_MS = 400;
+let PROG_TIMER = null;
+
+function renderProgress(p) {
+  const w = $('prog-wrap'); if (!w) return;
+  const total = p.total || 0, done = p.done || 0;
+  const pct = total > 0 ? Math.round(done * 100 / total) : (p.running ? 0 : 100);
+  $('prog-bar').style.width = pct + '%';
+  $('prog-pct').textContent = pct + '%';
+  $('prog-cnt').textContent = `${done}/${total}건`;
+  w.classList.toggle('has-fail', (p.fail || 0) > 0);
+  const parts = [];
+  if (p.success) parts.push(`성공 ${p.success}`);
+  if (p.fail) parts.push(`실패 ${p.fail}`);
+  if (p.skipped) parts.push(`건너뜀 ${p.skipped}`);
+  $('prog-sum').textContent = parts.join(' · ');
+  if (p.running && p.currentFile) {
+    $('prog-cur').innerHTML = `처리 중: <span class="tag ${esc(p.currentKind||'')}">${esc(p.currentKind||'')}</span> ${esc(p.currentFile)}`;
+  } else if (!p.running) {
+    $('prog-cur').textContent = total > 0
+      ? `완료 — ${total}건 처리 (${Math.round((p.elapsedMs||0)/100)/10}초)`
+      : '처리할 대상이 없습니다';
+  }
+}
+
+function progStart() {
+  const w = $('prog-wrap'); if (!w) return;
+  w.classList.remove('d-none', 'done', 'has-fail');
+  $('prog-bar').style.width = '0%';
+  $('prog-pct').textContent = '0%';
+  $('prog-cnt').textContent = '0/0건';
+  $('prog-sum').textContent = '';
+  $('prog-cur').textContent = '대상을 조회하는 중…';
+  clearInterval(PROG_TIMER);
+  PROG_TIMER = setInterval(async () => {
+    // 조용히 읽는다 — 폴링이 로그 콘솔을 덮으면 정작 배치 로그가 안 보인다.
+    const p = await call('GET', '/api/v1/voice/batches/progress', '', true);
+    if (p) renderProgress(p);
+  }, PROG_POLL_MS);
+}
+
+/** 배치 응답이 온 뒤 — 마지막 한 장을 더 읽어 100% 를 확실히 보여 주고 멈춘다. */
+async function progStop() {
+  clearInterval(PROG_TIMER);
+  PROG_TIMER = null;
+  const p = await call('GET', '/api/v1/voice/batches/progress', '', true);
+  if (p) { renderProgress(Object.assign({}, p, { running: false })); }
+  $('prog-wrap').classList.add('done');
+}
+
 async function runBatchInner(path, label, kind, extraQuery) {
   const s = STATUS || await call('GET', '/api/v1/voice/status', '', true);
   if (s && s.tracks) {
@@ -1208,8 +1286,14 @@ async function runBatchInner(path, label, kind, extraQuery) {
   }
   // 시뮬레이터에서 돌리는 배치는 전부 시험이다 → EXEC_ID 가 ...TST... 로 채번된다.
   const url = `${path}?test=true` + (kind ? `&kinds=${kind}` : '') + (extraQuery ? '&' + extraQuery : '');
-  const info = await callFull('POST', url, label);
-  if (info.ok && info.body) renderResult(info, info.body, kind);
+  progStart();
+  let info;
+  try {
+    info = await callFull('POST', url, label);
+  } finally {
+    await progStop();
+  }
+  if (info && info.ok && info.body) renderResult(info, info.body, kind);
   await loadStatus(true);
   return info;
 }
@@ -1359,14 +1443,44 @@ async function rtStep3() {
   await loadStatus(true);
   return info.ok;
 }
-async function rtStep4() {
+/**
+ * ③ 복구 뒤 브로커가 실제로 받을 준비가 됐는지 확인될 때까지 기다린다.
+ *
+ * 고정 sleep 으로는 모자랄 때가 있다 — 주소만 바꿔 놓고 곧바로 ④ 를 돌리면 브로커가 아직
+ * 받지 못해 수신 파일 대기(20초)가 헛돈다. 프로브가 reachable·경로 일치를 말할 때 넘어간다.
+ */
+async function rtWaitBrokerReady(maxMs = 15000) {
+  const deadline = Date.now() + maxMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    const p = await call('GET', '/api/v1/voice/broker/probe', '', true);
+    last = p;
+    if (p && p.reachable && p.pathMatched) {
+      log('  └ 브로커 준비 확인 — 재처리 배치를 시작합니다', 'ok');
+      return true;
+    }
+    await sleep(700);
+  }
+  log(`  └ ⚠ 브로커가 준비되지 않았습니다 (${esc(last?.verdict || last?.error || '응답 없음')}) — 그대로 진행합니다`, 'wr');
+  return false;
+}
+
+async function rtStep4(forceManual) {
   rtMark(3, { running:true });
   let info;
-  if ($('rt-reproc').value === 'manual') {
+  if (forceManual || $('rt-reproc').value === 'manual') {
     const now = new Date();
     const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,19);
-    const from = new Date(now.getTime() - 2*24*3600*1000), to = new Date(now.getTime() + 24*3600*1000);
-    info = await runBatchInner('/api/v1/voice/batches/manual', '④ 재처리 배치 실행 — 접견 (구간 지정)', 'MEET', `from=${encodeURIComponent(iso(from))}&to=${encodeURIComponent(iso(to))}`);
+    // 자동 실행은 ② 가 실패시킨 주기 표본 2건만 정확히 겨냥한다 — 주기 창(20분)에 여유 10분을 더해
+    // 지연 표본(지금-18분)까지 덮되, 어제 들어간 일배치 5건은 들이지 않는다. 그래야 "실패 2 → 재처리 2"
+    // 가 그대로 대응되어 읽힌다. 사용자가 직접 고른 '구간 지정' 은 넓은 창(2일)을 그대로 쓴다.
+    const lag = STATUS?.batch?.periodicLagMin ?? 20;
+    const back = forceManual ? (lag + 10) * 60 * 1000 : 2 * 24 * 3600 * 1000;
+    const fwd = forceManual ? 60 * 1000 : 24 * 3600 * 1000;
+    const from = new Date(now.getTime() - back), to = new Date(now.getTime() + fwd);
+    info = await runBatchInner('/api/v1/voice/batches/manual',
+        `④ 재처리 배치 실행 — 접견 (구간 지정${forceManual ? ` · 최근 ${lag + 10}분` : ''})`,
+        'MEET', `from=${encodeURIComponent(iso(from))}&to=${encodeURIComponent(iso(to))}`);
   } else {
     info = await runBatchInner('/api/v1/voice/batches/periodic', '④ 재처리 배치 실행 — 접견 (10분 주기)', 'MEET');
   }
@@ -1390,14 +1504,24 @@ $('rt-auto').onclick = async () => {
   log(`🚀 재처리 시나리오 자동 실행 — 단계 간 ${gap/1000}초`, 'hd');
   try {
     if ($('rt-fresh').checked) {
-      const d = await call('POST', '/api/v1/mock/sim-data', '시뮬레이션 데이터 생성 (재처리 시나리오 준비)');
+      // 수동으로 1~4 를 돌려 본 뒤 자동 실행을 누르면 멱등 표식·수신 파일·STT 출력이 남아 있다.
+      // 그 상태로 시작하면 ② 가 '건너뜀' 이 되어 실패 이력이 안 남고 시나리오가 성립하지 않는다.
+      // 그래서 지우고(초기화) 새로 만든다(생성) — 순서가 중요하다.
+      const c = await call('DELETE', '/api/v1/mock/test-data', '기존 테스트 데이터 정리 (초기화)');
+      if (c) log(`  └ 정리 — DB 메타 ${c.sim?.counts?.dbRows ?? 0}건 · 더미 파일 ${c.sim?.counts?.dummyFiles ?? 0}건 · 멱등 표식 ${c.local?.idempotencyMarkers ?? 0}건`, 'ok');
+      const d = await call('POST', '/api/v1/mock/sim-data', '시뮬레이션 데이터 재생성 (재처리 시나리오 준비)');
       if (d) log(`  └ ${d.message}`, 'ok');
+      log('✔ 테스트 정합성을 위해 기존 데이터를 정리하고 새 픽스처 14건을 재생성했습니다.', 'hd');
       await sleep(Math.min(gap, 1000));
     }
     const s1 = await rtStep1();               await sleep(gap);
     const s2 = await rtStep2();               await sleep(gap);
     const s3 = await rtStep3();               await sleep(gap);
-    const s4 = await rtStep4();
+    // ③ → ④ 동기화. 주소만 바꿔 놓고 바로 돌리면 ④ 가 수신 파일 대기에서 헛돈다.
+    await rtWaitBrokerReady();
+    // 자동 실행은 ④ 를 구간 지정(manual)으로 돌린다. 10분 주기 창은 20분짜리라
+    // ①~③ 을 도는 사이에 지연 표본(접견 지금-18분)이 창 밖으로 밀려나 재처리 대상에서 빠진다.
+    const s4 = await rtStep4(true);
     const all = s1 && s2 && s3 && s4;
     log(all ? '✔ 재처리 시나리오 완료 — ② 실패 이력 → ④ 재처리 성공' : '⚠ 재처리 시나리오가 기대대로 끝나지 않았습니다 — 타임라인 카드를 펼쳐 응답을 확인하십시오', all ? 'ok' : 'wr');
   } finally {
@@ -1511,7 +1635,7 @@ $('btn-files').onclick = async () => {
 // 환경 탭에서 누르면 아무 일도 안 일어난 것처럼 보인다 — 결과가 있는 곳으로 데려간다.
 $('btn-test-clear').onclick = async () => {
   if (!confirm('테스트 이력(EXEC_ID 작업코드 TST 의 로그·STT 출력)과 시뮬레이션 데이터(DB 메타 SIM 행·XVARM 원본 더미 파일·멱등 표식)를 모두 지웁니다. 운영 배치(VOC·STR·EXT)는 지워지지 않습니다. 계속할까요?')) return;
-  showTab('tab-pipeline');
+  // 탭을 옮기지 않는다 — 결과는 팝업이 알려 주므로 보던 자리를 뺏을 이유가 없다.
   const info = await callFull('DELETE', '/api/v1/mock/test-data', '시뮬레이션 데이터 초기화 (테스트 이력 + DB 메타 + 더미 파일)');
   const d = info.ok ? info.body : null;
   if (!d) return;
@@ -1553,9 +1677,11 @@ $('btn-log-tall').onclick = (e) => {
 
 // 마지막으로 보던 탭과 로그 접힘 상태를 복원한다 — 시연 중 새로고침해도 자리를 잃지 않게.
 (function restoreUi() {
-  let tab = null, logc = null;
-  try { tab = localStorage.getItem(TAB_KEY); logc = localStorage.getItem('vcsim.log'); } catch (e) {}
-  showTab(tab && $(tab) ? tab : 'tab-env', false);
+  // 탭은 기억하지 않는다 — 초기 진입은 늘 [1. 환경 & 디렉터리 설정] 이다. 무엇을 어디에 쓰는지
+  // 먼저 맞춘 뒤 돌리는 순서이므로, 지난번에 보던 자리로 떨어뜨리면 그 순서가 깨진다.
+  let logc = null;
+  try { logc = localStorage.getItem('vcsim.log'); } catch (e) {}
+  showTab('tab-env');
   if (logc === '1') toggleLog(true);
 })();
 
