@@ -150,6 +150,28 @@
   .sim-files { font-family:var(--mono); font-size:.72rem; columns:2; column-gap:1.5rem; }
   @media (max-width: 768px) { .sim-files { columns:1; } }
 
+  /* ── 헬스체크 배지 ──────────────────────────────────────────────────── */
+  #health-bar { display:flex; align-items:center; gap:.35rem; flex-wrap:wrap; }
+  .hb { display:inline-flex; align-items:center; gap:.3rem; font-size:.74rem; font-weight:600;
+        border:1px solid transparent; border-radius:1rem; padding:.12rem .55rem; white-space:nowrap;
+        cursor:help; transition:background .2s ease, color .2s ease; }
+  .hb .dot { width:.5rem; height:.5rem; border-radius:50%; flex:0 0 auto; }
+  .hb.up   { background:#d1e7dd; color:#0a3622; border-color:#a3cfbb; }
+  .hb.up   .dot { background:#198754; }
+  .hb.down { background:#f8d7da; color:#58151c; border-color:#f1aeb5; }
+  .hb.down .dot { background:#dc3545; animation:hbblink 1.4s infinite; }
+  .hb.off  { background:#e9ecef; color:#495057; border-color:#dee2e6; }
+  .hb.off  .dot { background:#adb5bd; }
+  .hb.wait { background:#fff3cd; color:#664d03; border-color:#ffe69c; }
+  .hb.wait .dot { background:#ffc107; }
+  @keyframes hbblink { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+  #health-meta { font-size:.7rem; color:#6c757d; white-space:nowrap; }
+  #health-bar.paused .hb { opacity:.55; }
+
+  /* ── 탭1 하단 환경 배너 ─────────────────────────────────────────────── */
+  #env-box { border:1px solid #dee2e6; border-radius:.45rem; background:#fbfcfd; padding:.5rem .7rem; }
+  #env-box .ttl { font-size:.78rem; font-weight:600; color:#495057; margin-bottom:.2rem; }
+
   /* ── 배치 진행률 ────────────────────────────────────────────────────── */
   #prog-wrap { border:1px solid #dee2e6; border-radius:.45rem; padding:.5rem .7rem; background:#fbfcfd; }
   #prog-bar-outer { height:.85rem; background:#e9ecef; border-radius:.45rem; overflow:hidden; }
@@ -235,7 +257,9 @@
     <div>
       <h4 class="mb-0">음성 수집 시뮬레이터</h4>
       <div class="text-secondary small">보라미 음성(접견·통화) → 수집 → 복호화 → STT → 출력 저장 · 로그 컬렉터 T1·T2·T4</div>
-      <div class="hint font-monospace" id="env-line">환경 감지 중…</div>
+      <div id="health-bar" class="mt-1">
+        <span class="hb wait"><span class="dot"></span>조회 중…</span>
+      </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
       <a class="btn btn-sm btn-outline-secondary" id="lnk-swagger" href="/swagger-ui/index.html" target="_blank">Swagger</a>
@@ -247,6 +271,8 @@
               title="테스트 데이터(EXEC_ID 작업코드 TST 의 로그 이력·STT 출력)와 시뮬레이션 데이터(DB 메타 SIM 행·더미 파일·멱등 표식)를 모두 지웁니다. 운영 배치(VOC/STR/EXT)는 건드리지 않습니다.">
         시뮬레이션 데이터 초기화
       </button>
+      <button class="btn btn-sm btn-outline-secondary" id="btn-health"
+              title="5종 연계 상태를 지금 다시 확인합니다 (자동 확인은 1분마다, 배치·시나리오 중에는 멈춥니다)">연결 새로고침</button>
       <button class="btn btn-sm btn-outline-primary" id="btn-refresh">상태 새로고침</button>
     </div>
   </div>
@@ -337,6 +363,13 @@
       <div class="mt-2" id="probe-line"></div>
     </div>
   </div>
+
+  <!-- 환경 정보 — 헤더에 있던 것을 여기로 내렸다. 자주 보는 값이 아니고, 지금 무엇을 보고
+       있는지는 위의 헬스체크 배지가 말해 준다. -->
+  <div id="env-box" class="mb-3">
+    <div class="ttl">환경 정보</div>
+    <div class="hint font-monospace" id="env-line">환경 감지 중…</div>
+  </div>
   </div>
 
   <div class="tabp" id="tab-pipeline">
@@ -347,6 +380,8 @@
       <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 7·전화 7 = 14건(트랙별 일배치 5 · 10분 주기 2)</div>
       <div class="d-flex flex-wrap gap-2 mb-2">
         <button class="btn btn-primary btn-sm" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
+        <button class="btn btn-success btn-sm" id="btn-ondemand"
+                title="POST /api/v1/voice/batches/on-demand — 마지막 성공 시점부터 지금까지를 훑습니다">바로 실행 <span class="opacity-75" id="ondemand-hint">(마지막 성공 ~ 현재)</span></button>
         <button class="btn btn-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
         <button class="btn btn-outline-primary btn-sm" id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
         <button class="btn btn-sm" id="btn-phone" style="color:#6f42c1;border-color:#6f42c1;background:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
@@ -1224,6 +1259,54 @@ async function runBatch(path, label, kind, btnId) {
   try { return await runBatchInner(path, label, kind); }
   finally { setBatchRunning(btnId, false); }
 }
+// ── 헬스체크 배지 ──────────────────────────────────────────────────────
+// 다섯 시스템을 화면이 직접 부르지 않는다 — 오리진이 달라 CORS 에 걸리고, K8s 서비스명은
+// 브라우저가 풀 수도 없다. 수집기의 /api/v1/voice/health 가 서버에서 한 번에 찔러 준다.
+//
+// 폴링은 1분이고, 배치·시나리오가 도는 동안에는 멈춘다. 시험 중에 DB 커넥션과 포트를
+// 같이 건드리면 그 자체가 시험 결과를 흔든다 — 이 기능이 시험을 방해하면 안 된다.
+const HEALTH_POLL_MS = 60000;
+let HEALTH_TIMER = null;
+let HEALTH_PAUSED = 0;          // 0보다 크면 멈춘 상태(중첩 가능)
+
+function renderHealth(h) {
+  const bar = $('health-bar'); if (!bar) return;
+  const items = (h && h.items) || [];
+  if (!items.length) {
+    bar.innerHTML = '<span class="hb down"><span class="dot"></span>상태를 받지 못했습니다</span>';
+    return;
+  }
+  const cls = { UP:'up', DOWN:'down', OFF:'off' };
+  const txt = { UP:'연결됨', DOWN:'연결 안됨', OFF:'미사용' };
+  bar.innerHTML = items.map(it => {
+    const c = cls[it.state] || 'wait';
+    const tip = `${it.label} — ${txt[it.state] || it.state}\n${it.target || ''}\n${it.detail || ''}`;
+    return `<span class="hb ${c}" title="${esc(tip)}"><span class="dot"></span>${esc(it.label)}</span>`;
+  }).join('')
+   + `<span id="health-meta" class="ms-1">${esc((h.checkedAt || '').replace('T', ' '))}`
+   + `${HEALTH_PAUSED > 0 ? ' · 자동확인 멈춤(시험 중)' : ''}</span>`;
+  bar.classList.toggle('paused', HEALTH_PAUSED > 0);
+}
+
+async function checkHealth(force) {
+  const h = await call('GET', '/api/v1/voice/health' + (force ? '?force=true' : ''), '', true);
+  if (h) { HEALTH_LAST = h; renderHealth(h); }
+  return h;
+}
+
+function healthStart() {
+  clearInterval(HEALTH_TIMER);
+  HEALTH_TIMER = setInterval(() => { if (HEALTH_PAUSED === 0) checkHealth(false); }, HEALTH_POLL_MS);
+}
+
+/** 배치·시나리오가 도는 동안 자동 확인을 멈춘다. 중첩 호출이 있어 카운터로 센다. */
+function healthPause() { HEALTH_PAUSED++; renderHealth(HEALTH_LAST); }
+function healthResume() {
+  HEALTH_PAUSED = Math.max(0, HEALTH_PAUSED - 1);
+  if (HEALTH_PAUSED === 0) checkHealth(true);   // 끝난 직후 한 번은 최신으로 맞춘다
+}
+let HEALTH_LAST = null;
+
 // ── 배치 진행률 ────────────────────────────────────────────────────────
 // 배치 REST 는 동기다 — 한 번 호출하면 전건이 끝나야 응답이 온다. 그동안 무엇을 하고 있는지
 // 보여 주려면 서버의 진행 상태(GET /batches/progress)를 따로 읽는 수밖에 없다.
@@ -1306,11 +1389,13 @@ async function runBatchInner(path, label, kind, extraQuery) {
   // 시뮬레이터에서 돌리는 배치는 전부 시험이다 → EXEC_ID 가 ...TST... 로 채번된다.
   const url = `${path}?test=true` + (kind ? `&kinds=${kind}` : '') + (extraQuery ? '&' + extraQuery : '');
   progStart();
+  healthPause();          // 시험 중에는 자동 헬스체크를 멈춘다 — DB 커넥션·포트 간섭 방지
   let info;
   try {
     info = await callFull('POST', url, label);
   } finally {
     await progStop();
+    healthResume();
   }
   if (info && info.ok && info.body) renderResult(info, info.body, kind);
   await loadStatus(true);
@@ -1520,6 +1605,7 @@ $('rt-auto').onclick = async () => {
   const gap = Math.max(500, Number($('rt-gap').value || 2.5) * 1000);
   RT.steps = [null,null,null,null]; RT.open = [false,false,false,false]; RT.cmpOpen = false; renderTimeline();
   rtLock(true);
+  healthPause();          // 장애 주입 시나리오 중에는 자동 헬스체크를 멈춘다(브로커를 일부러 죽인다)
   log(`🚀 재처리 시나리오 자동 실행 — 단계 간 ${gap/1000}초`, 'hd');
   try {
     if ($('rt-fresh').checked) {
@@ -1545,6 +1631,7 @@ $('rt-auto').onclick = async () => {
     log(all ? '✔ 재처리 시나리오 완료 — ② 실패 이력 → ④ 재처리 성공' : '⚠ 재처리 시나리오가 기대대로 끝나지 않았습니다 — 타임라인 카드를 펼쳐 응답을 확인하십시오', all ? 'ok' : 'wr');
   } finally {
     rtLock(false);
+    healthResume();
   }
 };
 renderTimeline();
@@ -1554,6 +1641,25 @@ $('btn-meet').onclick     = () => runBatch('/api/v1/voice/batches/periodic', '�
 $('btn-phone').onclick    = () => runBatch('/api/v1/voice/batches/periodic', '전화 트랙만 실행 (10분 창)',  'PHONE', 'btn-phone');
 $('btn-periodic').onclick = () => runBatch('/api/v1/voice/batches/periodic', '전체 실행 (10분 창)',          null,    'btn-periodic');
 $('btn-daily').onclick    = () => runBatch('/api/v1/voice/batches/daily',    '전체 실행 (전날 하루치)',      null,    'btn-daily');
+$('btn-ondemand').onclick = async () => {
+  await runBatch('/api/v1/voice/batches/on-demand', '바로 실행 (마지막 성공 ~ 현재)', null, 'btn-ondemand');
+  await loadLastSuccess();
+};
+$('btn-health').onclick = async () => {
+  log('연결 새로고침 — 5종 연계 상태를 지금 확인합니다', 'hd');
+  const h = await checkHealth(true);
+  if (h) (h.items || []).forEach(it => log(`  └ ${it.label} ${it.state} — ${it.detail || ''}`,
+      it.state === 'DOWN' ? 'er' : (it.state === 'OFF' ? 'wr' : 'ok')));
+};
+
+/** [바로 실행]이 어디서부터 볼지 버튼에 적어 준다 — 누르기 전에 범위를 알 수 있게. */
+async function loadLastSuccess() {
+  const d = await call('GET', '/api/v1/voice/batches/last-success', '', true);
+  const el = $('ondemand-hint'); if (!el) return;
+  el.textContent = (d && d.lastSuccessAt)
+      ? `(${String(d.lastSuccessAt).replace('T', ' ')} ~ 현재)`
+      : '(기록 없음 — 최근 24시간)';
+}
 
 $('btn-probe').onclick = async () => {
   const d = await call('GET', '/api/v1/voice/broker/probe', '브로커 연결 확인');
@@ -1721,7 +1827,14 @@ async function loadConfig() {
 
 log('시뮬레이터 준비 완료. [시뮬레이션 데이터 생성] → [처리 대상 미리보기] → [전체 실행] 순서를 권합니다. (접견 7·전화 7 = 14건: 트랙별 일배치 5 / 10분 주기 2)', 'hd');
 log('접견과 전화는 연동 경로가 완전히 다릅니다 — 전화는 XVARM·브로커를 타지 않습니다. STT 결과는 {최종 저장}/{execId}/ 폴더에 남습니다.', 'hd');
-(async () => { await detectApiBase(); await loadConfig(); await loadStatus(false); })();
+(async () => {
+  await detectApiBase();
+  await loadConfig();
+  await loadStatus(false);
+  await loadLastSuccess();
+  await checkHealth(true);
+  healthStart();
+})();
 </script>
 </body>
 </html>

@@ -36,6 +36,7 @@ import java.util.Map;
  * <p>스케줄러를 기다리지 않고 배치를 돌려볼 수 있게 한다. 다음 주 시연에서
  * "지금 한 번 돌려 보겠습니다"가 가능해야 하기 때문이다.</p>
  */
+@lombok.extern.log4j.Log4j2
 @Tag(name = "1. 음성 수집 배치", description = "보라미 음성(접견·통화) 수집 → 복호화 → STT → 처리 이력 적재")
 @RestController
 @RequestMapping(value = "/api/v1/voice", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -45,6 +46,8 @@ public class VoiceBatchController {
     private final VoiceCollectService service;
     private final VoiceBatchScheduler scheduler;
     private final egovframework.voice.collector.batch.BatchProgress progress;
+    private final egovframework.voice.collector.health.HealthProbeService healthProbe;
+    private final egovframework.voice.collector.batch.LastSuccessState lastSuccess;
     private final IdempotencyGuard idempotency;
     private final VoiceProperties props;
     private final VoiceDirState dirs;
@@ -90,6 +93,51 @@ public class VoiceBatchController {
                                      @RequestParam(defaultValue = "false") boolean test) {
         return service.run(BatchWindow.periodic(LocalDateTime.now(), props.batch().periodicLagMin()),
                 kinds, "MANUAL", test);
+    }
+
+    @Operation(summary = "연계 5종 헬스체크",
+            description = """
+                    DB · ESB · 브로커 · 로그 컬렉터 · 에이전트 커넥터를 **서버가 대신 찔러 봅니다**.
+
+                    화면에서 직접 부르면 오리진이 달라 CORS 에 걸리고, K8s 서비스명은 브라우저가 풀 수도 없습니다.
+
+                    상태는 셋입니다 — `UP`(연결됨) · `DOWN`(연결 안 됨) · `OFF`(쓰지 않는 중).
+                    **끈 것은 고장이 아닙니다**: Mock 브로커·미연동 로그 컬렉터는 회색(OFF)입니다.
+
+                    같은 결과를 3초간 재사용합니다. `force=true` 면 캐시를 무시하고 지금 붙어 봅니다.
+                    """)
+    @GetMapping("/health")
+    public Map<String, Object> health(@RequestParam(defaultValue = "false") boolean force) {
+        return healthProbe.health(force);
+    }
+
+    @Operation(summary = "바로 실행 (온디맨드)",
+            description = """
+                    **마지막 성공 시점 ~ 지금**을 훑습니다. 기획서 배치 스케줄 목록의 [바로 실행] 버튼이 부르는 API 입니다.
+
+                    기록된 마지막 성공이 없으면(첫 실행·기준점 유실) `fallbackHours` 시간 전부터 봅니다(기본 24시간).
+                    마지막 성공이 너무 오래됐어도 같은 상한을 적용합니다 — 몇 주치를 한 번에 긁어
+                    브로커·STT 를 몰아치지 않기 위해서입니다.
+
+                    기준점은 **성공 건이 있는 배치만** 밉니다. 실패한 배치로 기준점을 옮기면 그 구간이 영영 빠집니다.
+                    """)
+    @PostMapping("/batches/on-demand")
+    public VoiceBatchResult onDemand(@RequestParam(required = false) List<VoiceKind> kinds,
+                                     @RequestParam(defaultValue = "false") boolean test,
+                                     @RequestParam(defaultValue = "24") int fallbackHours) {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime last = lastSuccess.lastSuccessAt();
+        LocalDateTime floor = now.minusHours(Math.max(1, fallbackHours));
+        LocalDateTime from = (last == null || last.isBefore(floor)) ? floor : last;
+        log.info("[Batch] 바로 실행 — 마지막 성공 {} → 구간 [{} ~ {})", last, from, now);
+        return service.run(BatchWindow.manual(from, now), kinds, "ON_DEMAND", test);
+    }
+
+    @Operation(summary = "마지막 성공 시점",
+            description = "[바로 실행]이 어디서부터 볼지. 기록이 없으면 `lastSuccessAt` 이 null 입니다.")
+    @GetMapping("/batches/last-success")
+    public Map<String, Object> lastSuccess() {
+        return lastSuccess.snapshot();
     }
 
     @Operation(summary = "배치 진행률",
