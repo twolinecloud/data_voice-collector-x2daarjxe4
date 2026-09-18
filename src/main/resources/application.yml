@@ -193,3 +193,14 @@ voice:
 logging:
   level:
     egovframework.voice.collector: ${LOG_LEVEL:INFO}
+
+# ── 에이전트 커넥터 이관 ───────────────────────────────────────────────────
+#   1차 저장({ROOT}/xenon/…)을 마친 뒤 STT 산출물을 커넥터로 넘긴다. 커넥터가 이관 스펙 확정
+#   전까지 {AGENT_INGEST_BASE_DIR}/unstructured/{meet|phone} 에 파일로 적재한다.
+#   ⚠ 이관이 실패해도 배치는 성공이다 — 산출물은 이미 우리 폴더에 있고, 못 넘긴 것은 다시 넘기면 된다.
+agent-connector:
+  enabled: ${AGENT_CONNECTOR_ENABLED:true}
+  # 비우면 환경 프리셋 — 로컬 http://localhost:8080 · K8s http://agent-connector-dp8qbi7xqh:8080
+  base-url: ${AGENT_CONNECTOR_BASE_URL:}
+  # 비식별을 적용하지 않기로 한 결정 — 커넥터가 ADID/AIR 를 호출하지 않고 원본 그대로 적재한다.
+  deidentification-enabled: ${AGENT_DEID_ENABLED:false}
