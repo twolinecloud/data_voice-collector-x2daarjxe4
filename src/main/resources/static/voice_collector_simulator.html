@@ -164,6 +164,14 @@
   .pop-body ul { margin:.45rem 0 0; padding-left:1.15rem; }
   .pop-body li { margin:.25rem 0; }
   .pop-body .sub { color:#6c757d; font-size:.77rem; }
+  .pop-body .pop-lead { font-weight:600; margin-bottom:.55rem; }
+  .pop-body .pop-list { list-style:none; margin:0; padding:0; }
+  .pop-body .pop-list li { margin:.3rem 0; padding:.45rem .6rem; background:#f8f9fa;
+                           border-radius:.35rem; border:1px solid #eceef0; }
+  .pop-body .pop-list .lbl { color:#495057; }
+  .pop-body .pop-note { margin-top:.65rem; padding:.45rem .6rem; background:#fff8e6;
+                        border-left:3px solid #f0ad4e; border-radius:.25rem;
+                        font-size:.79rem; color:#6b5200; }
   .pop-body .n { font-weight:700; color:#0d6efd; }
   .pop-foot { padding:.55rem .85rem; border-top:1px solid #e9ecef; text-align:right; }
 
@@ -633,19 +641,19 @@ $('pop-x').onclick = closePopup;
 $('pop').onclick = (e) => { if (e.target === $('pop')) closePopup(); };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('pop').hidden) closePopup(); });
 
-/** 생성 결과 — 일배치용/주기용을 나눠 보여 준다. 건수는 서버가 센 것(sim.counts)을 그대로 쓴다. */
+/** 생성 결과 — 건수는 서버가 센 것(sim.counts), 20분은 서버 설정(batch.periodicLagMin)을 그대로 쓴다. */
 function seedPopupHtml(sim) {
   const c = sim.counts || {}, d = c.daily || {}, p = c.periodic || {}, off = p.offsetMin || {};
-  const mins = (a) => (a || []).map(m => m + '분 전').join(' · ');
-  return `<div>시뮬레이션 데이터가 생성되었습니다.</div>
-    <ul>
-      <li>일배치용: <span class="n">${d.total ?? 0}</span>건 (접견 ${d.meet ?? 0}, 전화 ${d.phone ?? 0})
-        <div class="sub">어제 00:00:00 ~ 23:59:59 에 고르게 — 첫 건과 마지막 건이 일배치 창의 양 끝입니다</div></li>
-      <li>10분 주기용: <span class="n">${p.total ?? 0}</span>건 (접견 ${p.meet ?? 0}, 전화 ${p.phone ?? 0})
-        <div class="sub">접견 ${mins(off.meet)} · 전화 ${mins(off.phone)}
-          &mdash; 뒤엣것은 10분 창 밖이라 <b>20분 창(periodic-lag-min)</b> 에서만 잡힙니다</div></li>
-      <li>합계: <span class="n">${c.total ?? 0}</span>건 · 더미 파일 ${c.files ?? 0}개</li>
+  const mins = (a) => (a || []).map(m => m + '분 전').join('·');
+  const lag = STATUS?.batch?.periodicLagMin ?? 20;   // 설정이 바뀌면 문구도 따라간다
+  return `<div class="pop-lead">시뮬레이션 데이터가 생성되었습니다.</div>
+    <ul class="pop-list">
+      <li><span class="lbl">일배치용:</span> <span class="n">${d.total ?? 0}</span>건
+        (접견 ${d.meet ?? 0}건, 전화 ${d.phone ?? 0}건)</li>
+      <li><span class="lbl">10분 주기용:</span> <span class="n">${p.total ?? 0}</span>건
+        (접견 ${mins(off.meet)} / 전화 ${mins(off.phone)})</li>
     </ul>
+    <div class="pop-note">※ 10분 배치는 최근 ${lag}분 전 데이터까지 포함하여 수집됩니다.</div>
     <div class="sub mt-2">대상 DB — ${esc(sim.db || '')}</div>`;
 }
 
@@ -655,8 +663,8 @@ function cleanPopupHtml(d) {
   const localFiles = ['meetFiles', 'phoneFiles', 'workFiles'].reduce((n, k) => n + (Number(l[k]) || 0), 0);
   const dummy = c.dummyFiles ?? 0;
   const detail = Object.entries(sim.cleaned || {}).map(([k, v]) => k + ' ' + v).join(' · ');
-  return `<div>시뮬레이션 데이터가 초기화되었습니다.</div>
-    <ul>
+  return `<div class="pop-lead">시뮬레이션 데이터가 초기화되었습니다.</div>
+    <ul class="pop-list">
       <li>삭제된 DB 레코드: <span class="n">${c.dbRows ?? 0}</span>건
         <div class="sub">${esc(detail)}</div></li>
       <li>삭제된 디렉토리 파일: <span class="n">${dummy + localFiles}</span>건
