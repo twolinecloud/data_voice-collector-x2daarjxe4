@@ -48,6 +48,11 @@ class BoramiSourceJdbcTest {
 
     @DynamicPropertySource
     static void dirs(DynamicPropertyRegistry registry) {
+        // 로그 컬렉터를 끈다 — 테스트는 외부 프로세스에 기대면 안 된다.
+        // local 프로파일 기본은 enabled=true + localhost:8090 이라, 그 포트에서 무언가 듣고 있지만
+        // 응답하지 않으면 호출마다 30초씩 멈춰 빌드가 통째로 늘어진다(실제로 그렇게 늘어졌다).
+        registry.add("log-collector.enabled", () -> "false");
+
         // 더미 파일이 실제 C:/XVARM_ORIGINAL_VOICE_FILES 를 건드리지 않게 임시 폴더로 돌린다
         registry.add("voice.dirs.xvarm-original", () -> tmp.resolve("xvarm_original").toString());
         registry.add("voice.dirs.work", () -> tmp.resolve("work").toString());

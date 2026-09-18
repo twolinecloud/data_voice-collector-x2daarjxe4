@@ -43,6 +43,10 @@ class VoiceCollectE2ETest {
         registry.add("voice.source.mode", () -> "MOCK");
         registry.add("voice.broker.mode", () -> "MOCK");
         // 테스트가 ./work 를 오염시키지 않게 임시 디렉터리로 돌린다.
+        // 로그 컬렉터를 끈다 — 테스트는 외부 프로세스에 기대면 안 된다.
+        // local 프로파일 기본은 enabled=true + localhost:8090 이라, 그 포트에서 무언가 듣고 있지만
+        // 응답하지 않으면 호출마다 30초씩 멈춰 빌드가 통째로 늘어진다(실제로 그렇게 늘어졌다).
+        registry.add("log-collector.enabled", () -> "false");
         registry.add("voice.dirs.base-dir", () -> tmp.toString());
         registry.add("voice.dirs.receive-meet", () -> tmp.resolve("raw/meet").toString());
         registry.add("voice.dirs.receive-phone", () -> tmp.resolve("raw/phone").toString());
@@ -121,12 +125,13 @@ class VoiceCollectE2ETest {
     }
 
     @Test
-    @DisplayName("T2 단계 요약 — COLLECT · ANALYZE 두 행, 전부 성공")
+    @DisplayName("T2 단계 요약 — COLLECT · ANALYZE · SEND 세 행, 전부 성공")
     void recordsCollectAndAnalyzeSteps() {
         VoiceBatchResult result = service.run(wideWindow(), null, "TEST");
 
+        // SEND 는 출력 저장 구간이다 — 여기까지 남아야 파이프라인 로그가 ANALYZE 에서 끊기지 않는다.
         assertThat(result.steps()).extracting(VoiceBatchResult.StepLog::stepTypeCd)
-                .containsExactly("COLLECT", "ANALYZE");
+                .containsExactly("COLLECT", "ANALYZE", "SEND");
         assertThat(result.steps()).allSatisfy(st -> {
             assertThat(st.stepStsCd()).isEqualTo("SUCCESS");
             assertThat(st.inCnt()).isEqualTo(14);

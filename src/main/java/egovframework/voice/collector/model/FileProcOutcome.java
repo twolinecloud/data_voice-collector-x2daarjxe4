@@ -29,6 +29,15 @@ public record FileProcOutcome(
 
     public static final String STEP_COLLECT = "COLLECT";
     public static final String STEP_ANALYZE = "ANALYZE";
+    /**
+     * 출력 저장 — STT 결과(.txt · .json)를 배치 폴더 {@code {output}/{execId}/} 에 내보낸다.
+     *
+     * <p>비정형 T2 체인(COLLECT 1 · ANALYZE 2 · DEIDENT 3 · SEND 4)의 마지막 칸이다.
+     * <b>이 서비스는 STT 텍스트를 외부 서비스로 전송하지 않는다</b> — 다음 단계(제논)가 이 폴더에서
+     * 집어 가는 것이 인계 방식이므로, 폴더에 내보내는 이 구간을 SEND 로 남긴다. 예전에는 ANALYZE 에
+     * 묶여 있어 "STT 는 됐는데 저장에서 깨진" 건과 "STT 자체가 깨진" 건을 T2 에서 구분할 수 없었다.</p>
+     */
+    public static final String STEP_SEND = "SEND";
 
     public static FileProcOutcome success(VoiceTarget t, long size, int chars, String sttPath, long ms) {
         return new FileProcOutcome(t, ProcStatus.SUCCESS, null, null, size, chars, sttPath, ms);

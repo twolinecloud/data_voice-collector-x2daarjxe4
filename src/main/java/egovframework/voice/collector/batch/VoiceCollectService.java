@@ -39,10 +39,16 @@ import java.util.Map;
  * 전송하지 않는다(비식별 커넥터 연동은 아키텍처 변경으로 제외됐다). 텍스트는 배치 단위 출력 폴더
  * ({@code {output}/{execId}/})에 남기고, 로그 테이블 INSERT 는 로그 컬렉터 API 로만 한다.</p>
  *
- * <p><b>T2 단계는 커넥터 호출 여부와 무관하게 남긴다.</b> 비정형 체인(COLLECT → ANALYZE → DEIDENT → SEND)
- * 중 이 서비스가 도는 두 단계를 기록한다 —
- * {@code COLLECT}(파일 확보·복호화)는 배치 시작에 열고, {@code ANALYZE}(STT·출력 저장)는 첫 STT 가
- * 시작될 때 열어 <b>STT 처리가 끝난 직후</b> 마감한다. 뒤의 DEIDENT·SEND 는 하류의 몫이다.</p>
+ * <p><b>T2 단계는 커넥터 호출 여부와 무관하게 남긴다.</b> 비정형 체인
+ * (COLLECT 1 → ANALYZE 2 → DEIDENT 3 → SEND 4) 중 이 서비스가 도는 세 단계를 기록한다 —
+ * {@code COLLECT}(파일 확보·복호화)는 배치 시작에 열고, {@code ANALYZE}(STT)는 첫 STT 가 시작될 때,
+ * {@code SEND}(출력 저장)는 첫 저장 직전에 연다. 셋 다 배치 끝에서 한 번에 마감한다.
+ * {@code DEIDENT} 는 이 서비스의 범위가 아니다(비식별 커넥터 연동 제외).</p>
+ *
+ * <p><b>SEND 를 ANALYZE 에서 떼어 낸 이유</b>: 예전에는 STT 와 출력 저장이 한 단계였다. 그래서
+ * "STT 는 됐는데 저장에서 깨진" 건과 "STT 자체가 깨진" 건이 T2 에서 같은 줄로 보였고, 파이프라인
+ * 로그가 ANALYZE 에서 끊겨 결과물이 어디까지 갔는지 읽히지 않았다. 이 서비스는 STT 텍스트를 외부로
+ * 전송하지 않지만, 다음 단계(제논)가 배치 폴더에서 집어 가는 것이 인계 방식이므로 그 구간을 SEND 로 둔다.</p>
  *
  * <p><b>건별 격리</b>: 한 건이 실패해도 배치를 멈추지 않는다. 1,300건을 도는 배치에서
  * 한 파일이 깨졌다고 전체가 중단되면 나머지 1,299건을 다시 처리해야 한다.
@@ -69,6 +75,7 @@ public class VoiceCollectService {
     private final LogCollectorClient logCollector;
     private final IdempotencyGuard idempotency;
     private final InmatePidGenerator pidGenerator;
+    private final BatchProgress progress;
 
     /**
      * 배치를 1회 실행한다.
@@ -118,8 +125,18 @@ public class VoiceCollectService {
         List<VoiceTarget> found = findTargets(window, targets);
         List<FileProcOutcome> outcomes = new ArrayList<>(found.size());
 
-        for (VoiceTarget t : found) {
-            outcomes.add(processOne(t, ctx));
+        // 화면 진행률 — 대상 수가 확정된 지금부터 센다. 배치 REST 는 동기라 이것 없이는
+        // 수 분짜리 배치가 도는지 죽었는지 화면에서 알 수 없다.
+        progress.begin(execId, window.toString(), found.size());
+        try {
+            for (VoiceTarget t : found) {
+                progress.startFile(t);
+                FileProcOutcome o = processOne(t, ctx);
+                progress.finishFile(o.status());
+                outcomes.add(o);
+            }
+        } finally {
+            progress.end();
         }
 
         int success = (int) outcomes.stream().filter(FileProcOutcome::isSuccess).count();
@@ -127,7 +144,7 @@ public class VoiceCollectService {
         int fail = outcomes.size() - success - skipped;
 
         // ── T2 마감 — COLLECT 는 확보 건수로, ANALYZE 는 STT 건수로 ───────────────
-        List<VoiceBatchResult.StepLog> steps = new ArrayList<>(2);
+        List<VoiceBatchResult.StepLog> steps = new ArrayList<>(3);
         long collectIn = outcomes.size() - skipped;
         long collectErr = outcomes.stream().filter(o -> o.failedAt(FileProcOutcome.STEP_COLLECT)).count();
         long collectOut = collectIn - collectErr;
@@ -135,10 +152,17 @@ public class VoiceCollectService {
                 collectIn, collectOut, collectErr, ctx.collectMs));
 
         // STT 가 한 건이라도 시작됐을 때만 ANALYZE 행이 있다 — 전건 확보 실패면 STT 단계는 돌지 않은 것이다.
+        long analyzeErr = outcomes.stream().filter(o -> o.failedAt(FileProcOutcome.STEP_ANALYZE)).count();
         if (ctx.analyzeStarted) {
-            long analyzeErr = outcomes.stream().filter(o -> o.failedAt(FileProcOutcome.STEP_ANALYZE)).count();
+            // ANALYZE 는 STT 까지다 — 나간 건수는 STT 를 통과해 SEND 로 넘어간 수.
             steps.add(finishStep(ctx.analyzeStepId, FileProcOutcome.STEP_ANALYZE,
-                    collectOut, success, analyzeErr, ctx.analyzeMs));
+                    collectOut, collectOut - analyzeErr, analyzeErr, ctx.analyzeMs));
+        }
+        // SEND — STT 를 통과한 건이 한 번이라도 저장을 시도했을 때만 행이 있다.
+        if (ctx.sendStarted) {
+            long sendErr = outcomes.stream().filter(o -> o.failedAt(FileProcOutcome.STEP_SEND)).count();
+            steps.add(finishStep(ctx.sendStepId, FileProcOutcome.STEP_SEND,
+                    collectOut - analyzeErr, success, sendErr, ctx.sendMs));
         }
 
         // T4 — 파일 1건 = 1행. 정합성 대사(T1.SUCCESS_CNT == Σ T3·T4·T5)의 근거다.
@@ -167,9 +191,12 @@ public class VoiceCollectService {
         final String execId;
         String collectStepId;
         String analyzeStepId;
+        String sendStepId;
         boolean analyzeStarted;
+        boolean sendStarted;
         long collectMs;
         long analyzeMs;
+        long sendMs;
 
         RunContext(String execId) {
             this.execId = execId;
@@ -205,6 +232,17 @@ public class VoiceCollectService {
         ctx.analyzeStarted = true;
         ctx.analyzeStepId = logCollector.createStep(ctx.execId, (short) 2, FileProcOutcome.STEP_ANALYZE);
         log.info("[Batch] T2 ANALYZE 시작 — stepLogId={}", ctx.analyzeStepId == null ? "(미연동)" : ctx.analyzeStepId);
+    }
+
+    /** SEND 단계를 연다 — 첫 출력 저장 직전에 한 번. ANALYZE 와 같은 방식이다. */
+    private void beginSend(RunContext ctx) {
+        if (ctx.sendStarted) {
+            return;
+        }
+        ctx.sendStarted = true;
+        // 비정형 체인의 4번 칸(COLLECT 1 · ANALYZE 2 · DEIDENT 3 · SEND 4). DEIDENT 는 이 서비스의 범위가 아니다.
+        ctx.sendStepId = logCollector.createStep(ctx.execId, (short) 4, FileProcOutcome.STEP_SEND);
+        log.info("[Batch] T2 SEND 시작 — stepLogId={}", ctx.sendStepId == null ? "(미연동)" : ctx.sendStepId);
     }
 
     /** 단계를 마감하고 결과 요약을 돌려준다. 컬렉터 미연동이면 요약만 만든다. */
@@ -292,13 +330,19 @@ public class VoiceCollectService {
             }
 
             if (stt.isEmpty()) {
-                ctx.analyzeMs += System.currentTimeMillis() - tCollected;
+                ctx.analyzeMs += System.currentTimeMillis() - tCollected;   // STT 구간에서 끝난 것
                 return FileProcOutcome.fail(target, step, "STT 결과가 비어 있음", System.currentTimeMillis() - t0);
             }
 
-            // STT 가 끝난 직후 배치 폴더에 남긴다 — 여기까지 되어야 '성공' 이다.
+            long tAnalyzed = System.currentTimeMillis();
+            ctx.analyzeMs += tAnalyzed - tCollected;
+
+            // ── SEND: STT 결과를 배치 폴더로 내보낸다 — 다음 단계(제논)가 여기서 집어 간다.
+            //    여기까지 되어야 '성공' 이다.
+            step = FileProcOutcome.STEP_SEND;
+            beginSend(ctx);
             SttOutputStore.Saved saved = outputStore.save(ctx.execId, target, stt, fileSize);
-            ctx.analyzeMs += System.currentTimeMillis() - tCollected;
+            ctx.sendMs += System.currentTimeMillis() - tAnalyzed;
 
             idempotency.markProcessed(target);
             return FileProcOutcome.success(target, fileSize, stt.charCount(),
@@ -311,6 +355,8 @@ public class VoiceCollectService {
             long ms = System.currentTimeMillis() - t0;
             if (FileProcOutcome.STEP_COLLECT.equals(step)) {
                 ctx.collectMs += ms;
+            } else if (FileProcOutcome.STEP_SEND.equals(step)) {
+                ctx.sendMs += ms;
             } else {
                 ctx.analyzeMs += ms;
             }
