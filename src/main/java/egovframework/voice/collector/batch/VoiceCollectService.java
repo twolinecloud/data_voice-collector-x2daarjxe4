@@ -77,6 +77,7 @@ public class VoiceCollectService {
     private final InmatePidGenerator pidGenerator;
     private final BatchProgress progress;
     private final egovframework.voice.collector.transfer.AgentConnectorClient agentConnector;
+    private final LastSuccessState lastSuccess;
 
     /**
      * 배치를 1회 실행한다.
@@ -185,6 +186,10 @@ public class VoiceCollectService {
         long elapsedMs = System.currentTimeMillis() - startedAt;
         VoiceBatchResult result = new VoiceBatchResult(execId, collectorExecId != null, window.toString(),
                 found.size(), success, fail, skipped, elapsedMs, outputDirs, steps, outcomes);
+
+        // [바로 실행]의 시작점 — 성공 건이 있을 때만 민다. 실패한 배치로 기준점을 옮기면
+        // 그 구간이 영영 수집되지 않는다.
+        lastSuccess.record(LocalDateTime.now().withNano(0), execId, success);
 
         logCollector.finishBatch(execId, result.execStsCd(), elapsedSec(startedAt),
                 (long) found.size(), (long) success, (long) fail,
