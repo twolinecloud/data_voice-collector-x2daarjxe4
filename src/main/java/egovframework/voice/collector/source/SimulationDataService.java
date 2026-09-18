@@ -54,6 +54,11 @@ public class SimulationDataService {
     public static final int PHONE_WITH_SOURCE_STT = 3;
     /** 이 번호의 접견 건은 암호화되지 않은 파일 — 복호화가 통과(Noop)하는지 본다. */
     public static final int MEET_UNENCRYPTED = 2;
+    /**
+     * 화면에 돌려줄 SQL 문장 수 상한. 대용량 시딩은 수천 문장이 되는데 그걸 전부 JSON 에 실으면
+     * 응답이 메가 단위로 붓고 로그 콘솔이 잠긴다. 넘치면 앞에서부터 이만큼만 싣고 총 건수를 따로 알린다.
+     */
+    public static final int SQL_TRACE_LIMIT = 150;
 
     private static final String USR = "simadm";
     /** 특이수용자 코드 — 001 만 마약(1) 이라 코드 필터 테스트의 기준이 된다. */
@@ -122,12 +127,13 @@ public class SimulationDataService {
         int phoneCount = dailyPhone + PERIODIC_PER_KIND;
         boolean writeFiles = meetCount + phoneCount <= FILE_LIMIT;
 
+        SqlTrace trace = new SqlTrace();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("db", db.label());
         out.put("target", db.target().name());
         out.put("dirsEnsured", dirs.ensureDirs());
-        out.put("ensured", ensureXvarmMockTables());
-        Map<String, Object> cleaned = cleanRows();
+        out.put("ensured", ensureXvarmMockTables(trace));
+        Map<String, Object> cleaned = cleanRows(trace);
         out.put("cleaned", cleaned);
 
         LocalDateTime now = LocalDateTime.now().withNano(0);
@@ -140,7 +146,7 @@ public class SimulationDataService {
             String code = i == 1 ? SPECL_CODES[0] : SPECL_CODES[1 + ((i - 2) % (SPECL_CODES.length - 1))];
             inmateRows.add(new Object[] {corrNo(i), 1, code, "A01", "20260101", null, ts, USR, ts, USR});
         }
-        jdbc.batchUpdate("INSERT INTO " + tables.imscPtprDt()
+        batch(trace, "INSERT INTO " + tables.imscPtprDt()
                 + " (CORR_NO, PTCR_PRSR_DTL_SN, SPECL_MNG_SE_CD, PTCR_PRSR_SE_CD, PTCR_PRSR_APNT_YMD, PTCR_PRSR_RMV_YMD,"
                 + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID) VALUES (?,?,?,?,?,?,?,?,?,?)", inmateRows);
 
@@ -156,13 +162,13 @@ public class SimulationDataService {
             Path file = meetDir.resolve(fileNm);
             String cmfi = "SIMCMFI" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i));
             String doc = "SIMDOC" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i));
-            jdbc.update("INSERT INTO " + tables.smsmCmfiBs()
+            exec(trace, "INSERT INTO " + tables.smsmCmfiBs()
                     + " (CMMN_FILE_ID, DOC_ID, FILE_NM, CORR_WRK_SE_CD, FILE_TY_CD, REG_DT, RPRS_YN, CMMN_FILE_ENC_YN, DEL_YN,"
                     + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     cmfi, doc, fileNm, "01", "A", crt, "Y", i == MEET_UNENCRYPTED ? "N" : "Y", "N", crt, USR, crt, USR);
-            jdbc.update("INSERT INTO " + tables.asysContentElement() + " (ELEMENTID, FILEKEY) VALUES (?,?)",
+            exec(trace, "INSERT INTO " + tables.asysContentElement() + " (ELEMENTID, FILEKEY) VALUES (?,?)",
                     doc, slash(file));
-            jdbc.update("INSERT INTO " + tables.rerdTfinDs()
+            exec(trace, "INSERT INTO " + tables.rerdTfinDs()
                     + " (TARE_FILE_NO, CORR_INSTT_CD, ADNC_SE_CD, RCPT_YMD, RCPT_SN, CORR_NO, ADNC_YMD,"
                     + "  TBLT_RECRD_FILE_ID, TBLT_VTR_FILE_ID, TARE_FILE_NM, TARE_BGNG_HMS, TARE_END_HMS, TARE_FILE_MG_VL, TARE_FLPTH_NM,"
                     + "  DEL_YN, RECRD_FILE_DEL_YN, RECRD_BKUP_FILE_DEL_YN, CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID)"
@@ -188,7 +194,7 @@ public class SimulationDataService {
                         + "연락처 010-9876-5432 로 전화 주세요. 주민번호는 900101-1234567 입니다.\n"));
                 sttPath = slash(stt);
             }
-            jdbc.update("INSERT INTO " + tables.imphUcdrDs()
+            exec(trace, "INSERT INTO " + tables.imphUcdrDs()
                     + " (VRFC_ESTL_ID, PCALL_KND_CD, TELP_USR_SCPT_SE_CD, CORR_NO, TELP_LST_SE_CD, RCVER_NM, ACQT_RLTNS_NM, INTRL_TELNO,"
                     + "  TELP_PCALL_BGNG_DT, TELP_PCALL_RSPNS_DT, TELP_PCALL_END_DT, TELP_PCALL_TIME, TELP_RSPNS_TIME, TELP_PCALL_RSPNS_YN,"
                     + "  TELP_PCALL_OCRN_AMT, TELP_PCALL_RECRD_YN, TELP_PTCR_PRSR_YN, TELP_PTCR_PRSR_TCNT, CORR_INSTT_CD, TELP_USE_PLACE_NM,"
@@ -219,8 +225,9 @@ public class SimulationDataService {
         out.put("windows", Map.of(
                 "daily", "접견 %d · 전화 %d (어제 09:10 부터 10분 간격)".formatted(dailyMeet, dailyPhone),
                 "periodic", "접견 %d · 전화 %d (지금-6분 / 지금-3분)".formatted(PERIODIC_PER_KIND, PERIODIC_PER_KIND)));
-        log.info("[Sim] 시뮬레이션 데이터 생성 — {} · 파일 {}개{} · {}", rows, files.size(),
-                writeFiles ? "" : " (대용량 — 더미 파일 생략)", tables.describe());
+        trace.into(out);
+        log.info("[Sim] 시뮬레이션 데이터 생성 — {} · 파일 {}개{} · SQL {}문장 · {}", rows, files.size(),
+                writeFiles ? "" : " (대용량 — 더미 파일 생략)", trace.total, tables.describe());
         return out;
     }
 
@@ -229,31 +236,36 @@ public class SimulationDataService {
     /** Complete Clean — SIM 행 일괄 삭제 + 원본 스토리지의 더미 파일 삭제. */
     @Transactional
     public Map<String, Object> clean() {
+        SqlTrace trace = new SqlTrace();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("db", db.label());
         out.put("dirsEnsured", dirs.ensureDirs());
-        out.put("cleaned", cleanRows());
+        out.put("cleaned", cleanRows(trace));
         out.put("filesDeleted", deleteDummyFiles());
+        trace.into(out);
         log.info("[Sim] 시뮬레이션 데이터 초기화 — {}", out);
         return out;
     }
 
     /** SIM 접두 행만 지운다 — 자식(xvarm·sm·re·im 통화) → 부모(im 수용자). 테이블이 없으면(REAL 인데 미구축) 사유만 남긴다. */
-    private Map<String, Object> cleanRows() {
+    private Map<String, Object> cleanRows(SqlTrace trace) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("xvarm", safeDelete(tables.asysContentElement(), "ELEMENTID LIKE 'SIMDOC%'"));
-        m.put("cmfi", safeDelete(tables.smsmCmfiBs(), "CMMN_FILE_ID LIKE 'SIMCMFI%'"));
-        m.put("meet", safeDelete(tables.rerdTfinDs(), "TARE_FILE_NO LIKE 'SIM-MEET-%'"));
-        m.put("phone", safeDelete(tables.imphUcdrDs(), "VRFC_ESTL_ID LIKE 'SIM-PHONE-%'"));
-        m.put("inmates", safeDelete(tables.imscPtprDt(), "CORR_NO LIKE 'SIM%'"));
+        m.put("xvarm", safeDelete(trace, tables.asysContentElement(), "ELEMENTID LIKE 'SIMDOC%'"));
+        m.put("cmfi", safeDelete(trace, tables.smsmCmfiBs(), "CMMN_FILE_ID LIKE 'SIMCMFI%'"));
+        m.put("meet", safeDelete(trace, tables.rerdTfinDs(), "TARE_FILE_NO LIKE 'SIM-MEET-%'"));
+        m.put("phone", safeDelete(trace, tables.imphUcdrDs(), "VRFC_ESTL_ID LIKE 'SIM-PHONE-%'"));
+        m.put("inmates", safeDelete(trace, tables.imscPtprDt(), "CORR_NO LIKE 'SIM%'"));
         return m;
     }
 
-    private Object safeDelete(String table, String where) {
+    private Object safeDelete(SqlTrace trace, String table, String where) {
+        String sql = "DELETE FROM " + table + " WHERE " + where;
         try {
-            return jdbc.update("DELETE FROM " + table + " WHERE " + where);
+            trace.add(sql);
+            return jdbc.update(sql);
         } catch (Exception e) {
             String msg = rootMessage(e);
+            trace.mark("-- ↑ 실패(건너뜀): " + msg);
             log.warn("[Sim] 삭제 건너뜀 — {} ({})", table, msg);
             return "skip: " + msg;
         }
@@ -291,6 +303,11 @@ public class SimulationDataService {
      * @return 무엇을 했는지 한 줄
      */
     public String ensureXvarmMockTables() {
+        return ensureXvarmMockTables(null);
+    }
+
+    /** 위와 같되, 실행한 DDL 을 화면용 SQL 목록에 같이 남긴다. */
+    private String ensureXvarmMockTables(SqlTrace trace) {
         if (!tables.isXvarmMock()) {
             return "REAL 모드 — 실 테이블(" + tables.smsmCmfiBs() + " · " + tables.asysContentElement() + ")을 그대로 쓴다";
         }
@@ -321,12 +338,99 @@ public class SimulationDataService {
             if (sql.isEmpty()) {
                 continue;
             }
+            if (trace != null) {
+                trace.add(sql);
+            }
             jdbc.execute(sql);
             n++;
         }
         String msg = "PostgreSQL — %s.tb_smsm_cmfi_bs · %s.asyscontentelement 확인/생성 (%d문장)".formatted(sm, xv, n);
         log.info("[Sim] {}", msg);
         return msg;
+    }
+
+    // ── SQL 트레이스 ──────────────────────────────────────────────────────
+
+    /** 바인딩 실행 + 화면용 SQL 기록. */
+    private void exec(SqlTrace trace, String sql, Object... args) {
+        trace.add(sql, args);
+        jdbc.update(sql, args);
+    }
+
+    /** 배치 실행 + 화면용 SQL 기록(행마다 한 문장으로 풀어 적는다). */
+    private void batch(SqlTrace trace, String sql, List<Object[]> rows) {
+        for (Object[] r : rows) {
+            trace.add(sql, r);
+        }
+        jdbc.batchUpdate(sql, rows);
+    }
+
+    /**
+     * 시딩에 쓴 SQL 을 <b>화면에 보여 주기 위해</b> 모아 둔다.
+     *
+     * <p><b>여기서 만드는 문자열은 표시 전용이다 — 실행되는 SQL 이 아니다.</b> 실제 실행은 끝까지
+     * 바인딩({@code ?})이고, 이 클래스는 읽는 사람이 DBeaver 에 그대로 붙여 넣어 대조할 수 있도록
+     * 값만 끼워 넣은 사본을 만든다. 그래서 문자열 값은 따옴표를 겹쳐 이스케이프한다 — SQL 주입 경로가
+     * 아니라 <b>보이는 문장이 실제로 실행된 것과 달라지지 않게</b> 하려는 것이다.</p>
+     *
+     * <p>{@link #SQL_TRACE_LIMIT} 를 넘으면 더 담지 않고 총 건수만 센다.</p>
+     */
+    private static final class SqlTrace {
+
+        private static final java.time.format.DateTimeFormatter TS_FMT =
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+        private final List<String> lines = new ArrayList<>();
+        private int total;
+
+        void add(String sql, Object... args) {
+            total++;
+            if (lines.size() < SQL_TRACE_LIMIT) {
+                lines.add(render(sql, args));
+            }
+        }
+
+        /** 앞 문장에 붙는 한 줄 메모(실패 사유 등). 총 건수에는 넣지 않는다. */
+        void mark(String note) {
+            if (lines.size() < SQL_TRACE_LIMIT) {
+                lines.add(note);
+            }
+        }
+
+        void into(Map<String, Object> out) {
+            out.put("sqls", List.copyOf(lines));
+            out.put("sqlTotal", total);
+            out.put("sqlTruncated", total > lines.size());
+        }
+
+        private static String render(String sql, Object... args) {
+            String one = sql.replaceAll("\\s+", " ").trim();
+            StringBuilder sb = new StringBuilder(one.length() + 64);
+            int ai = 0;
+            for (int i = 0; i < one.length(); i++) {
+                char c = one.charAt(i);
+                if (c == '?' && ai < args.length) {
+                    sb.append(literal(args[ai++]));
+                } else {
+                    sb.append(c);
+                }
+            }
+            return sb.append(';').toString();
+        }
+
+        private static String literal(Object v) {
+            if (v == null) {
+                return "NULL";
+            }
+            if (v instanceof Number || v instanceof Boolean) {
+                return String.valueOf(v);
+            }
+            if (v instanceof Timestamp t) {
+                // toString() 은 'T' 를 끼우고 초가 0이면 떨어뜨린다 — 붙여 넣어 쓸 수 있게 고정 형식으로 적는다
+                return "TIMESTAMP '" + TS_FMT.format(t.toLocalDateTime()) + "'";
+            }
+            return "'" + String.valueOf(v).replace("'", "''") + "'";
+        }
     }
 
     // ── 내부 ──────────────────────────────────────────────────────────────

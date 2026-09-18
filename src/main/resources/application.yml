@@ -66,6 +66,9 @@ log-collector:
 #   시연·검증이 통째로 무의미해지기 때문이다.
 voice:
   source:
+    # ⚠ 여기(프로파일 없이 뜰 때)만 MOCK 이다. 아래 schema 가 비어 있어 DIRECT_JDBC 로 두면
+    #   테이블명이 수식 없이(TB_IMSC_PTPR_DT) 나가 PostgreSQL·Oracle 에서 곧바로 깨진다.
+    #   실제로 쓰는 프로파일(local·dev)은 스키마가 채워져 있어 기본이 DIRECT_JDBC(개발계 DB)다.
     mode: ${VOICE_SOURCE_MODE:MOCK}          # MOCK | DIRECT_JDBC | ESB_HTTP2DB
     esb-base-url: ${VOICE_ESB_BASE_URL:}
     interface-id: ${VOICE_ESB_IF_ID:}        # 표준 A 명명규칙 IF_송신(3)_수신(3)_일련(3) — 미확정(Q2)
