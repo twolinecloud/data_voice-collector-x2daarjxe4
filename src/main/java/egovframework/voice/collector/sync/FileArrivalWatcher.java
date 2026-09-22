@@ -6,6 +6,7 @@ import egovframework.voice.collector.model.VoiceFile;
 import egovframework.voice.collector.model.VoiceKind;
 import egovframework.voice.collector.model.VoiceTarget;
 import egovframework.voice.collector.util.AudioFormatDetector;
+import egovframework.voice.collector.util.StaleFiles;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
@@ -14,6 +15,7 @@ import org.springframework.util.StringUtils;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * ESB 가 동기화해 준 파일이 도착했는지 보고, <b>쓰기가 끝났는지</b>까지 확인한 뒤 넘긴다.
@@ -50,6 +52,19 @@ public class FileArrivalWatcher {
      * @throws IllegalStateException 타임아웃
      */
     public VoiceFile await(VoiceTarget target, String hintFileName) {
+        return await(target, hintFileName, 0L);
+    }
+
+    /**
+     * @param notBefore 이 시각(epoch ms) <b>이전</b>에 만들어진 파일은 지난 배치의 잔재로 본다.
+     *                  호출 측이 추출을 <b>지시하기 직전</b>의 시각을 넘긴다. 0 이면 검사하지 않는다.
+     *                  <p>왜 필요한가: 수집은 언제나 "요청 → 대기" 순서라, 요청 시점에 이미 그 이름이
+     *                  있으면 그것은 이번 요청의 산출물일 수 없다. 그대로 두면 두 가지로 깨진다 —
+     *                  ① 옛 음성을 새 것인 양 STT 에 태우거나, ② 윈도우에서 그 이름이 잡혀 있어
+     *                  브로커·ESB 가 새 파일을 못 만들고 우리는 오지 않을 파일을 기다린다.
+     *                  그래서 <b>치우고 계속 기다린다</b>.</p>
+     */
+    public VoiceFile await(VoiceTarget target, String hintFileName, long notBefore) {
         Path dir = dirFor(target.kind());
         String name = StringUtils.hasText(hintFileName)
                 ? hintFileName
@@ -58,13 +73,34 @@ public class FileArrivalWatcher {
 
         long deadline = System.currentTimeMillis() + props.sync().waitTimeoutSec() * 1000L;
         while (System.currentTimeMillis() < deadline) {
-            if (Files.exists(file) && isStable(file)) {
-                return describe(target, file);
+            if (Files.exists(file)) {
+                if (isStale(file, notBefore)) {
+                    log.warn("[Sync] 지난 배치의 잔재를 치운다 — {} (요청보다 오래된 파일) · 새 파일을 계속 기다린다",
+                            file.getFileName());
+                    StaleFiles.delete(file);
+                } else if (isStable(file)) {
+                    return describe(target, file);
+                }
             }
             sleep(Math.max(props.sync().stableCheckMs() / 2, 200));
         }
-        throw new IllegalStateException("수신 파일 대기 타임아웃 — %s (%d초, dir=%s)"
-                .formatted(name, props.sync().waitTimeoutSec(), dir));
+        // 무엇을 기다렸는지만 적으면 원인을 못 찾는다 — 폴더에 지금 무엇이 있는지까지 같이 남긴다.
+        List<String> present = StaleFiles.names(dir);
+        throw new IllegalStateException("수신 파일 대기 타임아웃 — %s (%d초, dir=%s) · 폴더 현황: %s"
+                .formatted(name, props.sync().waitTimeoutSec(), dir,
+                        present.isEmpty() ? "비어 있음(아무도 파일을 만들지 않았다)" : present));
+    }
+
+    /** 이번 요청보다 먼저 만들어진 파일인가 — 그렇다면 지난 배치의 잔재다. */
+    private boolean isStale(Path file, long notBefore) {
+        if (notBefore <= 0) {
+            return false;
+        }
+        try {
+            return Files.getLastModifiedTime(file).toMillis() < notBefore;
+        } catch (IOException e) {
+            return false;       // 못 읽으면 건드리지 않는다 — 지우는 쪽이 더 위험하다
+        }
     }
 
     /** 이미 와 있는지만 즉시 확인한다(대기 없음). */

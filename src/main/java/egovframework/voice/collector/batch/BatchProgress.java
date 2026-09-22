@@ -32,6 +32,13 @@ public class BatchProgress {
     private volatile String currentKind;
     private volatile long startedAt;
     private volatile long finishedAt;
+    /**
+     * 중단 요청 — 배치 루프가 건과 건 사이에서 본다.
+     *
+     * <p><b>처리 중인 건은 끝까지 간다.</b> 브로커 왕복이나 STT 호출 한가운데서 스레드를 끊으면
+     * 복호화 원본이 디스크에 남거나 반쯤 쓴 산출물이 생긴다. 다음 건으로 넘어가기 직전에만 멈춘다.</p>
+     */
+    private volatile boolean cancelRequested;
 
     private final AtomicInteger done = new AtomicInteger();
     private final AtomicInteger success = new AtomicInteger();
@@ -51,6 +58,7 @@ public class BatchProgress {
         success.set(0);
         fail.set(0);
         skipped.set(0);
+        this.cancelRequested = false;
         this.running = true;
     }
 
@@ -86,6 +94,21 @@ public class BatchProgress {
         this.finishedAt = System.currentTimeMillis();
     }
 
+    /** 중단을 요청한다. 돌고 있지 않으면 아무 일도 하지 않는다. */
+    public boolean cancel() {
+        if (!running) {
+            return false;
+        }
+        cancelRequested = true;
+        log.info("[Progress] 중단 요청 — execId={} ({}/{}건 처리 후)", execId, done.get(), total);
+        return true;
+    }
+
+    /** 배치 루프가 건과 건 사이에서 묻는다. */
+    public boolean isCancelRequested() {
+        return cancelRequested;
+    }
+
     /** 화면이 읽어 가는 한 장. 배치가 한 번도 안 돌았으면 {@code total=0} 이다. */
     public Map<String, Object> snapshot() {
         Map<String, Object> m = new LinkedHashMap<>();
@@ -102,6 +125,7 @@ public class BatchProgress {
         m.put("skipped", skipped.get());
         m.put("currentFile", currentFile);
         m.put("currentKind", currentKind);
+        m.put("canceled", cancelRequested);
         m.put("elapsedMs", startedAt == 0 ? 0 : (running ? System.currentTimeMillis() : finishedAt) - startedAt);
         return m;
     }

@@ -113,6 +113,10 @@ voice:
     mode: ${VOICE_STT_MODE:MOCK}
   decrypt:
     mode: ${VOICE_DECRYPT_MODE:SKIP}
+    # 프로젝트 안의 테스트 키를 기본으로 둔다 — 복호화를 REAL 로 올렸을 때 "키 경로가 비어 있다"
+    #   로 곧바로 막히지 않게. Mock 브로커가 같은 키로 암호화해 떨구므로 앞뒤가 맞는다.
+    #   ⚠ 실제 암호화 파일을 풀려면 실 키 경로를 VOICE_RVS_KEY_PATH 로 준다(이 파일은 테스트 값이다).
+    rvs-key-path: ${VOICE_RVS_KEY_PATH:rvs_key.txt}
 
   sync:
     # Mock 파일은 즉시 완성되므로 안정성 검사를 짧게 둔다.

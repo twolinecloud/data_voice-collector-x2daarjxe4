@@ -83,4 +83,18 @@ class BatchResultSerializationTest {
         assertThat(fail.path("execStsCd").asText()).isEqualTo("FAIL");
         assertThat(fail.path("outcomes").get(0).path("failedStep").asText()).isEqualTo("COLLECT");
     }
+
+    @Test
+    @DisplayName("중단한 배치는 CANCELED — 43건만 하고 멈췄는데 이력에 '성공'으로 남으면 안 된다")
+    void canceledBatchIsNotSuccess() throws Exception {
+        VoiceBatchResult r = sample(0);
+        VoiceBatchResult canceled = new VoiceBatchResult(r.execId(), r.execIdFromCollector(), r.window(),
+                160, 43, 0, 117, r.elapsedMs(), r.outputDirs(), r.steps(), r.outcomes(), true);
+
+        assertThat(canceled.execStsCd()).isEqualTo("CANCELED");
+        assertThat(mapper.readTree(mapper.writeValueAsString(canceled)).path("execStsCd").asText())
+                .isEqualTo("CANCELED");
+        // 실패가 0이라는 이유로 SUCCESS 가 되던 자리
+        assertThat(r.execStsCd()).as("중단이 아니면 그대로 SUCCESS").isEqualTo("SUCCESS");
+    }
 }
