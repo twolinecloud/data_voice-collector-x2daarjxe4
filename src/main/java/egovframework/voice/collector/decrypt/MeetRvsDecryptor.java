@@ -6,6 +6,7 @@ import egovframework.voice.collector.model.VoiceFile;
 import egovframework.voice.collector.model.VoiceKind;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -28,6 +29,7 @@ import java.nio.file.Path;
  */
 @Log4j2
 @Component
+@Order(10)
 @RequiredArgsConstructor
 public class MeetRvsDecryptor implements AudioDecryptor {
 
