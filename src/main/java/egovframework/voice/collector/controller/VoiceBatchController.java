@@ -20,7 +20,9 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -48,6 +50,8 @@ public class VoiceBatchController {
     private final egovframework.voice.collector.batch.BatchProgress progress;
     private final egovframework.voice.collector.health.HealthProbeService healthProbe;
     private final egovframework.voice.collector.batch.LastSuccessState lastSuccess;
+    private final egovframework.voice.collector.batch.StageFaultState stageFault;
+    private final egovframework.voice.collector.stt.SttTempStore sttTemp;
     private final IdempotencyGuard idempotency;
     private final VoiceProperties props;
     private final VoiceDirState dirs;
@@ -93,6 +97,80 @@ public class VoiceBatchController {
                                      @RequestParam(defaultValue = "false") boolean test) {
         return service.run(BatchWindow.periodic(LocalDateTime.now(), props.batch().periodicLagMin()),
                 kinds, "MANUAL", test);
+    }
+
+    @Operation(summary = "단계별 장애 주입 설정",
+            description = """
+                    T4 `STEP_TYPE_CD`(C05)와 같은 단위로 **단계마다 따로** 장애를 켭니다.
+                    전역 스위치 하나가 모든 구간에 걸리던 방식을 대체합니다 —
+                    "STT 만 죽었을 때 이어서 처리되는가" 를 보려는데 수집까지 같이 깨지면 시나리오가 성립하지 않습니다.
+
+                    - `mode=OFF` 정상 · `ALL` 전건 실패 · `PARTIAL` 정해진 건수만 실패
+                    - `PARTIAL` 은 **확률이 아니라 건수**입니다. 10건 배치에 10% 면 정확히 1건이 실패해
+                      배치가 `PARTIAL` 로 끝납니다. 작은 배치에서도 최소 1건은 실패시킵니다.
+                    """)
+    @PutMapping("/faults/{stage}")
+    public Map<String, Object> setFault(
+            @PathVariable egovframework.voice.collector.batch.StageFaultState.Stage stage,
+            @RequestParam egovframework.voice.collector.batch.StageFaultState.Mode mode,
+            @RequestParam(required = false) Integer failPercent) {
+        stageFault.set(stage, mode, failPercent);
+        return stageFault.snapshot();
+    }
+
+    @Operation(summary = "단계별 장애 전체 해제",
+            description = "시나리오를 바꿀 때 앞 설정이 남아 간섭하지 않게 한 번에 끕니다.")
+    @DeleteMapping("/faults")
+    public Map<String, Object> clearFaults() {
+        stageFault.clear();
+        return stageFault.snapshot();
+    }
+
+    @Operation(summary = "단계별 장애 현황")
+    @GetMapping("/faults")
+    public Map<String, Object> faults() {
+        return stageFault.snapshot();
+    }
+
+    @Operation(summary = "재처리 — 이어서 하기(Resume)",
+            description = """
+                    보존된 중간 산출물로 **끊긴 단계부터** 다시 돌립니다.
+
+                    | resume | 시작 단계 | 쓰는 보존물 |
+                    |---|---|---|
+                    | `FULL` | 수집부터 전부 | 없음 |
+                    | `FROM_ANALYZE` | STT 부터 | `{ROOT}/xvram/decoding/decrypted_*` |
+                    | `FROM_SEND` | 최종 저장부터 | `{ROOT}/stt_temp/{execId}/*.json` |
+
+                    **보존물이 없으면 앞 단계로 내려갑니다.** 이어서 하기는 빠른 길이지 유일한 길이 아니라,
+                    `voice.resume.keep-on-failure=false` 인 환경에서도 재처리가 그대로 동작합니다.
+
+                    이미 성공한 건은 멱등 표식 때문에 `건너뜀` 이 되므로, 실패했던 건만 다시 처리됩니다.
+                    `fromExecId` 를 주면 그 배치의 보존물만 봅니다(비우면 가장 최근 것).
+                    """)
+    @PostMapping("/batches/resume")
+    public VoiceBatchResult resume(
+            @RequestParam(defaultValue = "FROM_ANALYZE") egovframework.voice.collector.batch.ResumeMode resume,
+            @RequestParam(required = false) String fromExecId,
+            @RequestParam(required = false) List<VoiceKind> kinds,
+            @RequestParam(defaultValue = "false") boolean test,
+            @RequestParam(defaultValue = "2880") int lookbackMin) {
+        LocalDateTime now = LocalDateTime.now();
+        // 재처리는 실패한 건을 다시 잡아야 하므로 창을 넉넉히 연다. 기본 이틀치 —
+        //   주기 창(20분)으로 잡으면 조금 전에 깨진 건도 이미 창 밖이고, 하루치로 잡으면
+        //   일배치 픽스처의 첫 건(어제 00:00:00)이 24시간을 넘겨 빠진다.
+        BatchWindow window = BatchWindow.manual(now.minusMinutes(Math.max(1, lookbackMin)), now.plusMinutes(1));
+        log.info("[Batch] 재처리 — resume={} fromExecId={} 창=[{} ~ {})", resume, fromExecId, window.from(), window.to());
+        return service.run(window, kinds, "RESUME", test, resume, fromExecId);
+    }
+
+    @Operation(summary = "중간 산출물 현황",
+            description = "지금 보존된 전사 결과가 어느 배치에 몇 건 남아 있는지. 재처리가 무엇을 집어 갈지 미리 봅니다.")
+    @GetMapping("/batches/preserved")
+    public Map<String, Object> preserved() {
+        Map<String, Object> out = new LinkedHashMap<>(sttTemp.status());
+        out.put("decryptedAudioDir", dirs.work());
+        return out;
     }
 
     @Operation(summary = "연계 5종 헬스체크",
@@ -239,6 +317,8 @@ public class VoiceBatchController {
         out.put("warnings", warnings());
         // 장애 주입이 켜진 줄 모르고 시연하면 실패 건수를 버그로 오해한다 — 항상 노출한다.
         out.put("chaos", faultInjector.snapshot());
+        // 단계별 장애(T4 STEP_TYPE_CD 단위) — 화면이 켜져 있는 단계를 알아야 경고를 띄운다
+        out.put("stageFaults", stageFault.snapshot());
         out.put("dataset", dataset.snapshot());
         // 환경 자동 감지(OS · profile) 결과 — 화면이 이 값으로 경로·브로커·컬렉터를 자동으로 맞춘다
         out.put("env", deployEnv.snapshot());

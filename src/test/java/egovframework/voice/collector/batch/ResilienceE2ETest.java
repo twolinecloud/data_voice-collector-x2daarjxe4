@@ -61,6 +61,11 @@ class ResilienceE2ETest {
         registry.add("voice.sync.wait-timeout-sec", () -> "15");
         registry.add("voice.sync.stable-check-ms", () -> "30");
         registry.add("log-collector.enabled", () -> "false");
+        // 이 클래스가 지키는 것은 PII 보장이다 — '실패해도 복호화 원본을 남기지 않는다'.
+        //   Resume 를 위한 보존(voice.resume.keep-on-failure, 기본 true)은 그 보장과 정면으로
+        //   맞서므로 여기서는 끄고 본다. 보존 쪽 동작은 SttTempStore·StageFault 테스트와
+        //   실기동 검증이 따로 덮는다.
+        registry.add("voice.resume.keep-on-failure", () -> "false");
     }
 
     @Autowired

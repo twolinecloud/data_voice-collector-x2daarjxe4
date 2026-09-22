@@ -78,6 +78,19 @@ public class VoiceCollectService {
     private final BatchProgress progress;
     private final egovframework.voice.collector.transfer.AgentConnectorClient agentConnector;
     private final LastSuccessState lastSuccess;
+    private final StageFaultState stageFault;
+    private final egovframework.voice.collector.stt.SttTempStore sttTemp;
+
+    /**
+     * 실패한 건의 중간 산출물을 남길지 — <b>Resume 의 전제</b>.
+     *
+     * <p>켜면 복호화 오디오({@code {ROOT}/xvram/decoding})와 전사 결과({@code stt_temp/{execId}})가
+     * 남아 다음 재처리가 그 단계부터 이어서 간다. ⚠ 복호화 오디오는 평문이고 그 안에 성명·
+     * 주민등록번호가 들어 있다 — 운영에서 PII 를 즉시 지워야 하면 {@code false} 로 내린다.
+     * 꺼도 재처리는 동작한다: 보존물이 없으면 앞 단계부터 다시 한다.</p>
+     */
+    @org.springframework.beans.factory.annotation.Value("${voice.resume.keep-on-failure:true}")
+    private boolean keepOnFailure;
 
     /**
      * 배치를 1회 실행한다.
@@ -99,6 +112,17 @@ public class VoiceCollectService {
      *                정합성 대사(T1.SUCCESS_CNT == Σ T3·T4·T5)가 의미를 잃는다.
      */
     public VoiceBatchResult run(BatchWindow window, List<VoiceKind> kinds, String triggerBy, boolean testRun) {
+        return run(window, kinds, triggerBy, testRun, ResumeMode.FULL, null);
+    }
+
+    /**
+     * 배치를 1회 실행한다 — <b>이어서 하기(Resume)</b> 포함.
+     *
+     * @param resume     어느 단계부터 이어서 할지. {@link ResumeMode#FULL} 이면 종전대로 전부 한다
+     * @param fromExecId 보존물을 어느 배치에서 찾을지. 비면 가장 최근 것
+     */
+    public VoiceBatchResult run(BatchWindow window, List<VoiceKind> kinds, String triggerBy, boolean testRun,
+                                ResumeMode resume, String fromExecId) {
         long startedAt = System.currentTimeMillis();
         List<VoiceKind> targets = (kinds == null || kinds.isEmpty())
                 ? List.of(VoiceKind.MEET, VoiceKind.PHONE) : kinds;
@@ -122,6 +146,7 @@ public class VoiceCollectService {
 
         // ── T2 ① COLLECT — 파일 확보·복호화. 배치 시작에 연다 ────────────────────
         RunContext ctx = new RunContext(execId);
+        ctx.fromExecId = fromExecId;
         ctx.collectStepId = logCollector.createStep(execId, (short) 1, FileProcOutcome.STEP_COLLECT);
 
         List<VoiceTarget> found = findTargets(window, targets);
@@ -130,10 +155,12 @@ public class VoiceCollectService {
         // 화면 진행률 — 대상 수가 확정된 지금부터 센다. 배치 REST 는 동기라 이것 없이는
         // 수 분짜리 배치가 도는지 죽었는지 화면에서 알 수 없다.
         progress.begin(execId, window.toString(), found.size());
+        // 부분 성공은 확률이 아니라 건수다 — 대상 수가 정해진 지금 몇 건을 떨어뜨릴지 확정한다.
+        stageFault.beginBatch(found.size());
         try {
             for (VoiceTarget t : found) {
                 progress.startFile(t);
-                FileProcOutcome o = processOne(t, ctx);
+                FileProcOutcome o = processOne(t, ctx, resume);
                 progress.finishFile(o.status());
                 outcomes.add(o);
             }
@@ -203,6 +230,7 @@ public class VoiceCollectService {
     /** 배치 1회 동안 단계 기록이 들고 다니는 상태 — 단계 ID 와 구간별 누적 시간. */
     private static final class RunContext {
         final String execId;
+        String fromExecId;
         String collectStepId;
         String analyzeStepId;
         String sendStepId;
@@ -305,7 +333,17 @@ public class VoiceCollectService {
      * 그 자리에서 지우지 않으면 <b>복호화된 음성이 디스크에 남는다</b>. 정책은 성공·실패를
      * 가리지 않고 즉시 삭제다(계획서 5.3-(4)).</p>
      */
-    private FileProcOutcome processOne(VoiceTarget target, RunContext ctx) {
+    /**
+     * 한 건을 처리한다 — 수집(+복호화) → 분석(STT) → 전송(최종 저장).
+     *
+     * <p><b>이어서 하기</b>: {@code resume} 가 가리키는 단계부터 시작하되, 그 단계가 기대하는
+     * 보존물이 없으면 앞 단계로 내려간다. 보존물은 빠른 길일 뿐 유일한 길이 아니다.</p>
+     *
+     * <p><b>중간 산출물</b>: 성공하면 지우고, 실패하면 남긴다({@code voice.resume.keep-on-failure}).
+     * 남겨야 다음 재처리가 그 단계부터 갈 수 있다. ⚠ 복호화 오디오는 평문이라 PII 가 디스크에
+     * 머문다 — 운영에서 즉시 지워야 하면 설정을 내린다.</p>
+     */
+    private FileProcOutcome processOne(VoiceTarget target, RunContext ctx, ResumeMode resume) {
         long t0 = System.currentTimeMillis();
 
         if (idempotency.isProcessed(target)) {
@@ -313,57 +351,103 @@ public class VoiceCollectService {
             return FileProcOutcome.skipped(target, "이미 처리된 건");
         }
 
-        // 이번 건이 디스크에 만든 것들 — 어떤 경로로 끝나든 전부 지운다.
+        // 이 건이 디스크에 만든 것들 — 성공했을 때만 지운다.
         List<Path> toClean = new ArrayList<>(2);
         String step = FileProcOutcome.STEP_COLLECT;
+        boolean ok = false;
+        // STT 가 쓸 오디오 — 실패했을 때 이것을 보존해야 재처리가 STT 부터 갈 수 있다.
+        //   복호화 산출물에만 기대면 안 된다: 복호화가 SKIP 이면 산출물이 아예 없고,
+        //   그러면 '분석 장애 -> 이어서 하기' 시나리오가 성립하지 않는다.
+        Path readyAudio = null;
         try {
-            SttResult stt;
+            SttResult stt = null;
             long fileSize = 0L;
             VoiceFile plain = null;
 
-            SttResult reused = target.hasSourceStt() ? tryReadSourceStt(target) : null;
-            if (reused == null) {
-                VoiceFile file = acquire(target, ctx.execId);
-                toClean.add(file.path());
-                fileSize = file.sizeBytes();
-
-                plain = decryptService.decrypt(file);
-                if (!plain.path().equals(file.path())) {
-                    toClean.add(plain.path());   // 복호화가 새 파일을 만든 경우
+            // ── SEND 부터 이어서 — 보존된 전사 결과를 찾는다 ──────────────────────
+            if (resume == ResumeMode.FROM_SEND) {
+                stt = sttTemp.find(target, ctx.fromExecId).orElse(null);
+                if (stt == null) {
+                    log.info("[Resume] 보존된 전사 결과가 없다 — {} · STT 부터 다시 한다", target.shortId());
+                    resume = ResumeMode.FROM_ANALYZE;
+                } else {
+                    log.info("[Resume] 전사 결과 재사용 — {} ({}자) · 수집·복호화·STT 생략",
+                            target.shortId(), stt.charCount());
                 }
+            }
+
+            // ── ANALYZE 부터 이어서 — 보존된 복호화 오디오를 찾는다 ────────────────
+            if (stt == null && resume == ResumeMode.FROM_ANALYZE) {
+                plain = findPreservedAudio(target).orElse(null);
+                if (plain == null) {
+                    log.info("[Resume] 보존된 복호화 오디오가 없다 — {} · 수집부터 다시 한다", target.shortId());
+                } else {
+                    fileSize = plain.sizeBytes();
+                    log.info("[Resume] 복호화 오디오 재사용 — {} · 수집·복호화 생략", plain.path().getFileName());
+                }
+            }
+
+            // ── COLLECT — 파일 확보 · 복호화 ────────────────────────────────────
+            if (stt == null && plain == null) {
+                if (stageFault.shouldFail(StageFaultState.Stage.COLLECT)) {
+                    throw StageFaultState.fault(StageFaultState.Stage.COLLECT, "수집 단계 장애 주입");
+                }
+                SttResult reused = target.hasSourceStt() ? tryReadSourceStt(target) : null;
+                if (reused == null) {
+                    VoiceFile file = acquire(target, ctx.execId);
+                    toClean.add(file.path());
+                    fileSize = file.sizeBytes();
+
+                    plain = decryptService.decrypt(file);
+                    if (!plain.path().equals(file.path())) {
+                        toClean.add(plain.path());   // 복호화가 새 파일을 만든 경우
+                    }
+                } else {
+                    stt = reused;   // 보라미가 이미 가진 STT(계획서 Q1) — 오디오를 만질 필요가 없다
+                }
+            }
+            if (plain != null) {
+                readyAudio = plain.path();
             }
             long tCollected = System.currentTimeMillis();
             ctx.collectMs += tCollected - t0;
 
-            // ── ANALYZE: STT → 출력 저장 ──────────────────────────────────────
+            // ── ANALYZE — STT ─────────────────────────────────────────────────
             step = FileProcOutcome.STEP_ANALYZE;
-            beginAnalyze(ctx);
-            if (reused != null) {
-                // 보라미가 이미 STT 를 가지고 있는 경우(계획서 Q1). 사실이면 오디오를 만질 필요가 없다.
-                stt = reused;
-            } else {
+            if (stt == null) {
+                beginAnalyze(ctx);
+                if (stageFault.shouldFail(StageFaultState.Stage.ANALYZE)) {
+                    throw StageFaultState.fault(StageFaultState.Stage.ANALYZE,
+                            "STT 호출 실패(500/Timeout) 주입");
+                }
                 stt = sttClient.transcribe(plain);
+                if (stt.isEmpty()) {
+                    ctx.analyzeMs += System.currentTimeMillis() - tCollected;
+                    return FileProcOutcome.fail(target, step, "STT 결과가 비어 있음", System.currentTimeMillis() - t0);
+                }
+                // 전사 결과를 남긴다 — SEND 가 깨져도 STT 를 다시 돌리지 않게.
+                sttTemp.save(ctx.execId, target, stt, fileSize);
             }
-
-            if (stt.isEmpty()) {
-                ctx.analyzeMs += System.currentTimeMillis() - tCollected;   // STT 구간에서 끝난 것
-                return FileProcOutcome.fail(target, step, "STT 결과가 비어 있음", System.currentTimeMillis() - t0);
-            }
-
             long tAnalyzed = System.currentTimeMillis();
             ctx.analyzeMs += tAnalyzed - tCollected;
 
-            // ── SEND: STT 결과를 배치 폴더로 내보낸다 — 다음 단계(제논)가 여기서 집어 간다.
-            //    여기까지 되어야 '성공' 이다.
+            // ── SEND — 최종 저장(PV) ──────────────────────────────────────────
             step = FileProcOutcome.STEP_SEND;
             beginSend(ctx);
+            if (stageFault.shouldFail(StageFaultState.Stage.SEND)) {
+                throw StageFaultState.fault(StageFaultState.Stage.SEND,
+                        "최종 저장 실패(Disk Full / IOException) 주입");
+            }
             SttOutputStore.Saved saved = outputStore.save(ctx.execId, target, stt, fileSize);
             ctx.sendMs += System.currentTimeMillis() - tAnalyzed;
             // 이관은 배치 끝에 한 번에 넘긴다 — 건마다 부르면 커넥터가 죽어 있을 때 건당 대기가 쌓인다.
             ctx.toTransfer.add(new egovframework.voice.collector.transfer.AgentConnectorClient.Output(
                     target.kind(), saved.textFile().getFileName().toString(), stt.text()));
 
+            // 끝까지 갔다 — 중간 산출물은 더 필요 없다.
+            sttTemp.discardAnywhere(target);
             idempotency.markProcessed(target);
+            ok = true;
             return FileProcOutcome.success(target, fileSize, stt.charCount(),
                     saved.textFile().toString().replace('\\', '/'), System.currentTimeMillis() - t0);
 
@@ -382,8 +466,97 @@ public class VoiceCollectService {
             return FileProcOutcome.fail(target, step, reason, ms);
 
         } finally {
-            cleanupAll(toClean);
+            // 성공했을 때만 지운다. 실패한 건의 복호화 오디오를 남겨야 다음 재처리가
+            // STT 부터 이어서 갈 수 있다 — keep-on-failure 를 내리면 종전대로 즉시 지운다.
+            if (ok) {
+                cleanupAll(toClean);
+                // 이 건이 앞선 실패에서 남긴 보존 오디오도 지운다 — 재처리로 되살려 썼든,
+                // 수집부터 다시 해서 성공했든 이제 필요 없다. 안 지우면 평문 PII 가 계속 쌓인다.
+                discardPreservedAudio(target);
+            } else if (!keepOnFailure) {
+                cleanupAll(toClean);
+            } else {
+                // 실패 — STT 가 쓸 오디오를 작업 폴더에 약속된 이름으로 남기고 나머지는 지운다.
+                Path kept = preserveAudio(target, readyAudio);
+                cleanupAll(toClean.stream().filter(p -> !p.equals(kept)).toList());
+                if (kept != null) {
+                    log.info("[Resume] 오디오 보존 — {} · 재처리가 STT 부터 이어 간다", kept.getFileName());
+                }
+            }
         }
+    }
+
+    /**
+     * 보존된 복호화 오디오를 찾는다 — {@code {ROOT}/xvram/decoding/decrypted_*}.
+     *
+     * <p>파일명은 복호화기가 정한 {@code decrypted_<원본명>} 이다. 원본명을 모르면 찾지 못한 것으로
+     * 본다 — 추측해서 엉뚱한 파일을 집으면 다른 사람의 음성을 STT 에 태우게 된다.</p>
+     */
+    /**
+     * 실패한 건의 오디오를 작업 폴더에 <b>약속된 이름</b>({@code decrypted_<원본명>})으로 남긴다.
+     *
+     * <p>이미 그 자리에 그 이름으로 있으면(복호화가 만든 경우) 그대로 두고, 다른 곳에 있으면
+     * 옮긴다. 이름을 한곳에서 정해 두어야 {@link #findPreservedAudio} 가 찾을 수 있다.</p>
+     *
+     * @return 보존한 경로. 남길 것이 없으면 {@code null}
+     */
+    /** 성공했으니 보존 오디오를 지운다 — 평문 PII 를 필요 이상으로 남기지 않는다. */
+    private void discardPreservedAudio(VoiceTarget target) {
+        String src = target.srcFileName();
+        if (src == null || src.isBlank()) {
+            return;
+        }
+        Path p = Path.of(dirs.work()).resolve("decrypted_" + src);
+        try {
+            if (Files.deleteIfExists(p)) {
+                log.debug("[Resume] 보존 오디오 정리 — {}", p.getFileName());
+            }
+        } catch (IOException e) {
+            log.debug("[Resume] 보존 오디오 정리 실패 — {} ({})", p, e.getMessage());
+        }
+    }
+
+    private Path preserveAudio(VoiceTarget target, Path audio) {
+        String src = target.srcFileName();
+        if (audio == null || src == null || src.isBlank() || !Files.isRegularFile(audio)) {
+            return null;
+        }
+        Path dest = Path.of(dirs.work()).resolve("decrypted_" + src);
+        try {
+            if (audio.toAbsolutePath().normalize().equals(dest.toAbsolutePath().normalize())) {
+                return audio;
+            }
+            Files.createDirectories(dest.getParent());
+            Files.copy(audio, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return dest;
+        } catch (IOException e) {
+            // 보존에 실패해도 배치 결과는 바뀌지 않는다 — 재처리가 수집부터 다시 하면 된다.
+            log.warn("[Resume] 오디오 보존 실패 — {} ({}) · 재처리는 수집부터 한다", dest, e.getMessage());
+            return null;
+        }
+    }
+
+    private java.util.Optional<VoiceFile> findPreservedAudio(VoiceTarget target) {
+        String src = target.srcFileName();
+        if (src == null || src.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        Path p = Path.of(dirs.work()).resolve("decrypted_" + src);
+        if (!Files.isRegularFile(p)) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.of(new VoiceFile(target, p, Files.size(p), formatOf(src), true));
+        } catch (IOException e) {
+            log.warn("[Resume] 보존 오디오를 읽지 못했다 — {} ({})", p, e.getMessage());
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** 원본 파일명의 확장자로 포맷을 본다 — 보존물은 이미 복호화돼 있어 매직 넘버 판별이 필요 없다. */
+    private static String formatOf(String srcFileName) {
+        int dot = srcFileName.lastIndexOf('.');
+        return dot > 0 ? srcFileName.substring(dot + 1).toLowerCase() : "unknown";
     }
 
     /**
