@@ -8,6 +8,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * STT Mock — NPU 없이 고정 텍스트를 돌려준다.
  *
@@ -16,6 +19,10 @@ import org.springframework.stereotype.Component;
  * 않는지(글자 수만 남기는지)를 실제와 같은 조건으로 확인할 수 있다.</p>
  *
  * <p>아래 값은 전부 <b>가공된 테스트 데이터</b>다. 실제 수용자·수신자 정보가 아니다.</p>
+ *
+ * <p><b>Whisper 표준 JSON 의 모양으로 돌려준다</b> — 대본을 줄 단위로 끊어 {@code segments} 를
+ * 만들고 {@code start}/{@code end} 를 채운다. 실물 엔진이 구간을 줄 때와 같은 모양이라야,
+ * 구간을 쓰는 쪽(산출물 {@code transcript})을 Mock 으로도 검증할 수 있다.</p>
  */
 @Log4j2
 @Component
@@ -42,17 +49,39 @@ public class MockSttClient implements SttClient {
             면회 시간 다 됐습니다. 마무리해 주세요.
             """;
 
+    /** 한 줄(=한 구간)이 차지하는 시간. 실제 발화 속도와 무관한 고정값이다 — 모양만 같으면 된다. */
+    private static final double SEG_SEC = 4.5;
+
     @Override
     public SttResult transcribe(VoiceFile file) {
         // 장애 시뮬레이션이 켜져 있으면 여기서 지연·예외가 난다.
         // 한 건이 터져도 배치가 끝까지 도는지(processOne 의 건별 격리) 확인하기 위한 지점이다.
         faultInjector.maybeInject(FaultInjector.Stage.STT);
 
-        String text = (file.target().kind() == VoiceKind.MEET) ? MEET_SCRIPT : PHONE_SCRIPT;
+        String script = (file.target().kind() == VoiceKind.MEET) ? MEET_SCRIPT : PHONE_SCRIPT;
+        // 대본을 줄 단위로 끊어 구간을 만든다 — 실물 엔진이 segments 를 줄 때와 같은 모양이라야
+        // 구간을 쓰는 쪽(산출물 transcript)을 Mock 으로도 검증할 수 있다.
+        List<String> lines = new ArrayList<>(script.strip().lines()
+                .map(String::strip).filter(l -> !l.isEmpty()).toList());
         // 건마다 구분되도록 식별자를 덧붙인다 — 로그에서 어느 건의 텍스트인지 추적할 수 있다.
-        String body = text.strip() + "\n(테스트 데이터 / " + file.target().shortId() + ")";
-        log.info("[STT:MOCK] {} — {}자", file.path().getFileName(), body.length());
-        return new SttResult(body, "MOCK", 30, false);
+        lines.add("(테스트 데이터 / " + file.target().shortId() + ")");
+
+        List<SttResult.Segment> segments = new ArrayList<>(lines.size());
+        for (int i = 0; i < lines.size(); i++) {
+            double start = round1(i * SEG_SEC);
+            segments.add(new SttResult.Segment(i, start, round1(start + SEG_SEC), lines.get(i)));
+        }
+        String body = String.join("\n", lines);
+        double duration = round1(lines.size() * SEG_SEC);
+
+        log.info("[STT:MOCK] {} — {}자 · {}초 · 구간 {}개",
+                file.path().getFileName(), body.length(), duration, segments.size());
+        return new SttResult(body, "MOCK", duration, false, "ko", segments);
+    }
+
+    /** 소수 첫째 자리 — Whisper 도 그 정도로 준다. 자릿수가 길면 산출물만 지저분해진다. */
+    private static double round1(double v) {
+        return Math.round(v * 10d) / 10d;
     }
 
     @Override
