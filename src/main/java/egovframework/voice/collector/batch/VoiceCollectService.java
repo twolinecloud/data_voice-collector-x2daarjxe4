@@ -157,8 +157,21 @@ public class VoiceCollectService {
         progress.begin(execId, window.toString(), found.size());
         // 부분 성공은 확률이 아니라 건수다 — 대상 수가 정해진 지금 몇 건을 떨어뜨릴지 확정한다.
         stageFault.beginBatch(found.size());
+        boolean canceled = false;
         try {
             for (VoiceTarget t : found) {
+                // 중단은 건과 건 사이에서만 받는다 — 처리 중인 건을 끊으면 복호화 원본이 남거나
+                //   반쯤 쓴 산출물이 생긴다. 남은 건은 '중단됨' 으로 세어 합계를 맞춘다.
+                if (progress.isCancelRequested()) {
+                    canceled = true;
+                    log.warn("[Batch] 중단 요청 — execId={} · 처리 {}건 · 남은 {}건은 건너뜀으로 남긴다",
+                            execId, outcomes.size(), found.size() - outcomes.size());
+                    for (VoiceTarget rest : found.subList(outcomes.size(), found.size())) {
+                        outcomes.add(FileProcOutcome.skipped(rest, "중단됨 — 사용자가 배치를 멈췄습니다"));
+                        progress.finishFile(ProcStatus.SKIPPED);
+                    }
+                    break;
+                }
                 progress.startFile(t);
                 FileProcOutcome o = processOne(t, ctx, resume);
                 progress.finishFile(o.status());
@@ -212,16 +225,20 @@ public class VoiceCollectService {
 
         long elapsedMs = System.currentTimeMillis() - startedAt;
         VoiceBatchResult result = new VoiceBatchResult(execId, collectorExecId != null, window.toString(),
-                found.size(), success, fail, skipped, elapsedMs, outputDirs, steps, outcomes);
+                found.size(), success, fail, skipped, elapsedMs, outputDirs, steps, outcomes, canceled);
 
         // [바로 실행]의 시작점 — 성공 건이 있을 때만 민다. 실패한 배치로 기준점을 옮기면
         // 그 구간이 영영 수집되지 않는다.
-        lastSuccess.record(LocalDateTime.now().withNano(0), execId, success);
+        //   중단도 같다. 160건 중 43건만 하고 멈췄는데 기준점을 '지금'으로 옮기면,
+        //   손대지 않은 117건은 다음 [바로 실행]의 창에서 빠져 아무도 다시 보지 않는다.
+        if (!canceled) {
+            lastSuccess.record(LocalDateTime.now().withNano(0), execId, success);
+        }
 
         logCollector.finishBatch(execId, result.execStsCd(), elapsedSec(startedAt),
                 (long) found.size(), (long) success, (long) fail,
                 result.errMsg() == null ? null : LogCollectorClient.FileProcReq.errStackOf(result.errMsg()));
-        log.info("[Batch] 종료 — {}", result.summary());
+        log.info("[Batch] 종료{} — {}", canceled ? "(중단됨)" : "", result.summary());
         return result;
     }
 
@@ -567,6 +584,8 @@ public class VoiceCollectService {
      * 어느 쪽이든 마지막은 수신 디렉터리를 보는 것으로 같다.</p>
      */
     private VoiceFile acquire(VoiceTarget target, String execId) {
+        // 요청하기 직전 시각 — 이보다 오래된 파일은 이번 요청의 산출물일 수 없다(지난 배치의 잔재).
+        long requestedAt = System.currentTimeMillis();
         if (target.kind() == VoiceKind.MEET) {
             log.info("[Track:MEET] ② XVARM 추출 요청 — {} via 브로커 {} (execId={})", target.shortId(), broker.mode(), execId);
             XvarmBrokerClient.ExtractResult extracted = broker.extract(target, execId);
@@ -581,12 +600,12 @@ public class VoiceCollectService {
             //   추측한 이름으로 찾으면 브로커가 다른 이름으로 만들었을 때 영영 못 찾고 타임아웃이 난다.
             //   Mock 브로커는 우리와 같은 명명 정책을 써서 우연히 일치했을 뿐이고,
             //   실제 XVARM 이 파일명을 어떻게 정하는지는 아직 모른다(계획서 Q3).
-            return watcher.await(target, fileNameOf(extracted.filePath()));
+            return watcher.await(target, fileNameOf(extracted.filePath()), requestedAt);
         }
         log.info("[Track:PHONE] ② 전화 파일 연계 요청 — {} via {}", target.shortId(), phoneFileProvider.mode());
         phoneFileProvider.request(target);
         log.info("[Track:PHONE] ③ 수신 대기 — {}", target.shortId());
-        return watcher.await(target);
+        return watcher.await(target, null, requestedAt);
     }
 
     /** 경로에서 파일명만 뽑는다. 경로가 비었으면 null — watcher 가 정책으로 되돌아간다. */

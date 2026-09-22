@@ -21,6 +21,7 @@ import java.util.Map;
  *                            처리한 트랙만 실린다
  * @param steps               로그 컬렉터에 남긴 T2 단계 기록(COLLECT · ANALYZE)
  * @param outcomes            파일별 결과(= T4 행)
+ * @param canceled            사용자가 도중에 멈췄는가 — 남은 건은 {@code 건너뜀(중단됨)} 으로 들어 있다
  */
 public record VoiceBatchResult(
         String execId,
@@ -33,8 +34,18 @@ public record VoiceBatchResult(
         long elapsedMs,
         Map<String, String> outputDirs,
         List<StepLog> steps,
-        List<FileProcOutcome> outcomes
+        List<FileProcOutcome> outcomes,
+        boolean canceled
 ) {
+
+    /** 중단이 아닌 보통의 배치 — 기존 호출부를 그대로 둔다. */
+    public VoiceBatchResult(String execId, boolean execIdFromCollector, String window,
+                            int targetCnt, int successCnt, int failCnt, int skippedCnt,
+                            long elapsedMs, Map<String, String> outputDirs,
+                            List<StepLog> steps, List<FileProcOutcome> outcomes) {
+        this(execId, execIdFromCollector, window, targetCnt, successCnt, failCnt, skippedCnt,
+                elapsedMs, outputDirs, steps, outcomes, false);
+    }
 
     /**
      * T2 단계 1행의 요약 — 컬렉터에 보낸 값 그대로다.
@@ -54,12 +65,19 @@ public record VoiceBatchResult(
     /**
      * 배치 상태 코드(C04) — 하나도 실패하지 않았으면 SUCCESS, 일부만 성공이면 PARTIAL.
      *
+     * <p><b>중단은 성공이 아니다.</b> 사용자가 멈춘 배치는 남은 건이 실패가 아니라 건너뜀이라
+     * {@code failCnt==0} 이 되어 SUCCESS 로 떨어졌다 — 160건 중 43건만 처리하고 멈춘 배치가
+     * 이력에 초록색 '성공' 으로 남는다는 뜻이다. C04 에 있는 {@code CANCELED} 를 쓴다.</p>
+     *
      * <p>{@code @JsonProperty} 가 필요한 이유: record 는 <b>컴포넌트만</b> 자동 직렬화된다.
      * 파생 값을 주는 이런 메서드는 {@code get} 접두어도 없어 Jackson 이 그냥 건너뛴다 —
      * 응답에서 조용히 빠져 화면에 빈칸으로 나온다.</p>
      */
     @JsonProperty("execStsCd")
     public String execStsCd() {
+        if (canceled) {
+            return "CANCELED";
+        }
         if (failCnt == 0) {
             return "SUCCESS";
         }

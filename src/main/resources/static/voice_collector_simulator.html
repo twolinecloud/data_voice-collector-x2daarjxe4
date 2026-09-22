@@ -405,6 +405,8 @@
         <button class="btn btn-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
         <button class="btn btn-outline-primary btn-sm" id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
         <button class="btn btn-sm" id="btn-phone" style="color:#6f42c1;border-color:#6f42c1;background:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
+        <button class="btn btn-danger btn-sm d-none" id="btn-cancel"
+                title="POST /api/v1/voice/batches/cancel — 처리 중인 건은 끝내고, 남은 건은 건너뜀으로 남깁니다">중단</button>
       </div>
       <div class="d-flex flex-wrap gap-2 mb-2">
         <button class="btn btn-outline-secondary btn-sm" id="btn-targets">처리 대상 미리보기</button>
@@ -899,6 +901,7 @@ function renderTracks(tracks) {
     const d = await call('PUT', `/api/v1/mock/endpoints/${key}?value=${encodeURIComponent(value)}`, `브로커 주소 변경 → ${value || '(비움)'}`);
     if (d) log(`  └ ${d.before || '(없음)'} → ${d.after || '(없음)'}`, 'ok');
     await loadStatus(true);
+    await refreshHealthFor('broker');   // 바꾼 주소로 배지를 바로 다시 찍는다
   }
   document.querySelectorAll('input[data-url-radio]').forEach(r => {
     r.onchange = () => { if (r.checked) applyUrl(r.dataset.urlRadio, r.value); };
@@ -910,6 +913,7 @@ function renderTracks(tracks) {
       const d = await call('PUT', `/api/v1/mock/modes/${key}?value=${encodeURIComponent(val)}`, `${key} → ${lbl(key, val)}`);
       if (d) log(`  └ ${key}: ${lbl(key, d.before)} → ${lbl(key, d.after)}`, 'ok');
       await loadStatus(true);
+      await refreshHealthFor(key);
     };
   });
   document.querySelectorAll('select[data-switch]').forEach(sel => {
@@ -920,8 +924,22 @@ function renderTracks(tracks) {
       await loadStatus(true);
       // 조회 대상 DB 가 바뀌었다 — 개발계 DB 면 실제로 붙는지 바로 확인해 준다(포트포워딩 누락을 여기서 잡는다)
       if (key === 'source' && (val === 'DIRECT_JDBC' || val === 'MOCK')) await probeDb(true);
+      await refreshHealthFor(key);
     };
   });
+}
+
+/**
+ * 연결 대상이 바뀌면 배지를 <b>그 자리에서</b> 다시 찍는다.
+ *
+ * <p>배지는 서버가 3초 캐시를 두고 화면은 60초마다 폴링한다. 그래서 브로커를 로컬 PC 로 바꾸고도
+ * 헤더는 한동안 개발계 K8s 를 찔러 본 결과를 들고 있었다 — 주소는 이미 바뀌어 있는데 배지만
+ * 옛 주소를 말하니, 보는 사람은 설정이 안 먹었다고 읽는다. <code>force=true</code> 로 캐시를
+ * 건너뛰고 지금 설정된 주소를 다시 찔러 맞춘다.</p>
+ */
+async function refreshHealthFor(key) {
+  if (key !== 'broker' && key !== 'source' && key !== 'stt') return;
+  if (HEALTH_PAUSED === 0) await checkHealth(true);
 }
 function trackCard(kind, tr) {
   if (!tr) return '';
@@ -1238,6 +1256,25 @@ function setBatchRunning(activeId, on) {
               b.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>실행 중…'; }
     else { b.innerHTML = b.dataset.label; b.classList.remove('is-running'); }
   });
+  // [중단] 은 도는 동안에만 보인다 — 평소에 떠 있으면 누를 일 없는 빨간 버튼이 하나 늘 뿐이다.
+  const c = $('btn-cancel');
+  c.classList.toggle('d-none', !on);
+  if (on) { c.disabled = false; c.textContent = '중단'; }
+}
+
+/**
+ * 배치를 멈춘다 — 건과 건 <b>사이</b>에서만 끊는다.
+ *
+ * <p>처리 중인 한 건은 끝까지 간다. 복호화·STT 중간에 칼을 넣으면 잘린 파일과 반쪽 이력이 남고,
+ * 그 뒤처리가 배치를 멈추는 것보다 비싸다. 남은 건은 <code>건너뜀</code>으로 남아 재처리가 집어 간다.</p>
+ */
+async function cancelBatch() {
+  const c = $('btn-cancel');
+  c.disabled = true;
+  c.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>중단하는 중…';
+  const d = await call('POST', '/api/v1/voice/batches/cancel', '배치 중단 요청');
+  // accepted=false 는 "돌고 있는 배치가 없다" 는 뜻 — 버튼을 되살려 둔다.
+  if (d && d.accepted === false) { c.disabled = false; c.textContent = '중단'; }
 }
 async function runBatch(path, label, kind, btnId) {
   setBatchRunning(btnId, true);
@@ -1311,11 +1348,13 @@ function renderProgress(p) {
   if (p.fail) parts.push(`실패 ${p.fail}`);
   if (p.skipped) parts.push(`건너뜀 ${p.skipped}`);
   $('prog-sum').textContent = parts.join(' · ');
-  if (p.running && p.currentFile) {
+  if (p.running && p.canceled) {
+    $('prog-cur').textContent = '중단하는 중 — 처리 중인 건을 끝내고 멈춥니다…';
+  } else if (p.running && p.currentFile) {
     $('prog-cur').innerHTML = `처리 중: <span class="tag ${esc(p.currentKind||'')}">${esc(p.currentKind||'')}</span> ${esc(p.currentFile)}`;
   } else if (!p.running) {
     $('prog-cur').textContent = total > 0
-      ? `완료 — ${total}건 처리 (${Math.round((p.elapsedMs||0)/100)/10}초)`
+      ? `${p.canceled ? '중단됨' : '완료'} — ${total}건 중 ${done}건 처리 (${Math.round((p.elapsedMs||0)/100)/10}초)`
       : '처리할 대상이 없습니다';
   }
 }
@@ -1656,6 +1695,7 @@ $('btn-meet').onclick     = () => runBatch('/api/v1/voice/batches/periodic', '�
 $('btn-phone').onclick    = () => runBatch('/api/v1/voice/batches/periodic', '전화 트랙만 실행 (10분 창)',  'PHONE', 'btn-phone');
 $('btn-periodic').onclick = () => runBatch('/api/v1/voice/batches/periodic', '전체 실행 (10분 창)',          null,    'btn-periodic');
 $('btn-daily').onclick    = () => runBatch('/api/v1/voice/batches/daily',    '전체 실행 (전날 하루치)',      null,    'btn-daily');
+$('btn-cancel').onclick   = cancelBatch;
 $('btn-ondemand').onclick = async () => {
   await runBatch('/api/v1/voice/batches/on-demand', '바로 실행 (마지막 성공 ~ 현재)', null, 'btn-ondemand');
   await loadLastSuccess();

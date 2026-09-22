@@ -10,6 +10,7 @@ import egovframework.voice.collector.model.BatchWindow;
 import egovframework.voice.collector.model.VoiceKind;
 import egovframework.voice.collector.model.VoiceTarget;
 import egovframework.voice.collector.source.BoramiSourceClient;
+import egovframework.voice.collector.util.StaleFiles;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -147,12 +148,7 @@ public class VoiceMockController {
 
     /** 멱등 표식 · 수신 파일 · Mock 작업 산출물 삭제 — 생성/초기화 공통. */
     private Map<String, Object> clearLocal() {
-        Map<String, Object> cleared = new LinkedHashMap<>();
-        cleared.put("idempotencyMarkers", idempotency.clearAll());
-        cleared.put("meetFiles", deleteFilesIn(dirs.receiveMeet()));
-        cleared.put("phoneFiles", deleteFilesIn(dirs.receivePhone()));
-        cleared.put("workFiles", deleteFilesIn(Path.of(dirs.work(), "mock_source_stt").toString()));
-        return cleared;
+        return clearLocalFiles();
     }
 
     @Operation(summary = "시뮬레이션 데이터 초기화 (테스트 이력 + 시뮬레이션 데이터 일괄 삭제)",
@@ -190,11 +186,7 @@ public class VoiceMockController {
         }
 
         // ② 로컬 산출물
-        Map<String, Object> local = new LinkedHashMap<>();
-        local.put("idempotencyMarkers", idempotency.clearAll());
-        local.put("meetFiles", deleteFilesIn(dirs.receiveMeet()));
-        local.put("phoneFiles", deleteFilesIn(dirs.receivePhone()));
-        local.put("workFiles", deleteFilesIn(Path.of(dirs.work(), "mock_source_stt").toString()));
+        Map<String, Object> local = clearLocalFiles();
         local.put("sttOutputDirs", outputStore.deleteTestOutputs());
         out.put("local", local);
         dataset.reset();
@@ -600,25 +592,31 @@ public class VoiceMockController {
      * <p>재귀 삭제를 쓰지 않는 이유: 설정이 잘못돼 엉뚱한 경로가 들어오면 피해가 걷잡을 수 없다.
      * 초기화에 필요한 것은 평평한 파일 목록뿐이다.</p>
      */
-    private int deleteFilesIn(String dir) {
-        Path p = Path.of(dir);
-        if (!Files.isDirectory(p)) {
-            return 0;
+    /**
+     * 수신·작업 폴더를 비우고 <b>지우지 못한 것까지</b> 결과에 담는다.
+     *
+     * <p>지운 건수만 돌려주던 때는 "3건 삭제" 라고 보고해 놓고 실제로는 이름이 잡혀 있어,
+     * 다음 실행이 수신 대기 타임아웃으로 죽어도 그 연결을 아무도 못 봤다. 이제는 화면까지 올린다
+     * — {@code stuckFiles} 가 비어 있지 않으면 초기화가 끝난 것이 아니다.</p>
+     */
+    private Map<String, Object> clearLocalFiles() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        List<String> stuck = new ArrayList<>();
+        out.put("idempotencyMarkers", idempotency.clearAll());
+        for (var e : Map.of("meetFiles", dirs.receiveMeet(),
+                "phoneFiles", dirs.receivePhone(),
+                "workFiles", Path.of(dirs.work(), "mock_source_stt").toString()).entrySet()) {
+            StaleFiles.Result r = StaleFiles.deleteAllIn(Path.of(e.getValue()));
+            out.put(e.getKey(), r.deleted());
+            stuck.addAll(r.stuck());
         }
-        int[] count = {0};
-        try (Stream<Path> s = Files.list(p)) {
-            s.filter(Files::isRegularFile).forEach(f -> {
-                try {
-                    Files.delete(f);
-                    count[0]++;
-                } catch (IOException e) {
-                    log.warn("[Mock] 파일 삭제 실패 — {} ({})", f.getFileName(), e.getMessage());
-                }
-            });
-        } catch (IOException e) {
-            log.warn("[Mock] 디렉터리 조회 실패 — {} ({})", dir, e.getMessage());
+        if (!stuck.isEmpty()) {
+            out.put("stuckFiles", stuck);
+            out.put("stuckWarning", "이 파일들을 지우지 못했습니다 — 다른 프로그램(탐색기 미리보기·재생기·백신)이 "
+                    + "열고 있으면 같은 이름으로 새 파일을 만들 수 없어 다음 실행이 '수신 파일 대기 타임아웃'으로 "
+                    + "끝납니다. 해당 파일을 닫고 초기화를 다시 눌러 주세요");
         }
-        return count[0];
+        return out;
     }
 
     private List<Map<String, Object>> listFiles(String dir) {

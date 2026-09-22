@@ -135,4 +135,60 @@ class FileArrivalWatcherTest {
         Files.write(meet.resolve("mock_meet_001.m4a"), SilentWav.of(1));
         assertThat(w.isArrived(meetTarget())).isTrue();
     }
+
+    // ── 지난 배치의 잔재 ──────────────────────────────────────────────────
+    // [초기화] → [생성] → [실행] 이 '수신 파일 대기 타임아웃' 으로 끝나던 자리.
+    // 수집은 언제나 "요청 → 대기" 순서라, 요청 시점에 이미 그 이름이 있으면 옛 파일이다.
+
+    @Test
+    @DisplayName("요청보다 오래된 파일은 치우고 계속 기다린다 — 옛 음성을 새 것인 양 넘기지 않는다")
+    void removesFileOlderThanTheRequest() throws Exception {
+        Path meet = tmp.resolve("meet-stale");
+        FileArrivalWatcher w = watcher(meet);
+        Path stale = meet.resolve("mock_meet_001.m4a");
+        Files.write(stale, SilentWav.of(1));
+        Files.setLastModifiedTime(stale, java.nio.file.attribute.FileTime.fromMillis(1_000_000L));
+
+        long requestedAt = System.currentTimeMillis();
+        assertThatThrownBy(() -> w.await(meetTarget(), "mock_meet_001.m4a", requestedAt))
+                .as("잔재를 받아들여 성공으로 끝내면 안 된다")
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("대기 타임아웃");
+        assertThat(stale).as("치워야 브로커가 같은 이름으로 새로 만들 수 있다").doesNotExist();
+    }
+
+    @Test
+    @DisplayName("요청 뒤에 만들어진 파일은 그대로 받는다 — 잔재 판정이 새 파일을 잡아먹으면 안 된다")
+    void keepsFileCreatedAfterTheRequest() throws Exception {
+        Path meet = tmp.resolve("meet-fresh");
+        FileArrivalWatcher w = watcher(meet);
+        long requestedAt = System.currentTimeMillis() - 5_000;
+        Files.write(meet.resolve("mock_meet_001.m4a"), SilentWav.of(1));
+
+        VoiceFile f = w.await(meetTarget(), "mock_meet_001.m4a", requestedAt);
+
+        assertThat(f.sizeBytes()).isPositive();
+    }
+
+    @Test
+    @DisplayName("타임아웃 메시지가 폴더 현황을 말한다 — '기다렸다'만 적으면 원인을 못 찾는다")
+    void timeoutMessageShowsWhatIsInTheDirectory() throws Exception {
+        Path meet = tmp.resolve("meet-diag");
+        FileArrivalWatcher w = watcher(meet);
+        Files.write(meet.resolve("엉뚱한이름.m4a"), SilentWav.of(1));
+
+        assertThatThrownBy(() -> w.await(meetTarget(), "mock_meet_001.m4a"))
+                .hasMessageContaining("폴더 현황")
+                .hasMessageContaining("엉뚱한이름.m4a");
+    }
+
+    @Test
+    @DisplayName("폴더가 비었으면 그렇게 말한다 — 아무도 파일을 만들지 않았다는 뜻")
+    void timeoutMessageSaysEmpty() throws Exception {
+        Path meet = tmp.resolve("meet-empty");
+        FileArrivalWatcher w = watcher(meet);
+
+        assertThatThrownBy(() -> w.await(meetTarget(), "mock_meet_001.m4a"))
+                .hasMessageContaining("비어 있음");
+    }
 }

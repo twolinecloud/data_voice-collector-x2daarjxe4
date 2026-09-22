@@ -218,6 +218,31 @@ public class VoiceBatchController {
         return lastSuccess.snapshot();
     }
 
+    @Operation(summary = "배치 중단",
+            description = """
+                    돌고 있는 배치를 멈춥니다.
+
+                    **처리 중인 건은 끝까지 갑니다.** 브로커 왕복이나 STT 호출 한가운데서 끊으면
+                    복호화 원본이 디스크에 남거나 반쯤 쓴 산출물이 생깁니다. 다음 건으로 넘어가기 직전에만 멈춥니다.
+
+                    남은 건은 `건너뜀(중단됨)` 으로 남겨 T1·T4 의 합계가 어긋나지 않게 합니다.
+
+                    - `accepted` — **이번 요청이 먹혔는지.** 돌고 있지 않으면 `false` 입니다
+                    - `canceled` — 진행 상태에 남아 있는 중단 표식(직전 배치를 멈췄다면 그 배치가 끝난 뒤에도 `true`)
+                    """)
+    @PostMapping("/batches/cancel")
+    public Map<String, Object> cancelBatch() {
+        boolean accepted = progress.cancel();
+        Map<String, Object> out = new LinkedHashMap<>(progress.snapshot());
+        // 진행 상태를 먼저 깔고 그 위에 이번 요청의 결과를 얹는다.
+        //   반대로 하면 스냅샷의 canceled(직전 배치의 표식)가 이번 응답을 덮어써,
+        //   돌고 있지 않은데도 "중단했다"고 답하게 된다.
+        out.put("accepted", accepted);
+        out.put("message", accepted ? "중단을 요청했습니다 — 처리 중인 건이 끝나면 멈춥니다"
+                                    : "돌고 있는 배치가 없습니다");
+        return out;
+    }
+
     @Operation(summary = "배치 진행률",
             description = """
                     지금 도는 배치가 **몇 건 중 몇 번째**인지. 화면 진행률 바가 짧은 주기로 폴링합니다.
