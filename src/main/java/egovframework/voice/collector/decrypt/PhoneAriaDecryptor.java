@@ -3,6 +3,7 @@ package egovframework.voice.collector.decrypt;
 import egovframework.voice.collector.model.VoiceFile;
 import egovframework.voice.collector.model.VoiceKind;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Component;
  */
 @Log4j2
 @Component
+@Order(20)          // PhoneSimAesDecryptor(10) 가 Mock 데이터를 먼저 걸러 간다
 public class PhoneAriaDecryptor implements AudioDecryptor {
 
     @Override
