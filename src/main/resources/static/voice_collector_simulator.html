@@ -1701,10 +1701,11 @@ function renderSimResult(title, d, isSeed) {
       </div></div></div>
     </div>`;
 }
-// 상단 툴바 버튼은 어느 탭에서나 눌린다. 그런데 결과 카드(#sim-box)도 SQL 로그도 파이프라인 탭에 있어
-// 환경 탭에서 누르면 아무 일도 안 일어난 것처럼 보인다 — 결과가 있는 곳으로 데려간다.
+// 상단 툴바 버튼은 어느 탭에서나 눌린다. 결과 카드(#sim-box)와 SQL 로그는 파이프라인 탭에 있지만
+// 요약은 완료 팝업이 알려 주므로, 보던 탭을 그대로 둔다.
 $('btn-reset').onclick = async () => {
-  showTab('tab-pipeline');
+  // 탭을 옮기지 않는다 — 결과는 팝업이 알려 주므로 보던 자리를 뺏을 이유가 없다.
+  //   (② 제어의 결과 카드는 파이프라인 탭으로 옮겨 가면 그대로 남아 있다.)
   const info = await callFull('POST', '/api/v1/mock/sim-data', '시뮬레이션 데이터 생성 (Clean & Seed)');
   const d = info.ok ? info.body : null;
   if (!d) return;
@@ -1756,8 +1757,8 @@ $('btn-files').onclick = async () => {
   log(`  └ 접견 ${m}개 · 전화 ${p}개`, m+p>0 ? 'ok' : 'wr');
 };
 
-// 상단 툴바 버튼은 어느 탭에서나 눌린다. 그런데 결과 카드(#sim-box)도 SQL 로그도 파이프라인 탭에 있어
-// 환경 탭에서 누르면 아무 일도 안 일어난 것처럼 보인다 — 결과가 있는 곳으로 데려간다.
+// 상단 툴바 버튼은 어느 탭에서나 눌린다. 결과 카드(#sim-box)와 SQL 로그는 파이프라인 탭에 있지만
+// 요약은 완료 팝업이 알려 주므로, 보던 탭을 그대로 둔다.
 $('btn-test-clear').onclick = async () => {
   if (!confirm('테스트 이력(EXEC_ID 작업코드 TST 의 로그·STT 출력)과 시뮬레이션 데이터(DB 메타 SIM 행·XVARM 원본 더미 파일·멱등 표식)를 모두 지웁니다. 운영 배치(VOC·STR·EXT)는 지워지지 않습니다. 계속할까요?')) return;
   // 탭을 옮기지 않는다 — 결과는 팝업이 알려 주므로 보던 자리를 뺏을 이유가 없다.

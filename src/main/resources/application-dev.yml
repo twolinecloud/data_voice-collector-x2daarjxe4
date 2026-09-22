@@ -64,8 +64,14 @@ voice:
     #   MOCK → 수집 서비스 안에서 더미 파일을 만든다(브로커 없이 기동 가능)
     #   REST → 위 파드의 POST /api/v1/xvarm/extract 를 실제로 호출한다
     # 기본을 MOCK 으로 두는 것은 Fail-fast 정책이다 — 실물 전환은 항상 명시적으로 한다.
-    mode: ${VOICE_BROKER_MODE:MOCK}          # MOCK | REST
-    base-url: ${VOICE_BROKER_BASE_URL:}     # 비우면 환경 프리셋(K8s http://borami-xvarm-broker-1joiuorqhl:8080)
+    # 브로커가 개발계에 떠 있으므로 기본을 REST 로 둔다. MOCK 이면 접견이 실물 경로를 타지 않아
+    # "배포했는데 왜 Mock 이냐" 가 된다. 브로커 없이 돌려야 하면 화면에서 내리거나 VOICE_BROKER_MODE=MOCK.
+    mode: ${VOICE_BROKER_MODE:REST}          # MOCK | REST
+    # 주소를 명시한다 — 비워 두면 DeployEnvPreset 이 정하는데, 그 판정은 'Windows 이거나 local
+    #   프로파일이면 LOCAL' 이라 Windows 에서 dev 로 띄우면 localhost:8082 로 떨어진다.
+    #   컨테이너에서는 어차피 K8s 로 가지만, 기본값이 OS 에 따라 달라지면 확인이 어렵다.
+    #   차트 ConfigMap 이 VOICE_BROKER_BASE_URL 을 주면 그것이 이긴다.
+    base-url: ${VOICE_BROKER_BASE_URL:http://borami-xvarm-broker-1joiuorqhl:8080}
     # 시뮬레이터의 원클릭 주소 프리셋. 환경마다 브로커가 사는 곳이 달라
     # 매번 손으로 치지 않게 둔다. 주소가 바뀌면 여기만 고치면 화면에 그대로 반영된다.
     presets:
