@@ -71,6 +71,27 @@ public class SttOutputStore {
         m.put("audioBytes", audioBytes);
         m.put("textFile", text.getFileName().toString());
         m.put("processedAt", LocalDateTime.now().withNano(0).toString());
+
+        // ── transcript — 전사 구조(Whisper 표준 모양) ───────────────────────────
+        //   위의 처리 메타(execId·key·engine·durationSec…)는 <b>그대로 둔다</b>. 하류가 이미 그 이름으로
+        //   읽고 있어, 이름을 바꾸거나 자리를 옮기면 읽는 쪽이 조용히 깨진다. 전사 구조는 새 키 아래에만
+        //   담아 <b>더하기만</b> 한다 — 예전 산출물을 읽던 코드는 이 키를 모른 채 그대로 동작한다.
+        //   구간을 주지 않는 엔진·보라미 기존 STT 재사용(Q1)이면 segments 가 빈 목록이다.
+        Map<String, Object> transcript = new LinkedHashMap<>();
+        transcript.put("text", stt.text() == null ? "" : stt.text());
+        transcript.put("language", stt.language());
+        transcript.put("duration", stt.duration());
+        List<Map<String, Object>> segs = new ArrayList<>();
+        for (SttResult.Segment seg : stt.segments()) {
+            Map<String, Object> one = new LinkedHashMap<>();
+            one.put("id", seg.id());
+            one.put("start", seg.start());
+            one.put("end", seg.end());
+            one.put("text", seg.text());
+            segs.add(one);
+        }
+        transcript.put("segments", segs);
+        m.put("transcript", transcript);
         Files.write(meta, objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(m),
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
 
