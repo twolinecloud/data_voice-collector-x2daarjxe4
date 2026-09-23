@@ -232,7 +232,9 @@ public class VoiceCollectService {
         //   중단도 같다. 160건 중 43건만 하고 멈췄는데 기준점을 '지금'으로 옮기면,
         //   손대지 않은 117건은 다음 [바로 실행]의 창에서 빠져 아무도 다시 보지 않는다.
         if (!canceled) {
-            lastSuccess.record(LocalDateTime.now().withNano(0), execId, success);
+            // 훑은 창의 끝을 적는다 — '지금' 을 적으면 보지도 않은 구간을 수집했다고 거짓말하게 된다.
+            //   일배치는 창이 [어제 00:00, 오늘 00:00) 이라 '지금' 과 많게는 하루가 벌어진다.
+            lastSuccess.record(window.to(), execId, success);
         }
 
         logCollector.finishBatch(execId, result.execStsCd(), elapsedSec(startedAt),

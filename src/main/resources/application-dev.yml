@@ -79,7 +79,9 @@ voice:
         url: "http://borami-xvarm-broker-1joiuorqhl:8080"
       - label: "로컬 PC"
         url: "http://localhost:8082"
-    poll-interval-ms: ${VOICE_BROKER_POLL_MS:2000}
+    # 브로커의 추출 지연(BROKER_DELAY_MS)이 1.5초다. 폴링이 2초면 그 지연을 거의 두 배로
+    #   불린다 — 건당 손해가 배치 전체에 곱해진다.
+    poll-interval-ms: ${VOICE_BROKER_POLL_MS:500}
     poll-timeout-sec: ${VOICE_BROKER_TIMEOUT_SEC:120}
   # ── 전화 파일 연계 ──────────────────────────────────────────────────────
   #   ⚠ 브로커(XVARM)와 <b>별개 스위치</b>다. 전화는 XVARM 을 타지 않는다 —
@@ -101,7 +103,11 @@ voice:
     rvs-key-path: ${VOICE_RVS_KEY_PATH:/etc/voice/secret/rvs_key.txt}
 
   sync:
-    stable-check-ms: ${VOICE_STABLE_CHECK_MS:1500}
+    # 쓰기 완료 판정 대기. 이 값이 건당 그대로 곱해진다(10건이면 ×10).
+    #   1.5초는 '느린 ESB 가 큰 파일을 망 너머로 쓴다' 를 가정한 값이었는데, 지금 개발계는
+    #   브로커가 같은 볼륨에 복사한다 — 그 가정이 성립하지 않는다.
+    #   ⚠ 실제 ESB 가 붙어 큰 파일이 천천히 들어오면 VOICE_STABLE_CHECK_MS 로 다시 올린다.
+    stable-check-ms: ${VOICE_STABLE_CHECK_MS:400}
     wait-timeout-sec: ${VOICE_WAIT_TIMEOUT_SEC:300}
     naming-policy: ${VOICE_NAMING_POLICY:ORIGINAL}   # ORIGINAL | ESB_DAT (Q7)
 
