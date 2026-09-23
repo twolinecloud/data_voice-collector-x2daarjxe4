@@ -16,10 +16,10 @@ podTemplate(
                     sh """
                         if [ -f ./settings.xml ]; then
                             echo "Using custom settings.xml for sonar"
-                            mvn clean verify sonar:sonar -s ./settings.xml -Dsonar.projectKey=$PROJECT_KEY -Dsonar.projectName=$PROJECT_KEY -Dsonar.token=$SONAR_TOKEN -Ddocker-registry=turaco-registry -Ddockerfile.skip=true
+                            mvn clean verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -s ./settings.xml -Dsonar.projectKey=$PROJECT_KEY -Dsonar.projectName=$PROJECT_KEY -Dsonar.token=$SONAR_TOKEN -Ddocker-registry=turaco-registry -Ddockerfile.skip=true
                         else
                             echo "No custom settings.xml found, using default settings"
-                            mvn clean verify sonar:sonar -Dsonar.projectKey=$PROJECT_KEY -Dsonar.projectName=$PROJECT_KEY -Dsonar.token=$SONAR_TOKEN -Ddocker-registry=turaco-registry -Ddockerfile.skip=true
+                            mvn clean verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=$PROJECT_KEY -Dsonar.projectName=$PROJECT_KEY -Dsonar.token=$SONAR_TOKEN -Ddocker-registry=turaco-registry -Ddockerfile.skip=true
                         fi
                     """
                 }
