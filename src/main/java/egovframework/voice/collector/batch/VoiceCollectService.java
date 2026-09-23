@@ -271,7 +271,7 @@ public class VoiceCollectService {
      */
     private String openBatch(BatchWindow window, String triggerBy, boolean testRun) {
         String jobId = testRun ? props.batch().testJobId() : props.batch().jobId();
-        return logCollector.createBatch(jobId, props.batch().dataTypeCd(), window.label(), triggerBy);
+        return logCollector.createBatch(jobId, props.batch().dataTypeCd(), window.execTypeCd(), triggerBy);
     }
 
     /**

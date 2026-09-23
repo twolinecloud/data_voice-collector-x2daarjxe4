@@ -401,7 +401,7 @@
       <div class="d-flex flex-wrap gap-2 mb-2">
         <button class="btn btn-primary btn-sm" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
         <button class="btn btn-success btn-sm" id="btn-ondemand"
-                title="POST /api/v1/voice/batches/on-demand — 마지막 성공 시점부터 지금까지를 훑습니다">바로 실행 <span class="opacity-75" id="ondemand-hint">(마지막 성공 ~ 현재)</span></button>
+                title="POST /api/v1/voice/batches/on-demand — 당일 00:00 부터 지금까지의 미처리 건을 모두 훑습니다(이미 성공한 건은 멱등으로 건너뜀)">바로 실행 <span class="opacity-75" id="ondemand-hint">(당일 미처리 전체 ~ 현재)</span></button>
         <button class="btn btn-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
         <button class="btn btn-outline-primary btn-sm" id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
         <button class="btn btn-sm" id="btn-phone" style="color:#6f42c1;border-color:#6f42c1;background:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
@@ -1697,7 +1697,7 @@ $('btn-periodic').onclick = () => runBatch('/api/v1/voice/batches/periodic', '�
 $('btn-daily').onclick    = () => runBatch('/api/v1/voice/batches/daily',    '전체 실행 (전날 하루치)',      null,    'btn-daily');
 $('btn-cancel').onclick   = cancelBatch;
 $('btn-ondemand').onclick = async () => {
-  await runBatch('/api/v1/voice/batches/on-demand', '바로 실행 (마지막 성공 ~ 현재)', null, 'btn-ondemand');
+  await runBatch('/api/v1/voice/batches/on-demand', '바로 실행 (당일 미처리 전체 ~ 현재)', null, 'btn-ondemand');
   await loadLastSuccess();
 };
 $('btn-health').onclick = async () => {
@@ -1707,13 +1707,23 @@ $('btn-health').onclick = async () => {
       it.state === 'DOWN' ? 'er' : (it.state === 'OFF' ? 'wr' : 'ok')));
 };
 
-/** [바로 실행]이 어디서부터 볼지 버튼에 적어 준다 — 누르기 전에 범위를 알 수 있게. */
+/**
+ * [바로 실행]이 어디서부터 볼지 버튼에 적어 준다 — 누르기 전에 범위를 알 수 있게.
+ *
+ * 최소한 <b>당일 전체</b>를 본다. 마지막 성공 시점부터만 적어 두었을 때는 일배치 직후
+ * "(11:16:17 ~ 현재)" 처럼 빈 구간이 떠서, 눌러도 아무것도 처리하지 못했다.
+ * 마지막 성공이 자정보다 이르면(어제 늦게 들어온 미처리 건) 거기까지 넓혀 적는다.
+ */
 async function loadLastSuccess() {
   const d = await call('GET', '/api/v1/voice/batches/last-success', '', true);
   const el = $('ondemand-hint'); if (!el) return;
-  el.textContent = (d && d.lastSuccessAt)
-      ? `(${String(d.lastSuccessAt).replace('T', ' ')} ~ 현재)`
-      : '(기록 없음 — 최근 24시간)';
+  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+  const last = d && d.lastSuccessAt ? new Date(String(d.lastSuccessAt)) : null;
+  const from = (last && last < midnight) ? last : midnight;
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = t => `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())} `
+                 + `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+  el.textContent = `(${fmt(from)} ~ 현재 · 당일 미처리 전체)`;
 }
 
 $('btn-probe').onclick = async () => {

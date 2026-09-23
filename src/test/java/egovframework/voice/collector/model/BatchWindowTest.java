@@ -26,18 +26,28 @@ class BatchWindowTest {
     }
 
     @Test
-    @DisplayName("주기배치는 지금으로부터 lag 분 전까지를 훑는다")
-    void periodicCoversLagWindow() {
+    @DisplayName("주기배치는 당일 00:00 부터 지금까지를 훑는다 — 최근 20분만 보면 놓친 건이 영영 빠진다")
+    void periodicCoversWholeDay() {
         LocalDateTime now = LocalDateTime.of(2026, 9, 15, 14, 30, 0);
 
         BatchWindow w = BatchWindow.periodic(now, 20);
 
-        assertThat(w.from()).isEqualTo(LocalDateTime.of(2026, 9, 15, 14, 10, 0));
+        assertThat(w.from()).isEqualTo(LocalDateTime.of(2026, 9, 15, 0, 0, 0));
         assertThat(w.to()).isEqualTo(now);
     }
 
     @Test
-    @DisplayName("주기배치 창은 10분 간격으로 실행하면 서로 겹친다 — 멱등 처리가 필요한 이유")
+    @DisplayName("자정 직후에는 어제 끝자락까지 넓힌다 — 00:05 에 도는 배치가 23:55 건을 놓치지 않게")
+    void periodicReachesBackAcrossMidnight() {
+        LocalDateTime justAfterMidnight = LocalDateTime.of(2026, 9, 15, 0, 5, 0);
+
+        BatchWindow w = BatchWindow.periodic(justAfterMidnight, 20);
+
+        assertThat(w.from()).isEqualTo(LocalDateTime.of(2026, 9, 14, 23, 45, 0));
+    }
+
+    @Test
+    @DisplayName("주기배치 창은 서로 겹친다 — 멱등 처리가 필요한 이유")
     void periodicWindowsOverlap() {
         LocalDateTime first = LocalDateTime.of(2026, 9, 15, 14, 0, 0);
         LocalDateTime second = first.plusMinutes(10);
@@ -45,7 +55,38 @@ class BatchWindowTest {
         BatchWindow w1 = BatchWindow.periodic(first, 20);
         BatchWindow w2 = BatchWindow.periodic(second, 20);
 
-        // w2 의 시작이 w1 의 종료보다 앞이다 = 겹친다
         assertThat(w2.from()).isBefore(w1.to());
+    }
+
+    // ── T1 EXEC_TYPE_CD ───────────────────────────────────────────────────
+    // 로그 테이블 설계서(TC-21223-01)가 허용하는 값은 SCHEDULED / MANUAL 둘뿐이다.
+    //   DAILY·PERIODIC 을 그대로 보내고 있었는데, 코드 밖의 값이라 통계·필터에서 빠진다.
+
+    @Test
+    @DisplayName("일배치·주기배치는 SCHEDULED — 스케줄러가 도는 작업이다")
+    void scheduledBatchesReportScheduled() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 15, 14, 30, 0);
+
+        assertThat(BatchWindow.daily(now).execTypeCd()).isEqualTo("SCHEDULED");
+        assertThat(BatchWindow.periodic(now, 20).execTypeCd()).isEqualTo("SCHEDULED");
+    }
+
+    @Test
+    @DisplayName("[바로 실행]은 MANUAL — 사람이 구간을 지정해 돌린 것")
+    void manualWindowReportsManual() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 15, 14, 30, 0);
+
+        assertThat(BatchWindow.manual(now.minusHours(1), now).execTypeCd()).isEqualTo("MANUAL");
+    }
+
+    @Test
+    @DisplayName("허용값 밖의 코드는 나오지 않는다")
+    void onlyTwoCodesExist() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 15, 14, 30, 0);
+
+        for (BatchWindow w : java.util.List.of(
+                BatchWindow.daily(now), BatchWindow.periodic(now, 20), BatchWindow.manual(now, now))) {
+            assertThat(w.execTypeCd()).isIn("SCHEDULED", "MANUAL");
+        }
     }
 }
