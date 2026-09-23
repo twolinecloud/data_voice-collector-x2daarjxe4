@@ -138,34 +138,44 @@ class FileArrivalWatcherTest {
 
     // ── 지난 배치의 잔재 ──────────────────────────────────────────────────
     // [초기화] → [생성] → [실행] 이 '수신 파일 대기 타임아웃' 으로 끝나던 자리.
-    // 수집은 언제나 "요청 → 대기" 순서라, 요청 시점에 이미 그 이름이 있으면 옛 파일이다.
+    // 수집은 언제나 "요청 → 대기" 순서라, 요청 전에 그 이름이 있으면 그것은 옛 파일이다.
+    //
+    // 대기 중에 "요청 시각보다 오래된 파일" 을 골라내는 방식은 쓰지 않는다. 벽시계와
+    // 파일시스템 mtime 을 비교하는 셈인데, mtime 해상도가 거친 파일시스템에서는 방금 쓴
+    // 파일이 요청 시각보다 이전으로 보여 갓 만들어진 파일을 지워 버린다(CI 에서 그랬다).
 
     @Test
-    @DisplayName("요청보다 오래된 파일은 치우고 계속 기다린다 — 옛 음성을 새 것인 양 넘기지 않는다")
-    void removesFileOlderThanTheRequest() throws Exception {
+    @DisplayName("요청 전에 남아 있던 파일을 치운다 — 그 이름이 비어야 브로커가 새로 만들 수 있다")
+    void clearStaleRemovesLeftover() throws Exception {
         Path meet = tmp.resolve("meet-stale");
         FileArrivalWatcher w = watcher(meet);
-        Path stale = meet.resolve("mock_meet_001.m4a");
-        Files.write(stale, SilentWav.of(1));
-        Files.setLastModifiedTime(stale, java.nio.file.attribute.FileTime.fromMillis(1_000_000L));
+        Path leftover = meet.resolve("mock_meet_001.m4a");
+        Files.write(leftover, SilentWav.of(1));
 
-        long requestedAt = System.currentTimeMillis();
-        assertThatThrownBy(() -> w.await(meetTarget(), "mock_meet_001.m4a", requestedAt))
-                .as("잔재를 받아들여 성공으로 끝내면 안 된다")
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("대기 타임아웃");
-        assertThat(stale).as("치워야 브로커가 같은 이름으로 새로 만들 수 있다").doesNotExist();
+        assertThat(w.clearStale(meetTarget())).isTrue();
+        assertThat(leftover).doesNotExist();
     }
 
     @Test
-    @DisplayName("요청 뒤에 만들어진 파일은 그대로 받는다 — 잔재 판정이 새 파일을 잡아먹으면 안 된다")
-    void keepsFileCreatedAfterTheRequest() throws Exception {
+    @DisplayName("치울 것이 없으면 아무 일도 하지 않는다")
+    void clearStaleIsQuietWhenNothingIsThere() throws Exception {
+        Path meet = tmp.resolve("meet-clean");
+        FileArrivalWatcher w = watcher(meet);
+
+        assertThat(w.clearStale(meetTarget())).isFalse();
+    }
+
+    @Test
+    @DisplayName("치운 뒤에 온 파일은 그대로 받는다 — 잔재 정리가 새 파일을 잡아먹으면 안 된다")
+    void acceptsFileWrittenAfterClearing() throws Exception {
         Path meet = tmp.resolve("meet-fresh");
         FileArrivalWatcher w = watcher(meet);
-        long requestedAt = System.currentTimeMillis() - 5_000;
+        Files.write(meet.resolve("mock_meet_001.m4a"), SilentWav.of(1));
+        w.clearStale(meetTarget());
+        // 브로커가 같은 이름으로 새로 만든다
         Files.write(meet.resolve("mock_meet_001.m4a"), SilentWav.of(1));
 
-        VoiceFile f = w.await(meetTarget(), "mock_meet_001.m4a", requestedAt);
+        VoiceFile f = w.await(meetTarget(), "mock_meet_001.m4a");
 
         assertThat(f.sizeBytes()).isPositive();
     }
@@ -190,5 +200,30 @@ class FileArrivalWatcherTest {
 
         assertThatThrownBy(() -> w.await(meetTarget(), "mock_meet_001.m4a"))
                 .hasMessageContaining("비어 있음");
+    }
+
+    @Test
+    @DisplayName("파일 시각이 과거로 보여도 받는다 — 도착 판정에 시계를 쓰지 않는다")
+    void acceptsFileWhoseTimestampLooksOld() throws Exception {
+        // 왜 이 테스트가 있는가: 한때 '요청 시각보다 오래된 파일' 을 잔재로 보고 지웠다. 벽시계와
+        //   파일시스템 mtime 을 비교하는 방식이었는데, 컨테이너의 overlayfs 처럼 mtime 해상도가
+        //   거친 곳에서는 방금 쓴 파일의 mtime 이 내림되어 요청 시각보다 이전으로 보인다.
+        //   그래서 갓 만들어진 파일을 지워 버렸고 수집 단계가 대기 타임아웃으로 죽었다
+        //   (Jenkins, COLLECT errCnt=5 · elapsedSec=75 = 15초 × 5건).
+        //
+        //   ⚠ 이 테스트가 그 사고를 그대로 재현하지는 못한다. 당시 검사는 호출 측이 시각을
+        //   넘길 때만 켜졌고 여기서 쓰는 2-인자 호출은 꺼져 있었다 — 실제로 잡아낸 것은
+        //   Linux 에서 돌린 E2E 였다. 여기서 지키는 것은 "도착 판정이 시계를 보지 않는다" 는
+        //   성질이고, 누군가 그 비교를 되살리면 이 테스트가 막는다.
+        Path meet = tmp.resolve("meet-coarse");
+        FileArrivalWatcher w = watcher(meet);
+        Path file = meet.resolve("mock_meet_001.m4a");
+        Files.write(file, SilentWav.of(1));
+        long flooredToSecond = (System.currentTimeMillis() / 1000L) * 1000L;
+        Files.setLastModifiedTime(file, java.nio.file.attribute.FileTime.fromMillis(flooredToSecond));
+
+        VoiceFile f = w.await(meetTarget(), "mock_meet_001.m4a");
+
+        assertThat(f.sizeBytes()).as("mtime 이 내림됐다는 이유로 버리면 안 된다").isPositive();
     }
 }

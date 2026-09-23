@@ -52,19 +52,6 @@ public class FileArrivalWatcher {
      * @throws IllegalStateException 타임아웃
      */
     public VoiceFile await(VoiceTarget target, String hintFileName) {
-        return await(target, hintFileName, 0L);
-    }
-
-    /**
-     * @param notBefore 이 시각(epoch ms) <b>이전</b>에 만들어진 파일은 지난 배치의 잔재로 본다.
-     *                  호출 측이 추출을 <b>지시하기 직전</b>의 시각을 넘긴다. 0 이면 검사하지 않는다.
-     *                  <p>왜 필요한가: 수집은 언제나 "요청 → 대기" 순서라, 요청 시점에 이미 그 이름이
-     *                  있으면 그것은 이번 요청의 산출물일 수 없다. 그대로 두면 두 가지로 깨진다 —
-     *                  ① 옛 음성을 새 것인 양 STT 에 태우거나, ② 윈도우에서 그 이름이 잡혀 있어
-     *                  브로커·ESB 가 새 파일을 못 만들고 우리는 오지 않을 파일을 기다린다.
-     *                  그래서 <b>치우고 계속 기다린다</b>.</p>
-     */
-    public VoiceFile await(VoiceTarget target, String hintFileName, long notBefore) {
         Path dir = dirFor(target.kind());
         String name = StringUtils.hasText(hintFileName)
                 ? hintFileName
@@ -73,14 +60,8 @@ public class FileArrivalWatcher {
 
         long deadline = System.currentTimeMillis() + props.sync().waitTimeoutSec() * 1000L;
         while (System.currentTimeMillis() < deadline) {
-            if (Files.exists(file)) {
-                if (isStale(file, notBefore)) {
-                    log.warn("[Sync] 지난 배치의 잔재를 치운다 — {} (요청보다 오래된 파일) · 새 파일을 계속 기다린다",
-                            file.getFileName());
-                    StaleFiles.delete(file);
-                } else if (isStable(file)) {
-                    return describe(target, file);
-                }
+            if (Files.exists(file) && isStable(file)) {
+                return describe(target, file);
             }
             sleep(Math.max(props.sync().stableCheckMs() / 2, 200));
         }
@@ -91,16 +72,33 @@ public class FileArrivalWatcher {
                         present.isEmpty() ? "비어 있음(아무도 파일을 만들지 않았다)" : present));
     }
 
-    /** 이번 요청보다 먼저 만들어진 파일인가 — 그렇다면 지난 배치의 잔재다. */
-    private boolean isStale(Path file, long notBefore) {
-        if (notBefore <= 0) {
+    /**
+     * 추출을 <b>지시하기 직전</b>에 호출한다 — 그 이름에 남아 있는 지난 배치의 파일을 치운다.
+     *
+     * <p><b>왜 대기 중이 아니라 요청 전인가</b>: 수집은 언제나 "요청 → 대기" 순서다. 요청 전에
+     * 그 이름이 있으면 그것은 이번 요청의 산출물일 수 없다 — <b>시계를 보지 않고</b> 잔재라고
+     * 단정할 수 있는 유일한 시점이다.</p>
+     *
+     * <p>처음에는 대기 중에 "요청 시각보다 오래된 파일" 을 골라내려 했는데, 벽시계
+     * ({@code System.currentTimeMillis()})와 파일시스템 mtime 을 비교하는 방식이었다.
+     * mtime 해상도가 거친 파일시스템(컨테이너의 overlayfs 등)에서는 <b>방금 쓴 파일이
+     * 요청 시각보다 이전으로 보인다</b>. 그래서 갓 만들어진 파일을 잔재로 알고 지워 버렸고,
+     * CI 에서 수집 단계가 통째로 대기 타임아웃으로 죽었다. 시계 비교를 걷어낸 이유다.</p>
+     *
+     * <p>치우지 않으면 두 가지로 깨진다 — ① 옛 음성을 새 것인 양 STT 에 태우거나,
+     * ② 윈도우에서 그 이름이 삭제 대기로 잡혀 브로커·ESB 가 새 파일을 만들지 못한다.</p>
+     *
+     * @return 실제로 치운 것이 있으면 {@code true}
+     */
+    public boolean clearStale(VoiceTarget target) {
+        Path file = dirFor(target.kind())
+                .resolve(namingPolicy.expectedFileName(target, props.sync().namingPolicy()));
+        if (!Files.exists(file)) {
             return false;
         }
-        try {
-            return Files.getLastModifiedTime(file).toMillis() < notBefore;
-        } catch (IOException e) {
-            return false;       // 못 읽으면 건드리지 않는다 — 지우는 쪽이 더 위험하다
-        }
+        log.warn("[Sync] 지난 배치의 잔재를 치운다 — {} (요청 전부터 있던 파일)", file.getFileName());
+        StaleFiles.delete(file);
+        return true;
     }
 
     /** 이미 와 있는지만 즉시 확인한다(대기 없음). */

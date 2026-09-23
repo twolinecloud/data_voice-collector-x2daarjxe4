@@ -584,8 +584,8 @@ public class VoiceCollectService {
      * 어느 쪽이든 마지막은 수신 디렉터리를 보는 것으로 같다.</p>
      */
     private VoiceFile acquire(VoiceTarget target, String execId) {
-        // 요청하기 직전 시각 — 이보다 오래된 파일은 이번 요청의 산출물일 수 없다(지난 배치의 잔재).
-        long requestedAt = System.currentTimeMillis();
+        // 요청 전에 그 이름에 남아 있는 것은 이번 요청의 산출물일 수 없다 — 먼저 치운다.
+        watcher.clearStale(target);
         if (target.kind() == VoiceKind.MEET) {
             log.info("[Track:MEET] ② XVARM 추출 요청 — {} via 브로커 {} (execId={})", target.shortId(), broker.mode(), execId);
             XvarmBrokerClient.ExtractResult extracted = broker.extract(target, execId);
@@ -600,12 +600,12 @@ public class VoiceCollectService {
             //   추측한 이름으로 찾으면 브로커가 다른 이름으로 만들었을 때 영영 못 찾고 타임아웃이 난다.
             //   Mock 브로커는 우리와 같은 명명 정책을 써서 우연히 일치했을 뿐이고,
             //   실제 XVARM 이 파일명을 어떻게 정하는지는 아직 모른다(계획서 Q3).
-            return watcher.await(target, fileNameOf(extracted.filePath()), requestedAt);
+            return watcher.await(target, fileNameOf(extracted.filePath()));
         }
         log.info("[Track:PHONE] ② 전화 파일 연계 요청 — {} via {}", target.shortId(), phoneFileProvider.mode());
         phoneFileProvider.request(target);
         log.info("[Track:PHONE] ③ 수신 대기 — {}", target.shortId());
-        return watcher.await(target, null, requestedAt);
+        return watcher.await(target);
     }
 
     /** 경로에서 파일명만 뽑는다. 경로가 비었으면 null — watcher 가 정책으로 되돌아간다. */
