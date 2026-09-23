@@ -141,4 +141,23 @@ class PhoneSimAesDecryptorTest {
             assertThat(e.getMessage()).contains("전화 복호화 실패(시뮬레이션)");
         }
     }
+
+    @Test
+    @DisplayName("복호화하면 포맷이 내용대로 다시 잡힌다 — 암호문일 때는 확장자로만 볼 수 있었다")
+    void decryptServiceRedetectsFormat() throws Exception {
+        // 수신 시점의 접견 파일은 암호문이라 매직 넘버가 안 읽혀 확장자(.m4a)로 떨어진다.
+        //   내용은 WAV 인데 라벨만 m4a 인 채로 STT 로 넘어가면, NPU 연동 시 format 이 엇갈린다.
+        VoiceModeState state = mock(VoiceModeState.class);
+        when(state.decrypt()).thenReturn(VoiceProperties.DecryptMode.REAL);
+        when(state.phone()).thenReturn(VoiceProperties.PhoneMode.MOCK);
+        DecryptService svc = new DecryptService(state, java.util.List.of(decryptor), new NoopDecryptor());
+
+        VoiceFile in = encryptedPhoneFile();
+        VoiceFile mislabelled = new VoiceFile(in.target(), in.path(), in.sizeBytes(), "m4a", false);
+
+        VoiceFile out = svc.decrypt(mislabelled);
+
+        assertThat(out.decrypted()).isTrue();
+        assertThat(out.format()).as("복호화 후에는 내용대로 wav 여야 한다").isEqualTo("wav");
+    }
 }
