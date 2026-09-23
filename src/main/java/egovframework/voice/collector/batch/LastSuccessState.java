@@ -52,7 +52,17 @@ public class LastSuccessState {
     /**
      * 배치가 끝난 뒤 호출한다 — <b>성공 건이 하나라도 있을 때만</b> 기준점을 민다.
      *
-     * @param at      배치 종료 시각
+     * <p><b>{@code at} 은 '배치가 끝난 시각' 이 아니라 '훑은 창의 끝' 이다.</b> 기준점의 뜻은
+     * "이 시각까지는 다 수집했다" 이므로, 일배치가 {@code [어제 00:00, 오늘 00:00)} 를 돌고
+     * 지금 시각을 적으면 <b>보지도 않은 [오늘 00:00, 지금] 을 수집했다고 거짓말</b>하게 된다.
+     * 실제로 그랬고, 그래서 [바로 실행] 의 창이 {@code [지금, 지금]} 으로 비어 아무것도
+     * 처리하지 못했다.</p>
+     *
+     * <p><b>뒤로는 가지 않는다.</b> 주기배치가 11:00 까지 밀어 둔 뒤에 일배치가 돌면
+     * 창의 끝(오늘 00:00)이 더 이르다. 그대로 적으면 이미 끝난 구간을 다시 훑게 된다 —
+     * 멱등 표식이 막아 주긴 하지만 그만큼 헛돈다.</p>
+     *
+     * @param at      이 배치가 <b>훑은 창의 끝</b>
      * @param execId  그 배치의 실행 ID(추적용)
      * @param success 성공 건수
      */
@@ -62,6 +72,11 @@ public class LastSuccessState {
             return;
         }
         load();
+        if (at == null || (lastSuccessAt != null && !at.isAfter(lastSuccessAt))) {
+            log.debug("[LastSuccess] 기준점이 앞으로 가지 않는다 — 현재 {} · 이번 창 끝 {} (execId={})",
+                    lastSuccessAt, at, execId);
+            return;
+        }
         this.lastSuccessAt = at;
         this.lastExecId = execId;
         Path f = file();
