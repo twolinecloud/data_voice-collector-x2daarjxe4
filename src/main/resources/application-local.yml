@@ -51,7 +51,7 @@ log-collector:
 
 voice:
   # ── 5개 스위치 ────────────────────────────────────────────────────────────
-  #   로컬 기본값: 보라미 조회 MOCK(로컬 H2) · 브로커 REST(8082 의 로컬 브로커) · 전화 MOCK · 복호화 SKIP · STT MOCK.
+  #   로컬 기본값: 보라미 조회 DIRECT_JDBC(개발계 DB) · 브로커 REST(내 PC 8082) · 전화 MOCK · 복호화 REAL · STT MOCK.
   #   기동 후 시뮬레이터 화면이나 PUT /api/v1/mock/modes/{name} 으로 재시작 없이 바꿀 수 있다.
   #
   #   조회를 [개발계 DB] 로 올리면 direct-db(기본 localhost:15433 = borami-db 포트포워딩)에 붙는다:
@@ -88,10 +88,10 @@ voice:
   #     curl -X PUT "http://localhost:8085/api/v1/mock/modes/broker?value=MOCK"
   broker:
     mode: ${VOICE_BROKER_MODE:REST}
-    # 기본을 개발계 K8s 브로커로 둔다 — 로컬에 브로커를 따로 띄우지 않고 개발계 것을 쓰는 것이
-    #   기본 흐름이기 때문이다. ⚠ 이 서비스명은 클러스터 안에서만 풀린다. 로컬에서 실제로 붙이려면
-    #   포트포워딩 후 화면의 [로컬 PC] 프리셋으로 내리거나 VOICE_BROKER_BASE_URL 을 준다.
-    base-url: ${VOICE_BROKER_BASE_URL:http://borami-xvarm-broker-1joiuorqhl:8080}
+    # 비우면 환경 프리셋이 잡는다 — 로컬은 <b>내 PC 의 브로커</b>(http://localhost:8082).
+    #   K8s 서비스명은 PC 에서 DNS 가 풀리지 않아 접견 건이 전부 COLLECT 에서 죽는다.
+    #   개발계 브로커를 쓰려면 포트포워딩 후 VOICE_BROKER_BASE_URL 로 준다.
+    base-url: ${VOICE_BROKER_BASE_URL:}
     # 시뮬레이터의 원클릭 주소 프리셋. 환경마다 브로커가 사는 곳이 달라
     # 매번 손으로 치지 않게 둔다. 주소가 바뀌면 여기만 고치면 화면에 그대로 반영된다.
     presets:
@@ -112,7 +112,10 @@ voice:
   stt:
     mode: ${VOICE_STT_MODE:MOCK}
   decrypt:
-    mode: ${VOICE_DECRYPT_MODE:SKIP}
+    # 접견 복호화를 상시 켠다. 시뮬레이션 데이터 생성이 이 모드를 보고 더미 원본을 실제로
+    #   암호화하므로(SimulationDataService.writeDummy), 브로커가 REST 여도 앞뒤가 맞는다.
+    #   ⚠ 전화는 실사양 미확정이라 phone.mode 를 MOCK 으로 두어야 한다(ESB 로 올리면 실패).
+    mode: ${VOICE_DECRYPT_MODE:REAL}
     # 프로젝트 안의 테스트 키를 기본으로 둔다 — 복호화를 REAL 로 올렸을 때 "키 경로가 비어 있다"
     #   로 곧바로 막히지 않게. Mock 브로커가 같은 키로 암호화해 떨구므로 앞뒤가 맞는다.
     #   ⚠ 실제 암호화 파일을 풀려면 실 키 경로를 VOICE_RVS_KEY_PATH 로 준다(이 파일은 테스트 값이다).

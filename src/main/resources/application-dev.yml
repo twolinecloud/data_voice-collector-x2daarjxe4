@@ -93,7 +93,9 @@ voice:
     base-url: ${VOICE_STT_BASE_URL:}
     timeout-sec: ${VOICE_STT_TIMEOUT_SEC:300}
   decrypt:
-    mode: ${VOICE_DECRYPT_MODE:SKIP}         # → REAL (복호화 주체 확정 후, Q13)
+    # 접견 복호화 상시 ON — K8s Secret 의 키(/etc/voice/secret/rvs_key.txt)를 쓴다.
+    #   ⚠ 전화 실사양은 아직 미확정(Q13)이라 phone.mode 는 MOCK 이어야 한다.
+    mode: ${VOICE_DECRYPT_MODE:REAL}
     # 차트가 Secret(voice-collector-secret-*)을 /etc/voice/secret 에 마운트하고 이 경로를 준다.
     #   키를 ConfigMap 에 적으면 평문으로 남는다 — 반드시 Secret 이어야 한다.
     rvs-key-path: ${VOICE_RVS_KEY_PATH:/etc/voice/secret/rvs_key.txt}

@@ -2,6 +2,7 @@ package egovframework.voice.collector.source;
 
 import egovframework.voice.collector.model.BatchWindow;
 import egovframework.voice.collector.model.VoiceKind;
+import egovframework.voice.collector.util.AudioFormatDetector;
 import egovframework.voice.collector.model.VoiceTarget;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -175,8 +176,8 @@ class BoramiSourceJdbcTest {
     }
 
     @Test
-    @DisplayName("생성은 멱등(Clean & Seed) — 두 번 만들어도 14건, 더미 파일 15개(전화 기존 STT 1개 포함)")
-    void seedIsIdempotentAndWritesDummyFiles() {
+    @DisplayName("생성은 멱등(Clean & Seed) — 두 번 만들어도 14건, 더미 파일 15개(전화 기존 STT 1개 포함) · 더미는 실제 오디오")
+    void seedIsIdempotentAndWritesDummyFiles() throws Exception {
         Map<String, Object> r = sim.seed();
 
         assertThat(source.findMeetTargets(wide(), SPECL, 100)).hasSize(7);
@@ -186,9 +187,16 @@ class BoramiSourceJdbcTest {
         assertThat(files).hasSize(15);
         assertThat(files).allSatisfy(f -> {
             assertThat(f.get("written")).isEqualTo(true);
-            assertThat((Integer) f.get("bytes")).as("경량 더미 — 1KB 이하").isLessThanOrEqualTo(1024);
+            assertThat((Integer) f.get("bytes")).as("빈 파일이면 만든 의미가 없다").isPositive();
             assertThat(Files.isRegularFile(Path.of((String) f.get("path")))).isTrue();
         });
+        // 더미 음성은 <b>실제 오디오</b>다. 예전에는 한 줄짜리 텍스트였는데, 브로커가 REST 면
+        //   이 파일이 그대로 수신 폴더로 와서 복호화·STT 를 타기 때문에 앞뒤가 맞지 않았다.
+        //   암호화 대상이 아닌 건(MEET_UNENCRYPTED)은 복호화 모드와 무관하게 늘 평문 오디오다.
+        //   암호화 대상의 암복호 규약은 SimulationDummyFileTest 가 본다.
+        assertThat(AudioFormatDetector.byMagic(Files.readAllBytes(tmp.resolve(
+                "xvarm_original/mock_meet_%03d.m4a".formatted(SimulationDataService.MEET_UNENCRYPTED)))))
+                .as("ENC_YN='N' 인 건은 평문 오디오여야 한다").isEqualTo("wav");
         assertThat(Files.isRegularFile(tmp.resolve("xvarm_original/mock_phone_003.wav"))).isTrue();
         assertThat(Files.isRegularFile(tmp.resolve("xvarm_original/mock_meet_007.m4a"))).isTrue();
     }

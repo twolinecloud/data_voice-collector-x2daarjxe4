@@ -2,8 +2,10 @@ package egovframework.voice.collector.source;
 
 import egovframework.voice.collector.config.MockDatasetState;
 import egovframework.voice.collector.config.VoiceDirState;
+import egovframework.voice.collector.config.VoiceModeState;
 import egovframework.voice.collector.config.VoiceProperties;
 import egovframework.voice.collector.model.VoiceKind;
+import egovframework.voice.collector.util.SilentWav;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.core.io.ClassPathResource;
@@ -84,6 +86,7 @@ public class SimulationDataService {
     private final VoiceDirState dirs;
     private final VoiceProperties props;
     private final MockDatasetState dataset;
+    private final VoiceModeState modeState;
 
     // ── 조회 ──────────────────────────────────────────────────────────────
 
@@ -191,7 +194,7 @@ public class SimulationDataService {
                     "SIMTRCD" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i)), cmfi, fileNm, hms(at), hms(at.plusMinutes(10)), "1024", slash(meetDir),
                     "N", "N", "N", crt, USR, crt, USR);
             if (writeFiles) {
-                files.add(writeDummy(file, "m4a", meetKey(i)));
+                files.add(writeDummy(file, "m4a", meetKey(i), i != MEET_UNENCRYPTED));
             }
         }
 
@@ -221,7 +224,7 @@ public class SimulationDataService {
                     slash(phoneDir), fileNm, "SIMPHONEKEY" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i)), sttPath, null,
                     crt, USR, crt, USR);
             if (writeFiles) {
-                files.add(writeDummy(file, "wav", phoneKey(i)));
+                files.add(writeDummy(file, "wav", phoneKey(i), true));
             }
         }
 
@@ -568,9 +571,61 @@ public class SimulationDataService {
         return n == null ? 0 : n;
     }
 
-    /** 경량 더미 — 생성 여부만 확인하면 되므로 한 줄짜리 텍스트(수십 byte)다. 실제 오디오가 아니다. */
-    private Map<String, Object> writeDummy(Path file, String kind, String key) {
-        return writeText(file, "SIMULATION DUMMY " + kind + " — " + key + " — 실제 오디오가 아닙니다\n");
+    /**
+     * XVARM 원본 스토리지의 더미 파일 — <b>메타가 말하는 그대로 만든다.</b>
+     *
+     * <p><b>왜 실제 오디오이고, 왜 실제로 암호화하나</b>: 예전에는 한 줄짜리 텍스트를 썼다.
+     * 브로커가 {@code MOCK} 일 때는 원본을 보지 않고 자기가 오디오를 만들어 떨구므로 그래도
+     * 파이프라인이 돌았다. 그런데 브로커가 {@code REST} 면 <b>이 파일을 그대로 가져간다</b> —
+     * 메타는 {@code CMMN_FILE_ENC_YN='Y'} 인데 내용은 평문 텍스트라, 복호화를 REAL 로 올리는
+     * 순간 평문에 AES 를 걸다가 {@code IllegalBlockSizeException} 으로 죽었다.
+     * 시뮬레이션 데이터는 메타와 앞뒤가 맞아야 한다.</p>
+     *
+     * <p>키를 못 읽으면 <b>평문으로 둔다</b>. 시딩이 키 문제로 실패하면 화면에서 원인을 찾기
+     * 어렵다 — 복호화 단계가 "암호문이 아니다" 라고 말하게 두는 편이 훨씬 읽기 쉽다.</p>
+     *
+     * @param encrypted 이 건의 메타가 '암호화됨' 인가. 참이고 복호화 모드가 REAL 이면 실제로 암호화한다
+     */
+    private Map<String, Object> writeDummy(Path file, String kind, String key, boolean encrypted) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("path", slash(file));
+        byte[] plain = SilentWav.of(dataset.wavSeconds());
+        boolean enc = false;
+        byte[] body = plain;
+        if (encrypted && modeState.decrypt() == VoiceProperties.DecryptMode.REAL) {
+            byte[] c = tryEncrypt(plain, file);
+            enc = c != plain;
+            body = c;
+        }
+        try {
+            Files.createDirectories(file.getParent());
+            Files.write(file, body);
+            m.put("bytes", body.length);
+            m.put("encrypted", enc);
+            m.put("written", true);
+        } catch (IOException e) {
+            m.put("written", false);
+            m.put("error", e.getMessage());
+            log.warn("[Sim] 더미 파일 생성 실패 — {} ({})", file, e.getMessage());
+        }
+        return m;
+    }
+
+    /** 설정된 키로 암호화한다. 못 하면 원본을 그대로 돌려준다(사유는 경고로 남긴다). */
+    private byte[] tryEncrypt(byte[] plain, Path file) {
+        String keyPath = props.decrypt().rvsKeyPath();
+        if (!org.springframework.util.StringUtils.hasText(keyPath)) {
+            log.warn("[Sim] 복호화 REAL 인데 키 경로가 없어 평문으로 둡니다 — voice.decrypt.rvs-key-path ({})",
+                    file.getFileName());
+            return plain;
+        }
+        try {
+            return egovframework.voice.collector.decrypt.MediaDecryptor
+                    .fromKeyFile(Path.of(keyPath.trim())).encrypt(plain);
+        } catch (Exception e) {
+            log.warn("[Sim] 더미 암호화 실패 — 평문으로 둡니다 — {} ({})", file.getFileName(), e.getMessage());
+            return plain;
+        }
     }
 
     private Map<String, Object> writeText(Path file, String content) {
