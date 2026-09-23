@@ -20,12 +20,44 @@ public record BatchWindow(LocalDateTime from, LocalDateTime to, String label) {
         return new BatchWindow(today.minusDays(1), today, "DAILY");
     }
 
+    /**
+     * 주기배치 창 — <b>당일 00:00 부터 지금까지</b>.
+     *
+     * <p><b>왜 최근 20분이 아니라 당일 전체인가</b>: 예전에는 {@code [지금-20분, 지금]} 만 봤다.
+     * 스케줄러가 멈춰 있었거나(파드 재기동·장애) 데이터가 그보다 먼저 들어와 있었으면,
+     * 그 건들은 다음 창에도 들어오지 않아 <b>영영 수집되지 않는다</b>. 일배치는 어제치만
+     * 보므로 오늘 낮에 빠진 건을 주워 줄 사람이 없다.</p>
+     *
+     * <p>창을 넓혀도 같은 건을 두 번 처리하지는 않는다 — 멱등 표식(T4)이 이미 성공한 건을
+     * 건너뛴다. 넓힌 만큼 조회 행수가 늘 뿐이고, 그것은 놓치는 것보다 훨씬 싸다.</p>
+     *
+     * @param lagMinutes 더 이상 창의 길이를 정하지 않는다. 당일 00:00 이 그보다 늦을 수 없으므로
+     *                   {@code 지금-lag} 가 자정보다 이르면(자정 직후) 그쪽까지 넓힌다 —
+     *                   00:05 에 도는 배치가 어제 23:55 건을 놓치지 않게.
+     */
     public static BatchWindow periodic(LocalDateTime now, int lagMinutes) {
-        return new BatchWindow(now.minusMinutes(lagMinutes), now, "PERIODIC");
+        LocalDateTime todayStart = now.toLocalDate().atStartOfDay();
+        LocalDateTime lag = now.minusMinutes(Math.max(0, lagMinutes));
+        return new BatchWindow(lag.isBefore(todayStart) ? lag : todayStart, now, "PERIODIC");
     }
 
     public static BatchWindow manual(LocalDateTime from, LocalDateTime to) {
         return new BatchWindow(from, to, "MANUAL");
+    }
+
+    /**
+     * T1 의 {@code EXEC_TYPE_CD} — <b>{@code SCHEDULED} / {@code MANUAL} 둘뿐이다.</b>
+     *
+     * <p>{@code label()}(DAILY·PERIODIC·MANUAL)을 그대로 보내고 있었는데, 로그 테이블
+     * 설계서(TC-21223-01)가 허용하는 값은 스케줄·수동 둘뿐이다. 코드 밖의 값을 넣으면
+     * 통계·필터가 그 행을 집계에서 놓친다.</p>
+     *
+     * <p>일배치·주기배치는 <b>스케줄러가 도는 작업</b>이므로 둘 다 {@code SCHEDULED} 다.
+     * 시뮬레이터에서 손으로 눌러 돌려도 같은 성격의 작업이라 같은 코드로 남긴다 —
+     * 누가 눌렀는지는 {@code TRIGGER_BY} 가 따로 들고 있다.</p>
+     */
+    public String execTypeCd() {
+        return "MANUAL".equals(label) ? "MANUAL" : "SCHEDULED";
     }
 
     /** 시각이 창 [from, to) 안에 있는가 — 조회 SQL 의 {@code CRT_DT >= from AND CRT_DT < to} 와 같은 판정. */

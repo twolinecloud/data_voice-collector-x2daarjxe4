@@ -160,19 +160,23 @@ class BoramiSourceJdbcTest {
     }
 
     @Test
-    @DisplayName("10분 창이면 지연 건(접견 -18분·전화 -16분)을 놓친다 — 20분 창이 있어야 주워 온다")
-    void periodicNarrowWindowMissesLagged() {
+    @DisplayName("주기배치는 lag 와 무관하게 지연 건을 주워 온다 — 당일 전체를 보기 때문")
+    void periodicPicksUpLaggedRegardlessOfLag() {
         LocalDateTime now = LocalDateTime.now();
 
-        // 10분만 봤다면 각 트랙에서 최근 1건만 잡힌다
-        assertThat(source.findMeetTargets(BatchWindow.periodic(now, 10), SPECL, 100))
-                .extracting(VoiceTarget::idempotencyKey).containsExactly("SIM-MEET-006");
-        assertThat(source.findPhoneTargets(BatchWindow.periodic(now, 10), SPECL, 100))
-                .extracting(VoiceTarget::idempotencyKey).containsExactly("SIM-PHONE-006");
-
-        // 20분(periodic-lag-min 기본값)이면 지연 건까지 2건
-        assertThat(source.findMeetTargets(BatchWindow.periodic(now, 20), SPECL, 100)).hasSize(2);
-        assertThat(source.findPhoneTargets(BatchWindow.periodic(now, 20), SPECL, 100)).hasSize(2);
+        // 예전에는 lag 가 창의 길이였다. 10분으로 좁히면 -18분·-16분 건이 빠졌고,
+        //   스케줄러가 멈췄던 구간의 미처리 건은 다음 창에도 들어오지 않아 영영 수집되지 않았다.
+        //   이제 창은 [당일 00:00, 지금] 이라 lag 를 어떻게 주든 오늘 건은 다 들어온다.
+        for (int lag : new int[] {10, 20}) {
+            assertThat(source.findMeetTargets(BatchWindow.periodic(now, lag), SPECL, 100))
+                    .as("lag=%d분", lag)
+                    .extracting(VoiceTarget::idempotencyKey)
+                    .contains("SIM-MEET-006", "SIM-MEET-007");
+            assertThat(source.findPhoneTargets(BatchWindow.periodic(now, lag), SPECL, 100))
+                    .as("lag=%d분", lag)
+                    .extracting(VoiceTarget::idempotencyKey)
+                    .contains("SIM-PHONE-006", "SIM-PHONE-007");
+        }
     }
 
     @Test

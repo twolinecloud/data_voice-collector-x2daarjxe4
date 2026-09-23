@@ -205,9 +205,19 @@ public class VoiceBatchController {
                                      @RequestParam(defaultValue = "24") int fallbackHours) {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime last = lastSuccess.lastSuccessAt();
+        LocalDateTime todayStart = now.toLocalDate().atStartOfDay();
         LocalDateTime floor = now.minusHours(Math.max(1, fallbackHours));
-        LocalDateTime from = (last == null || last.isBefore(floor)) ? floor : last;
-        log.info("[Batch] 바로 실행 — 마지막 성공 {} → 구간 [{} ~ {})", last, from, now);
+        // 최소한 <b>당일 전체</b>를 본다. 마지막 성공 시점부터만 보면, 그보다 먼저 들어와 있던
+        //   미처리 건(시뮬레이션 데이터를 미리 만들어 두었거나 스케줄러가 멈췄던 구간)이
+        //   창에서 빠져 영영 수집되지 않는다. 이미 성공한 건은 멱등 표식이 건너뛴다.
+        LocalDateTime from = todayStart;
+        // 마지막 성공이 더 이르면 거기까지 넓힌다 — 어제 늦게 들어온 미처리 건도 주워 온다.
+        //   다만 상한(fallbackHours)은 지킨다: 몇 주치를 한 번에 긁어 브로커·STT 를 몰아치지 않는다.
+        if (last != null && last.isBefore(from) && !last.isBefore(floor)) {
+            from = last;
+        }
+        log.info("[Batch] 바로 실행 — 마지막 성공 {} · 당일 시작 {} → 구간 [{} ~ {})",
+                last, todayStart, from, now);
         return service.run(BatchWindow.manual(from, now), kinds, "ON_DEMAND", test);
     }
 

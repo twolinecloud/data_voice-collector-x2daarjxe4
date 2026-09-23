@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * ESB 가 동기화해 준 파일이 도착했는지 보고, <b>쓰기가 끝났는지</b>까지 확인한 뒤 넘긴다.
@@ -60,7 +61,7 @@ public class FileArrivalWatcher {
 
         long deadline = System.currentTimeMillis() + props.sync().waitTimeoutSec() * 1000L;
         while (System.currentTimeMillis() < deadline) {
-            if (Files.exists(file) && isStable(file)) {
+            if (arrived(dir, name) && isStable(file)) {
                 return describe(target, file);
             }
             sleep(Math.max(props.sync().stableCheckMs() / 2, 200));
@@ -103,13 +104,37 @@ public class FileArrivalWatcher {
 
     /** 이미 와 있는지만 즉시 확인한다(대기 없음). */
     public boolean isArrived(VoiceTarget target) {
-        Path file = dirFor(target.kind())
-                .resolve(namingPolicy.expectedFileName(target, props.sync().namingPolicy()));
-        return Files.exists(file);
+        return arrived(dirFor(target.kind()),
+                namingPolicy.expectedFileName(target, props.sync().namingPolicy()));
     }
 
     private Path dirFor(VoiceKind kind) {
         return dirs.receiveDir(kind);
+    }
+
+    /**
+     * 파일이 도착했는가 — <b>디렉터리를 읽어서</b> 확인한다. {@code Files.exists} 를 쓰지 않는다.
+     *
+     * <p><b>왜 굳이 목록을 훑나</b>: 수신 폴더는 NFS 이고, 파일을 만드는 쪽은 <b>다른 파드</b>
+     * (브로커·ESB)다. {@code exists()} 로 없는 이름을 한 번 물어보면 그 "없음" 이 커널의
+     * negative dentry 에 캐시되고, 이후 호출은 그 캐시로 답한다. 갱신 시점은 부모 디렉터리의
+     * 속성 캐시가 만료될 때인데, 이 마운트는 {@code ac*} 옵션이 없어 기본값
+     * {@code acdirmin=30초} 가 걸린다 — <b>파일은 이미 디스크에 있는데 30초를 기다렸다.</b></p>
+     *
+     * <p>개발계 실측: 브로커가 1.5초에 산출을 끝냈는데 수집기는 29초 뒤에야 인지했고,
+     * 일배치 10건이 184초 걸렸다. 같은 폴더를 계속 {@code ls} 하는 프로세스를 하나 띄워 두자
+     * 12.3초로 떨어졌다 — READDIR 이 그 캐시를 깨기 때문이다. 그 일을 여기서 직접 한다.</p>
+     *
+     * <p>수신 폴더에는 이번 배치가 기다리는 파일 몇 개뿐이라 목록 비용은 무시할 만하다.
+     * 같은 파일시스템을 로컬로 쓰는 환경에서는 {@code exists()} 와 차이가 없다.</p>
+     */
+    private boolean arrived(Path dir, String name) {
+        try (Stream<Path> s = Files.list(dir)) {
+            return s.anyMatch(p -> name.equals(p.getFileName().toString()));
+        } catch (IOException e) {
+            // 폴더가 아직 없을 수 있다 — 실패가 아니라 '아직'이다.
+            return false;
+        }
     }
 
     /** 크기가 {@code stableCheckMs} 동안 변하지 않으면 쓰기가 끝난 것으로 본다. */
