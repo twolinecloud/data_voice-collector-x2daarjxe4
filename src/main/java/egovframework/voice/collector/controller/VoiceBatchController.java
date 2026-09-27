@@ -49,7 +49,6 @@ public class VoiceBatchController {
     private final VoiceBatchScheduler scheduler;
     private final egovframework.voice.collector.batch.BatchProgress progress;
     private final egovframework.voice.collector.health.HealthProbeService healthProbe;
-    private final egovframework.voice.collector.batch.LastSuccessState lastSuccess;
     private final egovframework.voice.collector.batch.StageFaultState stageFault;
     private final egovframework.voice.collector.stt.SttTempStore sttTemp;
     private final IdempotencyGuard idempotency;
@@ -199,50 +198,60 @@ public class VoiceBatchController {
         return healthProbe.health(force);
     }
 
-    @Operation(summary = "바로 실행 (온디맨드 · 미처리 전체 Catch-up)",
+    @Operation(summary = "바로 실행 (온디맨드 · DB 워터마크 ~ 지금)",
             description = """
-                    **과거의 미처리 건 전부 ~ 지금**을 한 번에 처리합니다. 기획서 배치 스케줄 목록의 [바로 실행] 버튼이 부르는 API 입니다.
+                    **마지막으로 성공한 수집 구간의 끝 ~ 지금**을 처리합니다. 기획서 배치 스케줄 목록의 [바로 실행] 버튼이 부르는 API 입니다.
 
-                    - 창: **최근 `lookbackDays` 일(기본 `voice.batch.catchup-lookback-days`=30) ~ 지금**.
-                      일배치 몫(어제)·주기배치 몫(오늘)을 가리지 않습니다
-                    - 마지막 성공 시점(`{ROOT}/state/last_success.txt`)이 그보다 더 이르면 **그 시점까지 넓힙니다** —
-                      서비스가 오래 멈춰 있었어도 그동안 쌓인 건을 놓치지 않게
-                    - 이미 성공한 건은 멱등 표식이 건너뜁니다. 창이 넓어도 같은 건을 두 번 처리하지 않습니다
+                    - 시작점(워터마크) = 로그 컬렉터 T1(`kcais.tb_batch_exec_log`)에서
+                      `exec_sts_cd = 'SUCCESS'` 인 이 작업 배치의 **`MAX(target_to_dtm)`** — `GET /api/v1/logs/batches/watermark`
+                    - 성공한 배치가 아직 없으면 **최근 `lookbackDays` 일**(기본 `voice.batch.catchup-lookback-days`=30)을 되짚습니다
+                    - `test=true`(시뮬레이터)는 `TEST_BATCH` 이력으로, 운영은 `VOICE_ANALYSIS` 이력으로 워터마크를 셉니다 —
+                      시뮬레이터가 운영 기준점을 밀지 않게
+                    - PARTIAL·FAIL·CANCELED 배치는 워터마크를 밀지 않습니다. 빠진 건이 있는 구간이 '다 수집했다' 로 둔갑하지 않게
+                    - 이미 성공한 건은 멱등 표식이 건너뜁니다
 
-                    **왜 당일로 한정하지 않나**: 당일 00:00 부터만 보면 어제 일배치가 실패했거나 스케줄러가 멈춰 있던
-                    구간의 건이 [바로 실행]으로도 주워지지 않았습니다. 수동 실행의 목적은 "밀린 것을 지금 다 처리" 입니다.
+                    예전에는 기준점을 파일(`{ROOT}/state/last_success.txt`)에 따로 적었습니다. 파드가 PV 를 잃으면 기준점도 잃고,
+                    같은 사실이 T1 과 파일 두 군데에 있어 어긋날 수 있어 T1 에서 바로 읽도록 바꿨습니다.
                     """)
     @PostMapping("/batches/on-demand")
     public VoiceBatchResult onDemand(@RequestParam(required = false) List<VoiceKind> kinds,
                                      @RequestParam(defaultValue = "false") boolean test,
                                      @RequestParam(required = false) Integer lookbackDays) {
-        BatchWindow w = onDemandWindow(LocalDateTime.now(), lookbackDays);
-        log.info("[Batch] 바로 실행 — 마지막 성공 {} → 구간 {} (미처리 전체 Catch-up)",
-                lastSuccess.lastSuccessAt(), w);
+        LogCollectorClient.Watermark wm = watermark(test);
+        BatchWindow w = BatchWindow.onDemand(LocalDateTime.now(), wm == null ? null : wm.at(), lookbackOr(lookbackDays));
+        log.info("[Batch] 바로 실행 — 구간 {} (시작점: {})", w, wm != null
+                ? "DB 워터마크 " + wm.at() + " · " + wm.execId()
+                : "워터마크 없음 → 최근 " + lookbackOr(lookbackDays) + "일");
         return service.run(w, kinds, "ON_DEMAND", test);
     }
 
     /**
-     * [바로 실행]의 창 — 최근 {@code lookbackDays} 일 ~ 지금. 마지막 성공이 더 이르면 거기까지.
+     * [바로 실행]의 창 — DB 워터마크 ~ 지금. 워터마크가 없으면 최근 {@code lookbackDays} 일.
      *
      * <p>[미처리 건수]와 실제 실행이 <b>같은 창</b>을 써야 한다. 둘이 다르면 "0건이라 생성할까요?"
      * 라고 물어 놓고 실행하면 무언가를 처리하거나, 그 반대가 된다.</p>
      */
-    private BatchWindow onDemandWindow(LocalDateTime now, Integer lookbackDays) {
-        int days = lookbackDays == null ? catchupLookbackDays : Math.max(1, lookbackDays);
-        LocalDateTime from = now.minusDays(days);
-        LocalDateTime last = lastSuccess.lastSuccessAt();
-        if (last != null && last.isBefore(from)) {
-            from = last;
-        }
-        return BatchWindow.manual(from, now);
+    private BatchWindow onDemandWindow(LocalDateTime now, Integer lookbackDays, boolean test) {
+        LogCollectorClient.Watermark w = watermark(test);
+        return BatchWindow.onDemand(now, w == null ? null : w.at(), lookbackOr(lookbackDays));
+    }
+
+    private int lookbackOr(Integer lookbackDays) {
+        return lookbackDays == null ? catchupLookbackDays : Math.max(1, lookbackDays);
+    }
+
+    /** 이 작업의 DB 워터마크. 시험(test)과 운영은 다른 이력을 본다. 없거나 컬렉터 미연동이면 null. */
+    private LogCollectorClient.Watermark watermark(boolean test) {
+        return logCollector.watermark(props.batch().dataTypeCd(),
+                test ? props.batch().testJobId() : props.batch().jobId());
     }
 
     @Operation(summary = "미처리 건수 (실행 전 확인)",
             description = """
                     배치를 **열지 않고** 이 창을 돌리면 처리할 건이 몇 개인지 셉니다. 시뮬레이터가 실행 버튼을 누르기 직전에 부릅니다.
 
-                    - `type` — `daily`(어제 하루) · `periodic`(당일 00:00~지금) · `on-demand`(미처리 전체 Catch-up)
+                    - `type` — `daily`(어제 하루) · `periodic`(당일 00:00~지금) · `on-demand`(DB 워터마크 ~ 지금)
+                    - `test` — `on-demand` 의 워터마크를 시험 이력(`TEST_BATCH`)으로 셀지. 시뮬레이터는 `true`
                     - `pending` 이 0 이면 화면이 "시뮬레이션 데이터를 생성하시겠습니까?" 를 묻습니다.
                       대상은 있는데 모두 처리가 끝난 경우(`total > 0`, `pending = 0`)도 0 입니다 —
                       그대로 누르면 전부 '건너뜀' 으로 끝나 확인할 것이 없으니까요
@@ -251,12 +260,13 @@ public class VoiceBatchController {
     @GetMapping("/batches/pending")
     public Map<String, Object> pending(@RequestParam(defaultValue = "daily") String type,
                                        @RequestParam(required = false) List<VoiceKind> kinds,
-                                       @RequestParam(required = false) Integer lookbackDays) {
+                                       @RequestParam(required = false) Integer lookbackDays,
+                                       @RequestParam(defaultValue = "false") boolean test) {
         LocalDateTime now = LocalDateTime.now();
         BatchWindow w = switch (type.trim().toLowerCase()) {
             case "daily" -> BatchWindow.daily(now);
             case "periodic" -> BatchWindow.periodic(now, props.batch().periodicLagMin());
-            case "on-demand", "ondemand" -> onDemandWindow(now, lookbackDays);
+            case "on-demand", "ondemand" -> onDemandWindow(now, lookbackDays, test);
             default -> throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.BAD_REQUEST,
                     "type 은 daily · periodic · on-demand 중 하나입니다: " + type);
@@ -273,7 +283,7 @@ public class VoiceBatchController {
                     - `db` — 로그 컬렉터를 통해 T1(`kcais.tb_batch_exec_log`) · T2(`tb_batch_step_log`) ·
                       T4(`tb_file_proc_log`, 상태별) · T5(`tb_deident_send_log`, 상태별). 이 서비스는 로그 DB 에 직접 붙지 않습니다
                     - `files` — 복호화 보존물(`{ROOT}/xvram/decoding/decrypted_*`) · 전사 보존물(`{ROOT}/stt_temp/{execId}`) ·
-                      STT 결과(`{ROOT}/xenon/{kind}/{execId}`) · 기준점(`{ROOT}/state/last_success.txt`)
+                      STT 결과(`{ROOT}/xenon/{kind}/{execId}`)
                     - `sql` · `cli` — 위를 **손으로** 확인할 때 그대로 복사해 쓰는 SQL 과 `ls`/`cat` 명령.
                       배포 환경이면 `kubectl exec` 접두가 붙습니다
                     """)
@@ -282,11 +292,28 @@ public class VoiceBatchController {
         return verification.verify(execId);
     }
 
-    @Operation(summary = "마지막 성공 시점",
-            description = "[바로 실행]이 어디서부터 볼지. 기록이 없으면 `lastSuccessAt` 이 null 입니다.")
-    @GetMapping("/batches/last-success")
-    public Map<String, Object> lastSuccess() {
-        return lastSuccess.snapshot();
+    @Operation(summary = "[바로 실행] 워터마크 (DB)",
+            description = """
+                    [바로 실행]이 어디서부터 볼지 — 로그 컬렉터 T1 의 `exec_sts_cd='SUCCESS'` 배치 `MAX(target_to_dtm)`.
+                    없으면 `watermark` 가 null 이고 `from` 은 최근 30일 전입니다. `test=true` 면 시험 이력(`TEST_BATCH`) 기준.
+                    """)
+    @GetMapping("/batches/watermark")
+    public Map<String, Object> watermarkInfo(@RequestParam(defaultValue = "false") boolean test,
+                                             @RequestParam(required = false) Integer lookbackDays) {
+        LocalDateTime now = LocalDateTime.now();
+        LogCollectorClient.Watermark w = watermark(test);
+        BatchWindow win = BatchWindow.onDemand(now, w == null ? null : w.at(), lookbackOr(lookbackDays));
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("jobId", test ? props.batch().testJobId() : props.batch().jobId());
+        out.put("dataTypeCd", props.batch().dataTypeCd());
+        out.put("watermark", w == null ? null : w.at().toString());
+        out.put("watermarkExecId", w == null ? null : w.execId());
+        out.put("source", w != null ? "DB — kcais.tb_batch_exec_log MAX(target_to_dtm) WHERE exec_sts_cd='SUCCESS'"
+                : (logCollector.isEnabled() ? "성공 배치 없음 → 최근 " + lookbackOr(lookbackDays) + "일"
+                                             : "로그 컬렉터 미연동 → 최근 " + lookbackOr(lookbackDays) + "일"));
+        out.put("from", win.from().toString());
+        out.put("to", win.to().toString());
+        return out;
     }
 
     @Operation(summary = "배치 중단",

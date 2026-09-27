@@ -89,4 +89,47 @@ class BatchWindowTest {
             assertThat(w.execTypeCd()).isIn("SCHEDULED", "MANUAL");
         }
     }
+
+    // ── [바로 실행] — DB 워터마크 ──────────────────────────────────────────
+
+    @Test
+    @DisplayName("워터마크가 있으면 거기서부터 지금까지")
+    void onDemandStartsAtTheWatermark() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 27, 14, 30);
+        LocalDateTime wm = LocalDateTime.of(2026, 9, 27, 0, 0);
+
+        BatchWindow w = BatchWindow.onDemand(now, wm, 30);
+
+        assertThat(w.from()).isEqualTo(wm);
+        assertThat(w.to()).isEqualTo(now);
+        assertThat(w.execTypeCd()).isEqualTo("MANUAL");
+    }
+
+    @Test
+    @DisplayName("워터마크가 없으면 최근 30일 — 첫 실행·시험 이력 초기화 직후")
+    void onDemandFallsBackToLookback() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 27, 14, 30);
+
+        assertThat(BatchWindow.onDemand(now, null, 30).from()).isEqualTo(now.minusDays(30));
+        assertThat(BatchWindow.onDemand(now, null, 0).from()).as("0 이하면 1일").isEqualTo(now.minusDays(1));
+    }
+
+    @Test
+    @DisplayName("워터마크가 30일보다 오래됐어도 그대로 쓴다 — 멈춰 있던 동안 쌓인 건을 놓치지 않게")
+    void onDemandUsesAnOldWatermarkAsIs() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 27, 14, 30);
+        LocalDateTime old = now.minusDays(45);
+
+        assertThat(BatchWindow.onDemand(now, old, 30).from()).isEqualTo(old);
+    }
+
+    @Test
+    @DisplayName("T1 에 남길 구간 끝은 '지금' 을 넘지 않는다 — 재처리 창(지금+1분)이 워터마크를 미래로 밀지 않게")
+    void recordedEndNeverExceedsNow() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 27, 17, 56, 16);
+
+        assertThat(BatchWindow.manual(now.minusMinutes(30), now.plusMinutes(1)).recordedEnd(now)).isEqualTo(now);
+        assertThat(BatchWindow.daily(now).recordedEnd(now))
+                .as("일배치 끝(오늘 00:00)은 과거라 그대로").isEqualTo(LocalDateTime.of(2026, 9, 27, 0, 0));
+    }
 }

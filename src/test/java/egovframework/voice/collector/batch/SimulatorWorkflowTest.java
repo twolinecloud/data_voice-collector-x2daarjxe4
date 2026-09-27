@@ -85,13 +85,13 @@ class SimulatorWorkflowTest {
     @Test
     @DisplayName("미처리 건수 — 돌리기 전엔 전부 미처리, 돌린 뒤엔 0건(화면이 '생성할까요?' 를 묻는 조건)")
     void pendingDropsToZeroAfterRun() {
-        Map<String, Object> before = batches.pending("daily", null, null);
+        Map<String, Object> before = batches.pending("daily", null, null, true);
         assertThat(num(before, "total")).isEqualTo(10);
         assertThat(num(before, "pending")).isEqualTo(10);
 
         service.run(BatchWindow.daily(LocalDateTime.now()), null, "TEST", true);
 
-        Map<String, Object> after = batches.pending("daily", null, null);
+        Map<String, Object> after = batches.pending("daily", null, null, true);
         assertThat(num(after, "total")).as("대상 자체는 그대로 있다").isEqualTo(10);
         assertThat(num(after, "processed")).isEqualTo(10);
         assertThat(num(after, "pending")).as("전부 처리됨 — 그대로 누르면 전부 건너뜀").isZero();
@@ -100,10 +100,10 @@ class SimulatorWorkflowTest {
     @Test
     @DisplayName("미처리 건수는 배치를 열지 않는다 — 멱등 표식이 생기지 않는다")
     void pendingHasNoSideEffects() {
-        batches.pending("on-demand", null, null);
-        batches.pending("daily", null, null);
+        batches.pending("on-demand", null, null, true);
+        batches.pending("daily", null, null, true);
 
-        assertThat(num(batches.pending("daily", null, null), "pending")).isEqualTo(10);
+        assertThat(num(batches.pending("daily", null, null, true), "pending")).isEqualTo(10);
     }
 
     // ── [바로 실행] Catch-up ──────────────────────────────────────────────
@@ -111,7 +111,7 @@ class SimulatorWorkflowTest {
     @Test
     @DisplayName("[바로 실행]은 일배치 몫(어제)·주기배치 몫(오늘)을 가리지 않고 미처리 전부를 처리한다")
     void onDemandCatchesUpEverything() {
-        Map<String, Object> p = batches.pending("on-demand", null, null);
+        Map<String, Object> p = batches.pending("on-demand", null, null, true);
         assertThat(num(p, "pending")).as("어제 5+5 · 오늘 2+2").isEqualTo(14);
 
         VoiceBatchResult r = batches.onDemand(null, true, null);
@@ -119,7 +119,7 @@ class SimulatorWorkflowTest {
         assertThat(r.targetCnt()).isEqualTo(14);
         assertThat(r.successCnt()).isEqualTo(14);
         assertThat(r.failCnt()).isZero();
-        assertThat(num(batches.pending("on-demand", null, null), "pending")).isZero();
+        assertThat(num(batches.pending("on-demand", null, null, true), "pending")).isZero();
     }
 
     @Test
@@ -213,6 +213,10 @@ class SimulatorWorkflowTest {
 
         List<Map<String, String>> cli = (List<Map<String, String>>) v.get("cli");
         assertThat(cli).extracting(c -> c.get("text")).anyMatch(t -> t.startsWith("ls -la"));
-        assertThat(cli).extracting(c -> c.get("text")).anyMatch(t -> t.contains("last_success.txt"));
+        // 기준점은 T1(DB) 이다 — 파일(last_success.txt)을 가리키는 명령이 남아 있으면 안 된다
+        assertThat(cli).extracting(c -> c.get("text")).noneMatch(t -> t.contains("last_success"));
+        assertThat(sql).extracting(q -> q.get("text")).anyMatch(t -> t.contains("MAX(target_to_dtm)"));
+        Map<String, Object> filesMap = (Map<String, Object>) v.get("files");
+        assertThat(filesMap).doesNotContainKey("lastSuccess");
     }
 }

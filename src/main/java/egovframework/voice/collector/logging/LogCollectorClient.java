@@ -115,11 +115,24 @@ public class LogCollectorClient {
      * @return 채번된 execId. 미연동·실패 시 null
      */
     public String createBatch(String jobId, String dataTypeCd, String execTypeCd, String triggerBy) {
+        return createBatch(jobId, dataTypeCd, execTypeCd, triggerBy, null, null);
+    }
+
+    /**
+     * T1 을 연다 — <b>훑을 구간</b>({@code target_from_dtm}·{@code target_to_dtm})까지 남긴다.
+     *
+     * <p>구간의 끝이 [바로 실행] 워터마크의 재료다({@link #watermark}). 예전에는 둘 다 null 로 보내
+     * T1 의 구간 칸이 비어 있었고, 그래서 "어디까지 수집했나" 를 파일에 따로 적어야 했다.</p>
+     */
+    public String createBatch(String jobId, String dataTypeCd, String execTypeCd, String triggerBy,
+                              LocalDateTime targetFrom, LocalDateTime targetTo) {
         if (!isEnabled()) {
             return null;
         }
         JsonNode result = exchange(HttpMethod.POST, url("/api/v1/logs/batches"),
-                new BatchCreateReq(jobId, null, dataTypeCd, null, null,
+                new BatchCreateReq(jobId, null, dataTypeCd,
+                        targetFrom == null ? null : targetFrom.withNano(0),
+                        targetTo == null ? null : targetTo.withNano(0),
                         execTypeCd, LocalDateTime.now().withNano(0), triggerBy));
         return (result == null || result.path("execId").isMissingNode())
                 ? null : result.path("execId").asText(null);
@@ -245,6 +258,57 @@ public class LogCollectorClient {
         }
         return exchange(HttpMethod.GET, url("/api/v1/logs/batches/" + execId.trim()), null);
     }
+
+    /**
+     * [바로 실행] 워터마크 — 이 작업의 <b>SUCCESS 배치가 훑은 구간의 끝 중 가장 늦은 것</b>.
+     *
+     * <p>{@code GET /api/v1/logs/batches/watermark}. T1 이 원본이다. 컬렉터가 꺼져 있거나 호출이 실패하거나 아직 성공한
+     * 배치가 없으면 null — 호출 측이 기본 창(최근 30일)으로 되짚는다.</p>
+     *
+     * @param jobId 운영({@code VOICE_ANALYSIS})과 시험({@code TEST_BATCH})을 가른다 — 시뮬레이터가
+     *              운영 기준점을 밀면 안 된다
+     */
+    public Watermark watermark(String dataTypeCd, String jobId) {
+        if (!isEnabled()) {
+            return null;
+        }
+        String q = "/api/v1/logs/batches/watermark?dataTypeCd=" + dataTypeCd
+                + (jobId == null || jobId.isBlank() ? "" : "&jobId=" + jobId);
+        JsonNode r = exchange(HttpMethod.GET, url(q), null);
+        if (r == null || r.path("watermark").isNull() || r.path("watermark").isMissingNode()) {
+            return null;
+        }
+        try {
+            return new Watermark(parseDtm(r.path("watermark").asText()), r.path("execId").asText(null));
+        } catch (RuntimeException e) {
+            log.warn("[LogCollector] 워터마크 형식을 읽지 못했다 — {} ({})", r.path("watermark"), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 컬렉터가 돌려주는 시각을 이 서버의 벽시계로 읽는다.
+     *
+     * <p>컬렉터는 시간대 없는 문자열({@code 2026-09-27T00:00:00})을 준다. 그래도 형식이 바뀔 수 있으니 셋을 다
+     * 받는다 — 시간대가 붙었으면({@code +00:00}·{@code Z}) 이 서버 시간대로 옮기고, 에폭 밀리초면 그대로 환산한다.
+     * <b>시간대 붙은 값을 앞부분만 잘라 읽으면 9시간이 어긋난다</b> — 기준점이 9시간 늦으면 그 사이 건이 빠진다.</p>
+     */
+    static LocalDateTime parseDtm(String v) {
+        java.time.ZoneId here = java.time.ZoneId.systemDefault();
+        if (v.matches("\\d{10,}")) {
+            return LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(Long.parseLong(v)), here);
+        }
+        String s = v.trim().replace(' ', 'T');
+        if (s.endsWith("Z") || s.matches(".*[+-]\\d{2}:?\\d{2}$")) {
+            return java.time.OffsetDateTime.parse(s.matches(".*[+-]\\d{4}$")
+                            ? s.substring(0, s.length() - 2) + ":" + s.substring(s.length() - 2) : s)
+                    .atZoneSameInstant(here).toLocalDateTime().withNano(0);
+        }
+        return LocalDateTime.parse(s).withNano(0);
+    }
+
+    /** 워터마크 한 건 — 그 시각과, 그 시각을 남긴 배치. */
+    public record Watermark(LocalDateTime at, String execId) {}
 
     public JsonNode deleteTestData() {
         if (!isEnabled()) {

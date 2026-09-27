@@ -77,7 +77,6 @@ public class VoiceCollectService {
     private final InmatePidGenerator pidGenerator;
     private final BatchProgress progress;
     private final egovframework.voice.collector.transfer.AgentConnectorClient agentConnector;
-    private final LastSuccessState lastSuccess;
     private final StageFaultState stageFault;
     private final egovframework.voice.collector.stt.SttTempStore sttTemp;
 
@@ -227,15 +226,10 @@ public class VoiceCollectService {
         VoiceBatchResult result = new VoiceBatchResult(execId, collectorExecId != null, window.toString(),
                 found.size(), success, fail, skipped, elapsedMs, outputDirs, steps, outcomes, canceled);
 
-        // [바로 실행]의 시작점 — 성공 건이 있을 때만 민다. 실패한 배치로 기준점을 옮기면
-        // 그 구간이 영영 수집되지 않는다.
-        //   중단도 같다. 160건 중 43건만 하고 멈췄는데 기준점을 '지금'으로 옮기면,
-        //   손대지 않은 117건은 다음 [바로 실행]의 창에서 빠져 아무도 다시 보지 않는다.
-        if (!canceled) {
-            // 훑은 창의 끝을 적는다 — '지금' 을 적으면 보지도 않은 구간을 수집했다고 거짓말하게 된다.
-            //   일배치는 창이 [어제 00:00, 오늘 00:00) 이라 '지금' 과 많게는 하루가 벌어진다.
-            lastSuccess.record(window.to(), execId, success);
-        }
+        // [바로 실행]의 시작점은 따로 적지 않는다 — T1 이 원본이다.
+        //   배치를 열 때 훑을 구간(target_from/to_dtm)을 T1 에 남기고, 마감 상태가 SUCCESS 인 배치의
+        //   MAX(target_to_dtm) 이 곧 워터마크다. PARTIAL·FAIL·CANCELED 는 로그 컬렉터가 세지 않으므로,
+        //   빠진 건이 있는 구간이 '다 수집했다' 로 둔갑하지 않는다.
 
         logCollector.finishBatch(execId, result.execStsCd(), elapsedSec(startedAt),
                 (long) found.size(), (long) success, (long) fail,
@@ -271,7 +265,10 @@ public class VoiceCollectService {
      */
     private String openBatch(BatchWindow window, String triggerBy, boolean testRun) {
         String jobId = testRun ? props.batch().testJobId() : props.batch().jobId();
-        return logCollector.createBatch(jobId, props.batch().dataTypeCd(), window.execTypeCd(), triggerBy);
+        // 훑을 구간을 T1 에 남긴다 — [바로 실행]의 워터마크(MAX(target_to_dtm))가 여기서 나온다.
+        //   예전에는 null 로 보내 T1 의 구간 칸이 전부 비어 있었다.
+        return logCollector.createBatch(jobId, props.batch().dataTypeCd(), window.execTypeCd(), triggerBy,
+                window.from(), window.recordedEnd(LocalDateTime.now()));
     }
 
     /**

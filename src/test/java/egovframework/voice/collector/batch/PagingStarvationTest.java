@@ -81,7 +81,7 @@ class PagingStarvationTest {
         }
 
         assertThat(total).as("14건이 전부 처리돼야 한다(고치기 전엔 3건에서 멈췄다)").isEqualTo(14);
-        Map<String, Object> left = batches.pending("on-demand", null, null);
+        Map<String, Object> left = batches.pending("on-demand", null, null, true);
         assertThat(((Number) left.get("pending")).longValue()).isZero();
     }
 
@@ -90,7 +90,7 @@ class PagingStarvationTest {
     void pendingCountLooksPastProcessedRows() {
         batches.onDemand(null, true, null);   // 앞쪽 3건 처리
 
-        Map<String, Object> p = batches.pending("on-demand", null, null);
+        Map<String, Object> p = batches.pending("on-demand", null, null, true);
 
         // 이 값은 '다음 실행이 처리할 건수' 라 상한(3)으로 잘린다. 요점은 0 이 아니라는 것 —
         //   고치기 전에는 앞쪽 3건(처리 끝)만 읽어 0 이 나왔고, 화면이 데이터를 다시 만들자고 물었다.
