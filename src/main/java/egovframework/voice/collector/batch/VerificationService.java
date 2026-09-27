@@ -119,6 +119,16 @@ public class VerificationService {
         m.put("t5", t5);
         // 컬렉터가 옛 버전이면 상태별 집계가 없다 — 건수만 보이고, 화면이 그 사실을 말한다
         m.put("statusSummarySupported", !ss.isMissingNode());
+
+        // [바로 실행] 워터마크 — 이 배치와 같은 작업(job_id)의 SUCCESS 배치 MAX(target_to_dtm).
+        String jobId = text(b, "job_id");
+        LogCollectorClient.Watermark w = logCollector.watermark(text(b, "data_type_cd"), jobId);
+        Map<String, Object> wm = new LinkedHashMap<>();
+        wm.put("jobId", jobId);
+        wm.put("at", w == null ? null : w.at().toString());
+        wm.put("execId", w == null ? null : w.execId());
+        wm.put("targetToDtm", text(b, "target_to_dtm"));
+        m.put("watermark", wm);
         return m;
     }
 
@@ -155,7 +165,6 @@ public class VerificationService {
             output.put(k.name(), listing(dirs.outputDir(k, execId), null));
         }
         m.put("output", output);
-        m.put("lastSuccess", listing(Path.of(dirs.baseDir(), "state"), "last_success"));
         return m;
     }
 
@@ -194,6 +203,7 @@ public class VerificationService {
         List<Map<String, String>> l = new ArrayList<>();
         l.add(cmd("T1 배치 실행 이력 (kcais.tb_batch_exec_log)",
                 "SELECT exec_id, job_id, data_type_cd, exec_type_cd, exec_sts_cd,\n"
+                        + "       target_from_dtm, target_to_dtm,\n"
                         + "       target_cnt, success_cnt, fail_cnt, start_dtm, end_dtm\n"
                         + "  FROM kcais.tb_batch_exec_log\n"
                         + " WHERE exec_id = '" + id + "';"));
@@ -212,6 +222,12 @@ public class VerificationService {
                         + "  FROM kcais.tb_file_proc_log\n"
                         + " WHERE exec_id = '" + id + "'\n"
                         + " ORDER BY file_proc_id;"));
+        l.add(cmd("[바로 실행] 워터마크 — SUCCESS 배치의 MAX(target_to_dtm)",
+                "SELECT MAX(target_to_dtm) AS watermark\n"
+                        + "  FROM kcais.tb_batch_exec_log\n"
+                        + " WHERE exec_sts_cd = 'SUCCESS'\n"
+                        + "   AND data_type_cd = 'UNSTRUCTURED'\n"
+                        + "   AND job_id = (SELECT job_id FROM kcais.tb_batch_exec_log WHERE exec_id = '" + id + "');"));
         l.add(cmd("T5 전송 이력 — 상태별 (kcais.tb_deident_send_log)",
                 "SELECT send_sts_cd, COUNT(*)\n"
                         + "  FROM kcais.tb_deident_send_log\n"
@@ -229,7 +245,6 @@ public class VerificationService {
         String temp = slash(sttTemp.dir(id).toString());
         String outMeet = slash(dirs.outputDir(VoiceKind.MEET, id).toString());
         String outPhone = slash(dirs.outputDir(VoiceKind.PHONE, id).toString());
-        String state = slash(Path.of(dirs.baseDir(), "state", "last_success.txt").toString());
 
         List<Map<String, String>> l = new ArrayList<>();
         l.add(cmd("복호화 보존물 (ANALYZE 재처리용)", pre + "ls -la " + q(work, k8s)));
@@ -239,7 +254,6 @@ public class VerificationService {
         l.add(cmd("STT 결과 내용 (접견 첫 파일)",
                 k8s ? KUBECTL + "sh -c 'cat " + outMeet + "/*.txt | head -20'"
                     : "cat \"" + outMeet + "\"/*.txt | head -20"));
-        l.add(cmd("[바로 실행] 기준점 (last_success.txt)", pre + "cat " + q(state, k8s)));
         return l;
     }
 

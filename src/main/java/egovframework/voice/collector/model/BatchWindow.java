@@ -41,6 +41,21 @@ public record BatchWindow(LocalDateTime from, LocalDateTime to, String label) {
         return new BatchWindow(lag.isBefore(todayStart) ? lag : todayStart, now, "PERIODIC");
     }
 
+    /**
+     * [바로 실행] 창 — <b>DB 워터마크 ~ 지금</b>. 워터마크가 없으면 최근 {@code lookbackDays} 일.
+     *
+     * <p>워터마크는 로그 컬렉터 T1 에서 읽는다: {@code exec_sts_cd='SUCCESS'} 인 배치의
+     * {@code MAX(target_to_dtm)}. "이 시각까지는 다 수집했다" 는 뜻이다.
+     * 성공한 배치가 아직 없으면(첫 실행·시험 이력 초기화 직후) 최근 {@code lookbackDays} 일을 되짚는다.</p>
+     *
+     * @param watermark    DB 워터마크. 없으면 null
+     * @param lookbackDays 워터마크가 없을 때 되짚을 일수(1 이상)
+     */
+    public static BatchWindow onDemand(LocalDateTime now, LocalDateTime watermark, int lookbackDays) {
+        LocalDateTime from = watermark != null ? watermark : now.minusDays(Math.max(1, lookbackDays));
+        return new BatchWindow(from, now, "MANUAL");
+    }
+
     public static BatchWindow manual(LocalDateTime from, LocalDateTime to) {
         return new BatchWindow(from, to, "MANUAL");
     }
@@ -58,6 +73,17 @@ public record BatchWindow(LocalDateTime from, LocalDateTime to, String label) {
      */
     public String execTypeCd() {
         return "MANUAL".equals(label) ? "MANUAL" : "SCHEDULED";
+    }
+
+    /**
+     * T1 에 남길 구간의 끝 — <b>'지금' 을 넘지 않는다.</b>
+     *
+     * <p>재처리 창은 시계 오차 여유로 끝을 '지금+1분' 으로 잡는다. 그 끝을 그대로 T1 에 남기면 SUCCESS 일 때
+     * [바로 실행] 워터마크가 미래가 되어, 그 1분 사이에 들어온 건을 다음 [바로 실행]이 창 밖으로 놓친다.
+     * 처리 범위는 그대로 두고, 기록만 '지금' 에서 자른다 — 겹친 만큼은 멱등 표식이 건너뛴다.</p>
+     */
+    public LocalDateTime recordedEnd(LocalDateTime now) {
+        return to.isAfter(now) ? now : to;
     }
 
     /** 시각이 창 [from, to) 안에 있는가 — 조회 SQL 의 {@code CRT_DT >= from AND CRT_DT < to} 와 같은 판정. */
