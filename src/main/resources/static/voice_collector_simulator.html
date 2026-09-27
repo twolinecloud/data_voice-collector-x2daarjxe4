@@ -245,6 +245,29 @@
   .scen-res .ok { color:#198754; font-weight:600; }
   .scen-res .ng { color:#dc3545; font-weight:600; }
   .scen-res .sk { color:#b8860b; font-weight:600; }
+  /* 3번 탭 — 세로 아코디언의 번호 뱃지(상태색) */
+  .sacc .acc-head .no { font-weight:700; font-size:.8rem; color:#fff; background:#6c757d; border-radius:.3rem;
+                        min-width:1.5rem; text-align:center; padding:.05rem .35rem; }
+  .sacc.on .acc-head .no { background:#fd7e14; }
+  .sacc.done-ok .acc-head .no { background:#198754; }
+  .sacc.done-fail .acc-head .no { background:#dc3545; }
+  /* 검증 패널 — DB 테이블 상태 · K8s PV 파일 상태 · 수동 검증 명령 */
+  .vf { margin-top:.6rem; border-top:1px dashed #dee2e6; padding-top:.45rem; }
+  .vf-phase { font-weight:700; font-size:.8rem; margin-bottom:.35rem; }
+  .vf-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:.5rem; }
+  @media (max-width: 768px) { .vf-grid { grid-template-columns:1fr; } }
+  .vf-card { border:1px solid #dee2e6; border-radius:.4rem; padding:.45rem .6rem; font-size:.76rem; background:#fcfcfd; }
+  .vf-card h6 { font-size:.78rem; font-weight:700; margin:0 0 .35rem; }
+  .vf-row { display:flex; justify-content:space-between; gap:.5rem; padding:.15rem 0; border-bottom:1px dashed #eef0f2; }
+  .vf-sub { font-size:.72rem; color:#495057; padding:.15rem 0 .3rem; }
+  .vf-path { font-family:var(--mono); font-size:.66rem; color:#868e96; word-break:break-all; padding-bottom:.25rem; }
+  .vf-b { display:inline-block; padding:0 .35rem; border-radius:.25rem; font-weight:600; font-size:.68rem; }
+  .vf-b.SUCCESS { background:#d1e7dd; color:#0f5132; } .vf-b.FAIL { background:#f8d7da; color:#842029; }
+  .vf-b.PARTIAL { background:#fff3cd; color:#664d03; } .vf-b.x { background:#e9ecef; color:#495057; }
+  .vf-cmd { position:relative; }
+  .vf-cmd pre { font-family:var(--mono); font-size:.68rem; background:#212529; color:#e9ecef; padding:.4rem .55rem;
+                padding-right:3.2rem; border-radius:.3rem; margin:.15rem 0 .45rem; white-space:pre-wrap; word-break:break-all; }
+  .vf-cmd .cp { position:absolute; top:1.15rem; right:.3rem; --bs-btn-padding-y:.05rem; --bs-btn-font-size:.66rem; }
   .scen select, .scen input { font-size:.75rem; }
 
 
@@ -400,9 +423,9 @@
       <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 7·전화 7 = 14건(트랙별 일배치 5 · 10분 주기 2)</div>
       <div class="d-flex flex-wrap gap-2 mb-2">
         <button class="btn btn-primary btn-sm" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
-        <button class="btn btn-success btn-sm" id="btn-ondemand"
-                title="POST /api/v1/voice/batches/on-demand — 당일 00:00 부터 지금까지의 미처리 건을 모두 훑습니다(이미 성공한 건은 멱등으로 건너뜀)">바로 실행 <span class="opacity-75" id="ondemand-hint">(당일 미처리 전체 ~ 현재)</span></button>
         <button class="btn btn-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
+        <button class="btn btn-success btn-sm" id="btn-ondemand"
+                title="POST /api/v1/voice/batches/on-demand — 과거의 미처리 건 전부(기본 최근 30일, 마지막 성공이 더 이르면 거기까지)를 지금 처리합니다. 이미 성공한 건은 멱등으로 건너뜁니다">바로 실행 <span class="opacity-75" id="ondemand-hint">(미처리 전체 ~ 현재)</span></button>
         <button class="btn btn-outline-primary btn-sm" id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
         <button class="btn btn-sm" id="btn-phone" style="color:#6f42c1;border-color:#6f42c1;background:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
         <button class="btn btn-danger btn-sm d-none" id="btn-cancel"
@@ -486,7 +509,7 @@
         <button class="btn btn-outline-secondary btn-sm" id="scen-reset">전체 해제 · 데이터 재생성</button>
         <span class="hint ms-auto" id="scen-preserved">보존물 —</span>
       </div>
-      <div class="scen-grid" id="scen-cards"></div>
+      <div id="scen-cards"></div>
       <div class="hint mt-2">
         재처리는 <b>보존된 중간 산출물</b>로 끊긴 단계부터 잇습니다 —
         복호화 오디오 <code id="scen-dir-audio">…/xvram/decoding</code> ·
@@ -572,7 +595,7 @@
       <button type="button" class="btn-close" id="pop-x" aria-label="닫기"></button>
     </div>
     <div class="pop-body" id="pop-body"></div>
-    <div class="pop-foot"><button type="button" class="btn btn-sm btn-primary" id="pop-ok">확인</button></div>
+    <div class="pop-foot"><button type="button" class="btn btn-sm btn-outline-secondary" id="pop-no" hidden>아니오</button><button type="button" class="btn btn-sm btn-primary" id="pop-ok">확인</button></div>
   </div>
 </div>
 
@@ -685,11 +708,31 @@ function showPopup(title, html) {
   $('pop').hidden = false;
   $('pop-ok').focus();
 }
-function closePopup() { $('pop').hidden = true; }
-$('pop-ok').onclick = closePopup;
-$('pop-x').onclick = closePopup;
-$('pop').onclick = (e) => { if (e.target === $('pop')) closePopup(); };
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('pop').hidden) closePopup(); });
+// 예/아니오를 받는 팝업 — Promise 로 답을 돌려준다. 닫기(X)·바깥 클릭·Esc 는 '아니오'.
+let POP_RESOLVE = null;
+function confirmPopup(title, html, okLabel = '예', noLabel = '아니오') {
+  return new Promise(resolve => {
+    POP_RESOLVE = resolve;
+    $('pop-title').textContent = title;
+    $('pop-body').innerHTML = html;
+    $('pop-ok').textContent = okLabel;
+    $('pop-no').textContent = noLabel;
+    $('pop-no').hidden = false;
+    $('pop').hidden = false;
+    $('pop-ok').focus();
+  });
+}
+function closePopup(answer) {
+  $('pop').hidden = true;
+  $('pop-no').hidden = true;
+  $('pop-ok').textContent = '확인';
+  if (POP_RESOLVE) { const r = POP_RESOLVE; POP_RESOLVE = null; r(answer === true); }
+}
+$('pop-ok').onclick = () => closePopup(true);
+$('pop-no').onclick = () => closePopup(false);
+$('pop-x').onclick = () => closePopup(false);
+$('pop').onclick = (e) => { if (e.target === $('pop')) closePopup(false); };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('pop').hidden) closePopup(false); });
 
 /** 생성 결과 — 건수는 서버가 센 것(sim.counts), 20분은 서버 설정(batch.periodicLagMin)을 그대로 쓴다. */
 function seedPopupHtml(sim) {
@@ -1276,10 +1319,40 @@ async function cancelBatch() {
   // accepted=false 는 "돌고 있는 배치가 없다" 는 뜻 — 버튼을 되살려 둔다.
   if (d && d.accepted === false) { c.disabled = false; c.textContent = '중단'; }
 }
+/**
+ * 실행 직전에 '처리할 건이 있는가' 를 묻는다 — 0건이면 시뮬레이션 데이터를 만들지 확인한다.
+ *
+ * 0건으로 돌리면 T1 에 빈 배치가 하나 남고 화면엔 '대상 0' 만 뜬다. 무엇을 눌러야 할지 사람이
+ * 다시 생각해야 한다. 대상은 있는데 전부 처리가 끝난 경우도 0건이다 — 누르면 전부 '건너뜀' 이다.
+ * '예' 면 생성하고 true 를 돌려줘 호출한 동작이 그대로 이어진다.
+ */
+async function ensureData(type, kinds, label) {
+  const q = `type=${type}` + (kinds ? `&kinds=${kinds}` : '');
+  const p = await call('GET', `/api/v1/voice/batches/pending?${q}`, '', true);
+  if (!p || p.pending > 0) return true;          // 확인이 실패하면 막지 않는다
+  const why = p.total > 0
+      ? `대상 ${p.total}건이 <b>모두 이미 처리</b>되었습니다 — 그대로 실행하면 전부 '건너뜀' 입니다.`
+      : `실행 구간에 대상이 없습니다.`;
+  const ok = await confirmPopup('처리 대상 0건',
+      `<div class="pop-lead">시뮬레이션 데이터가 없습니다. 시뮬레이션 데이터를 생성하시겠습니까?</div>
+       <div class="hint mt-2">${why}<br>구간 <code>${esc(p.window || '')}</code></div>
+       <div class="hint mt-1">'예' 를 누르면 생성한 뒤 <b>${esc(label)}</b> 을(를) 이어서 실행합니다.</div>`);
+  if (!ok) {
+    log(`  └ ${esc(label)} — 처리 대상 0건이라 실행하지 않았습니다`, 'wr');
+    return false;
+  }
+  log(`▶ 처리 대상 0건 → 시뮬레이션 데이터를 생성하고 ${esc(label)} 을(를) 이어서 실행합니다`, 'hd');
+  return await simCreate(false);
+}
+
 async function runBatch(path, label, kind, btnId) {
+  const type = path.endsWith('/daily') ? 'daily'
+             : path.endsWith('/periodic') ? 'periodic'
+             : path.endsWith('/on-demand') ? 'on-demand' : null;
+  if (type && !(await ensureData(type, kind, label))) return null;
   setBatchRunning(btnId, true);
   try { return await runBatchInner(path, label, kind); }
-  finally { setBatchRunning(btnId, false); }
+  finally { setBatchRunning(btnId, false); loadLastSuccess(); }
 }
 // ── 헬스체크 배지 ──────────────────────────────────────────────────────
 // 다섯 시스템을 화면이 직접 부르지 않는다 — 오리진이 달라 CORS 에 걸리고, K8s 서비스명은
@@ -1477,21 +1550,21 @@ async function rtWaitBrokerReady(maxMs = 15000) {
 // 스위치도 같은 단위로 나눈다.
 const SCEN = [
   {
-    key:'COLLECT', no:'1', title:'수집 (COLLECT) 장애',
+    key:'COLLECT', no:'1', short:'수집 장애', title:'COLLECT — 브로커 주소 장애',
     how:'브로커 주소를 닿지 않는 곳(9999)으로 바꿔 수집을 깨뜨립니다',
     expect:'T4 STEP_TYPE_CD=COLLECT · PROC_STS_CD=FAIL',
     resume:'FULL', resumeText:'브로커 복구 후 1단계(수집)부터 전체 재실행',
     kinds:'MEET', modes:false,   // 이 시나리오는 주소로 깨뜨린다 — 주입 스위치를 쓰지 않는다
   },
   {
-    key:'ANALYZE', no:'2', title:'분석 (ANALYZE — STT) 장애',
+    key:'ANALYZE', no:'2', short:'분석 장애', title:'ANALYZE — STT 장애',
     how:'STT 호출을 500/Timeout 으로 떨어뜨립니다',
     expect:'복호화 오디오 보존 · T4 ANALYZE=FAIL / PARTIAL',
     resume:'FROM_ANALYZE', resumeText:'수집·복호화 스킵 → 보존된 복호화 오디오로 STT 부터',
     kinds:'MEET', modes:true,
   },
   {
-    key:'SEND', no:'3', title:'전송 (SEND) 장애',
+    key:'SEND', no:'3', short:'전송 장애', title:'SEND — 최종 저장 장애',
     how:'최종 저장(PV)에서 Disk Full(IOException) 을 냅니다',
     expect:'전사 결과 보존 · T4 SEND=FAIL / PARTIAL',
     resume:'FROM_SEND', resumeText:'수집·복호화·STT 스킵 → 보존된 전사 결과로 저장만',
@@ -1504,43 +1577,151 @@ const SC = {};   // key -> { state, fail, resume }
 //   보고 깨진다. 실제로 원클릭에서 2·3번이 COLLECT FAIL 로 무너졌다.
 let BROKER_BEFORE = null;
 
-function scenRender() {
-  $('scen-cards').innerHTML = SCEN.map(s => {
-    const st = SC[s.key] || {};
-    const cls = st.running ? 'on' : (st.result === 'ok' ? 'done-ok' : (st.result === 'ng' ? 'done-fail' : ''));
+/**
+ * 3번 탭 — 단계별 세로 아코디언. <b>한 번만 그리고</b>, 이후에는 상태·결과·검증 칸만 갈아 끼운다.
+ *
+ * 예전에는 상태가 바뀔 때마다 카드 전체를 innerHTML 로 다시 그렸다. 그때 드롭다운이 첫 옵션
+ * (전체 실패)으로 돌아가는데, [장애 실행] 은 '실행 중' 표시를 먼저 그리고 나서 드롭다운 값을
+ * 읽었다 — 그래서 '부분 실패 10%' 를 골라도 늘 전체 실패가 주입되어 5건이 다 떨어졌다.
+ * 백엔드의 건수 계산은 맞았다. 컨트롤을 다시 그리지 않는 것으로 고친다.
+ */
+function scenBuild() {
+  $('scen-cards').innerHTML = SCEN.map((s, i) => {
     const modeSel = s.modes ? `
-      <select class="form-select form-select-sm" id="sc-mode-${s.key}" style="max-width:8.5rem">
+      <select class="form-select form-select-sm" id="sc-mode-${s.key}" data-mode-for="${s.key}" style="max-width:8.5rem">
         <option value="ALL">전체 실패</option>
-        <option value="PARTIAL">부분 성공</option>
+        <option value="PARTIAL">부분 실패</option>
       </select>
       <span class="hint">실패율</span>
-      <input type="number" class="form-control form-control-sm" id="sc-pct-${s.key}"
-             value="10" min="1" max="100" style="max-width:4.5rem">` : '';
-    return `<div class="scen ${cls}" id="sc-card-${s.key}">
-      <div class="scen-head"><span class="no">${s.no}</span><span class="ttl">${esc(s.title)}</span></div>
-      <div class="scen-body">
-        <div>${esc(s.how)}</div>
-        <div class="step mt-1">기대: ${esc(s.expect)}</div>
-        <div class="step">재처리: ${esc(s.resumeText)}</div>
-        <div class="scen-res" id="sc-res-${s.key}">${st.html || ''}</div>
+      <input type="number" class="form-control form-control-sm" id="sc-pct-${s.key}" value="10" min="1" max="100"
+             style="max-width:4.5rem" disabled title="'부분 실패' 일 때만 씁니다">
+      <span class="hint">%</span>` : '';
+    return `<div class="acc sacc ${i === 0 ? 'open' : ''}" id="sc-acc-${s.key}">
+      <div class="acc-head" data-acc="sc-acc-${s.key}">
+        <span class="no">${s.no}</span>
+        <span class="grow"><b>${s.no}. ${esc(s.short)}</b> <span class="hint">— ${esc(s.title)}</span></span>
+        <span class="hint" id="sc-badge-${s.key}"></span>
+        <button class="acc-tgl" type="button">&#9660;</button>
       </div>
-      <div class="scen-foot">
-        ${modeSel}
-        <button class="btn btn-sm btn-outline-danger" data-scen="${s.key}" data-act="fail">장애 실행</button>
-        <button class="btn btn-sm btn-outline-primary" data-scen="${s.key}" data-act="resume">재처리</button>
-        <button class="btn btn-sm btn-dark" data-scen="${s.key}" data-act="both">단독 실행</button>
-      </div>
+      <div class="acc-body"><div class="acc-inner"><div class="pad">
+        <div class="scen-body p-0">
+          <div>${esc(s.how)}</div>
+          <div class="step mt-1">기대: ${esc(s.expect)}</div>
+          <div class="step">재처리: ${esc(s.resumeText)}</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+          ${modeSel}
+          <button class="btn btn-sm btn-outline-danger" data-scen="${s.key}" data-act="fail">장애 실행</button>
+          <button class="btn btn-sm btn-outline-primary" data-scen="${s.key}" data-act="resume">재처리</button>
+          <button class="btn btn-sm btn-dark" data-scen="${s.key}" data-act="both">단독 실행</button>
+        </div>
+        <div class="scen-res" id="sc-res-${s.key}"></div>
+        <div id="sc-vf-${s.key}"></div>
+      </div></div></div>
     </div>`;
   }).join('');
   document.querySelectorAll('#scen-cards [data-scen]').forEach(b => {
     b.onclick = () => scenRun(b.dataset.scen, b.dataset.act);
   });
+  // 실패율은 '부분 실패' 일 때만 의미가 있다 — 전체 실패에서 숫자를 바꿔도 아무 일이 없으면 헷갈린다
+  document.querySelectorAll('#scen-cards [data-mode-for]').forEach(sel => {
+    sel.onchange = () => { $('sc-pct-' + sel.dataset.modeFor).disabled = sel.value !== 'PARTIAL'; };
+  });
 }
 
-function scenMark(key, patch) { SC[key] = Object.assign(SC[key] || {}, patch); scenRender(); }
+/** 상태·결과만 제자리에서 갈아 끼운다 — 드롭다운·실패율·검증 패널은 건드리지 않는다. */
+function scenPaint(key) {
+  const st = SC[key] || {};
+  const el = $('sc-acc-' + key); if (!el) return;
+  el.classList.toggle('on', !!st.running);
+  el.classList.toggle('done-ok', !st.running && st.result === 'ok');
+  el.classList.toggle('done-fail', !st.running && st.result === 'ng');
+  $('sc-res-' + key).innerHTML = st.html || '';
+  $('sc-badge-' + key).textContent = st.running ? '실행 중…'
+      : st.result === 'ok' ? '완료' : st.result === 'ng' ? '장애 확인' : '';
+}
+
+function scenMark(key, patch) { SC[key] = Object.assign(SC[key] || {}, patch); scenPaint(key); }
+
+// ── 검증 패널 — 장애 직후·재처리 직후 한 장씩 ────────────────────────────────
+// 배치 응답의 "성공 9 · 실패 1" 이 로그 테이블과 PV 에 실제로 어떻게 남았는지를 같이 보여 준다.
+// 재처리의 요점은 "실패한 건의 보존물이 남아 있다가 재처리 후 사라진다" 이므로 전후 두 장을 나란히 둔다.
+function vfBadge(st) {
+  const k = ['SUCCESS', 'FAIL', 'PARTIAL'].includes(st) ? st : 'x';
+  return `<span class="vf-b ${k}">${esc(st ?? '—')}</span>`;
+}
+function vfCounts(m) {
+  const e = Object.entries(m || {});
+  return e.length ? e.map(([k, n]) => `${vfBadge(k)} ${n}`).join(' &nbsp;') : '<span class="text-secondary">0건</span>';
+}
+function vfFile(label, f) {
+  if (!f) return '';
+  const tip = (f.sample || []).join(' · ');
+  return `<div class="vf-row"><span>${esc(label)}</span>
+            <span title="${esc(tip)}">${f.exists ? `<b>${f.count}</b>개` : '<span class="text-secondary">폴더 없음</span>'}</span></div>
+          <div class="vf-path">${esc(f.path)}${tip ? ` — ${esc(tip)}` : ''}</div>`;
+}
+function verifyHtml(v, title, id) {
+  const db = v.db || {}, fl = v.files || {}, out = fl.output || {};
+  let dbHtml;
+  if (!db.available) {
+    dbHtml = `<div class="text-secondary">${esc(db.reason || '조회할 수 없습니다')}</div>`;
+  } else {
+    const t1 = db.t1 || {}, sup = db.statusSummarySupported;
+    dbHtml = `
+      <div class="vf-row"><span>T1 배치 <code>tb_batch_exec_log</code></span><span>${vfBadge(t1.execStsCd)}</span></div>
+      <div class="vf-sub">대상 ${t1.targetCnt ?? '-'} · 성공 ${t1.successCnt ?? '-'} · 실패 ${t1.failCnt ?? '-'} · ${esc(t1.execTypeCd || '')}</div>
+      <div class="vf-row"><span>T2 단계 <code>tb_batch_step_log</code></span><span>${(db.t2 || []).length}행</span></div>
+      <div class="vf-sub">${(db.t2 || []).map(x => `${esc(x.stepTypeCd)} ${vfBadge(x.stepStsCd)}
+          <span class="text-secondary">in ${x.inCnt ?? 0} / out ${x.outCnt ?? 0} / err ${x.errCnt ?? 0}</span>`).join('<br>') || '—'}</div>
+      <div class="vf-row"><span>T4 파일 <code>tb_file_proc_log</code></span><span>${db.t4?.total ?? 0}행</span></div>
+      <div class="vf-sub">${sup ? vfCounts(db.t4?.byStatus) : '<span class="text-secondary">상태별 집계 없음 — 로그 컬렉터가 구버전</span>'}</div>
+      <div class="vf-row"><span>T5 전송 <code>tb_deident_send_log</code></span><span>${db.t5?.total ?? 0}행</span></div>
+      <div class="vf-sub">${sup ? vfCounts(db.t5?.byStatus) : '—'}</div>`;
+  }
+  const filesHtml = vfFile('복호화 보존물 decrypted_*', fl.decoding)
+      + vfFile('전사 보존물 stt_temp/{execId}', fl.sttTemp)
+      + vfFile('STT 결과 — 접견', out.MEET)
+      + vfFile('STT 결과 — 전화', out.PHONE)
+      + vfFile('[바로 실행] 기준점 last_success.txt', fl.lastSuccess);
+  const cmds = (arr, kind) => (arr || []).map((c, i) => {
+    const pid = `${id}-${kind}-${i}`;
+    return `<div class="vf-cmd"><div class="hint">${esc(c.label)}</div>
+      <pre id="${pid}">${esc(c.text)}</pre>
+      <button class="btn btn-sm btn-outline-light cp" type="button" data-copy="${pid}">복사</button></div>`;
+  }).join('');
+  return `<div class="vf" id="${id}">
+    <div class="vf-phase">🔎 검증 — ${esc(title)}
+      <span class="hint">EXEC_ID <code>${esc(v.execId || '—')}</code> · ${v.env === 'K8S' ? '배포(K8s)' : '로컬'}</span></div>
+    <div class="vf-grid">
+      <div class="vf-card"><h6>DB 테이블 상태</h6>${dbHtml}</div>
+      <div class="vf-card"><h6>K8s PV 파일 상태</h6>${filesHtml}</div>
+    </div>
+    <details class="mt-1" open><summary class="hint">수동 검증 명령 — 복사해 DB 툴·터미널에서 그대로 실행</summary>
+      <div class="vf-grid mt-1">
+        <div><div class="fw-semibold small">SQL</div>${cmds(v.sql, 'sql')}</div>
+        <div><div class="fw-semibold small">CLI · ${v.env === 'K8S' ? 'kubectl exec' : '로컬 Git Bash'}</div>${cmds(v.cli, 'cli')}</div>
+      </div>
+    </details>
+  </div>`;
+}
+/** 배치 응답의 EXEC_ID 로 검증을 불러 해당 아코디언에 붙인다. phase = 'fail' | 'resume'. */
+async function scenVerify(key, phase, r) {
+  const box = $('sc-vf-' + key);
+  if (!box || !r || !r.execId) return;
+  const v = await call('GET', `/api/v1/voice/verify?execId=${encodeURIComponent(r.execId)}`, '', true);
+  if (!v) return;
+  const id = `vf-${key}-${phase}`;
+  const html = verifyHtml(v, phase === 'fail' ? '장애 직후' : '재처리 직후', id);
+  const old = $(id);
+  if (old) old.outerHTML = html; else box.insertAdjacentHTML('beforeend', html);
+  // 재처리 패널이 붙으면 앞 패널의 명령 영역은 접는다 — 두 장 다 펼치면 2,000px 를 넘어
+  //   정작 비교해야 할 두 카드(DB·PV)가 한 화면에 안 들어온다. 접어도 한 번 누르면 다시 펼쳐진다.
+  if (phase === 'resume') $(`vf-${key}-fail`)?.querySelector('details')?.removeAttribute('open');
+}
 
 function scenLock(on) {
-  document.querySelectorAll('#scen-box button').forEach(b => b.disabled = on);
+  document.querySelectorAll('#scen-box button:not(.acc-tgl)').forEach(b => b.disabled = on);
   $('scen-auto').innerHTML = on
     ? '<span class="spinner-border spinner-border-sm me-1"></span>실행 중…'
     : '🚀 원클릭 자동 실행 (1→2→3)';
@@ -1599,7 +1780,7 @@ async function scenFail(s) {
     const mode = $('sc-mode-' + s.key).value;
     const pct = $('sc-pct-' + s.key).value;
     await call('PUT', `/api/v1/voice/faults/${s.key}?mode=${mode}` + (mode === 'PARTIAL' ? `&failPercent=${pct}` : ''),
-        `[${s.no}] ${s.key} 장애 주입 — ${mode === 'ALL' ? '전체 실패' : '부분 성공(실패율 ' + pct + '%)'}`);
+        `[${s.no}] ${s.key} 장애 주입 — ${mode === 'ALL' ? '전체 실패' : '부분 실패(실패율 ' + pct + '%)'}`);
   }
   const q = s.kinds ? `&kinds=${s.kinds}` : '';
   const info = await runBatchInner('/api/v1/voice/batches/daily', `[${s.no}] 1차 배치 (장애 상태)`, s.kinds || null, null);
@@ -1625,6 +1806,8 @@ async function scenResume(s) {
 async function scenRun(key, act) {
   const s = SCEN.find(x => x.key === key);
   if (!s) return;
+  // [단독 실행]은 스스로 데이터를 다시 만든다. [장애 실행]만 있는 데이터로 돌기 때문에 먼저 확인한다
+  if (act === 'fail' && !SCEN_AUTO && !(await ensureData('daily', s.kinds || null, `[${s.no}] 장애 실행`))) return;
   scenLock(true);
   healthPause();
   try {
@@ -1639,6 +1822,8 @@ async function scenRun(key, act) {
       const r = await scenFail(s);
       html += `<div>1차: ${scenSummary(r)}</div>`;
       scenMark(key, { running:false, html, result: (r && r.failCnt > 0) ? 'ng' : 'ok' });
+      $('sc-vf-' + key).innerHTML = '';        // 새 1차 — 앞 시험의 검증 패널은 치운다
+      await scenVerify(key, 'fail', r);
       await scenPreserved();
     }
     if (act === 'resume' || act === 'both') {
@@ -1647,16 +1832,22 @@ async function scenRun(key, act) {
       html += `<div class="mt-1">재처리: ${scenSummary(r)}</div>`;
       const ok = r && r.failCnt === 0 && (r.successCnt > 0 || r.skippedCnt > 0);
       scenMark(key, { running:false, html, result: ok ? 'ok' : 'ng' });
+      await scenVerify(key, 'resume', r);
       log(ok ? `✔ 시나리오 ${s.no} 재처리 성공` : `⚠ 시나리오 ${s.no} 재처리가 기대대로 끝나지 않았습니다`, ok ? 'ok' : 'wr');
       await scenPreserved();
     }
   } finally {
-    scenLock(false);
+    // 원클릭 도중이면 잠금을 풀지 않는다 — 시나리오 하나가 끝날 때마다 풀면, 다음 시나리오가
+    //   시작되기 전 틈에 버튼이 살아나 사람이 누를 수 있다(원클릭과 겹쳐 돈다). 원클릭이 끝에서 푼다.
+    if (!SCEN_AUTO) scenLock(false);
     healthResume();
   }
 }
 
+let SCEN_AUTO = false;   // 원클릭이 도는 중 — 시나리오마다 스스로 재생성하므로 0건 확인을 다시 묻지 않는다
 $('scen-auto').onclick = async () => {
+  if (!(await ensureData('daily', null, '원클릭 자동 실행'))) return;
+  SCEN_AUTO = true;
   scenLock(true);
   healthPause();
   log('🚀 단계별 장애 시나리오 자동 실행 — 1(수집) → 2(분석) → 3(전송)', 'hd');
@@ -1673,6 +1864,7 @@ $('scen-auto').onclick = async () => {
     await scenReset(true);
     log('✔ 세 시나리오 완료 — 각 단계의 장애·보존·이어서 하기를 모두 확인했습니다', 'ok');
   } finally {
+    SCEN_AUTO = false;
     scenLock(false);
     healthResume();
   }
@@ -1683,12 +1875,12 @@ $('scen-reset').onclick = async () => {
   try {
     await scenReset(false);
     Object.keys(SC).forEach(k => delete SC[k]);
-    scenRender();
+    SCEN.forEach(x => { scenPaint(x.key); $('sc-vf-' + x.key).innerHTML = ''; });
     log('  └ 단계별 장애 해제 · 브로커 복구 · 픽스처 재생성', 'ok');
   } finally { scenLock(false); }
 };
 
-scenRender();
+scenBuild();
 
 // ── 바인딩 ──────────────────────────────────────────────────────────────
 $('btn-meet').onclick     = () => runBatch('/api/v1/voice/batches/periodic', '접견 트랙만 실행 (10분 창)',  'MEET',  'btn-meet');
@@ -1697,7 +1889,7 @@ $('btn-periodic').onclick = () => runBatch('/api/v1/voice/batches/periodic', '�
 $('btn-daily').onclick    = () => runBatch('/api/v1/voice/batches/daily',    '전체 실행 (전날 하루치)',      null,    'btn-daily');
 $('btn-cancel').onclick   = cancelBatch;
 $('btn-ondemand').onclick = async () => {
-  await runBatch('/api/v1/voice/batches/on-demand', '바로 실행 (당일 미처리 전체 ~ 현재)', null, 'btn-ondemand');
+  await runBatch('/api/v1/voice/batches/on-demand', '바로 실행 (미처리 전체 ~ 현재)', null, 'btn-ondemand');
   await loadLastSuccess();
 };
 $('btn-health').onclick = async () => {
@@ -1708,22 +1900,17 @@ $('btn-health').onclick = async () => {
 };
 
 /**
- * [바로 실행]이 어디서부터 볼지 버튼에 적어 준다 — 누르기 전에 범위를 알 수 있게.
+ * [바로 실행]이 무엇을 할지 버튼에 적어 준다 — <b>서버가 실제로 쓸 창과 미처리 건수</b>.
  *
- * 최소한 <b>당일 전체</b>를 본다. 마지막 성공 시점부터만 적어 두었을 때는 일배치 직후
- * "(11:16:17 ~ 현재)" 처럼 빈 구간이 떠서, 눌러도 아무것도 처리하지 못했다.
- * 마지막 성공이 자정보다 이르면(어제 늦게 들어온 미처리 건) 거기까지 넓혀 적는다.
+ * 창은 서버가 정한다(최근 30일 · 마지막 성공이 더 이르면 거기까지). 화면이 따로 계산하면
+ * 버튼에 적힌 구간과 실제로 도는 구간이 어긋날 수 있어, 같은 API(pending)에서 받아 적는다.
  */
 async function loadLastSuccess() {
-  const d = await call('GET', '/api/v1/voice/batches/last-success', '', true);
   const el = $('ondemand-hint'); if (!el) return;
-  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
-  const last = d && d.lastSuccessAt ? new Date(String(d.lastSuccessAt)) : null;
-  const from = (last && last < midnight) ? last : midnight;
-  const pad = n => String(n).padStart(2, '0');
-  const fmt = t => `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())} `
-                 + `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
-  el.textContent = `(${fmt(from)} ~ 현재 · 당일 미처리 전체)`;
+  const p = await call('GET', '/api/v1/voice/batches/pending?type=on-demand', '', true);
+  if (!p) { el.textContent = '(미처리 전체 ~ 현재)'; return; }
+  const from = String(p.from || '').replace('T', ' ').slice(0, 19);
+  el.textContent = `(${from} ~ 현재 · 미처리 ${p.pending}건)`;
 }
 
 $('btn-probe').onclick = async () => {
@@ -1768,12 +1955,17 @@ function renderSimResult(title, d, isSeed) {
 }
 // 상단 툴바 버튼은 어느 탭에서나 눌린다. 결과 카드(#sim-box)와 SQL 로그는 파이프라인 탭에 있지만
 // 요약은 완료 팝업이 알려 주므로, 보던 탭을 그대로 둔다.
-$('btn-reset').onclick = async () => {
+/**
+ * 시뮬레이션 데이터 생성 — 툴바 버튼과 '0건이면 생성할까요?' 가 같이 쓴다.
+ * @param showDone 완료 팝업을 띄울지. 이어서 배치를 돌릴 때는 띄우지 않는다(흐름이 끊긴다).
+ * @return 성공하면 true
+ */
+async function simCreate(showDone) {
   // 탭을 옮기지 않는다 — 결과는 팝업이 알려 주므로 보던 자리를 뺏을 이유가 없다.
   //   (② 제어의 결과 카드는 파이프라인 탭으로 옮겨 가면 그대로 남아 있다.)
   const info = await callFull('POST', '/api/v1/mock/sim-data', '시뮬레이션 데이터 생성 (Clean & Seed)');
   const d = info.ok ? info.body : null;
-  if (!d) return;
+  if (!d) return false;
   const c = d.cleared || {};
   log(`  └ 로컬 정리 — 표식 ${c.idempotencyMarkers} · 접견파일 ${c.meetFiles} · 전화파일 ${c.phoneFiles} · 작업파일 ${c.workFiles}`, 'ok');
   const sim = d.sim || {};
@@ -1784,8 +1976,11 @@ $('btn-reset').onclick = async () => {
   renderSimResult('시뮬레이션 데이터 생성', d, true);
   $('targets-card').classList.add('d-none');
   await loadStatus(true);
-  showPopup('시뮬레이션 데이터 생성 완료', seedPopupHtml(sim));
-};
+  loadLastSuccess();
+  if (showDone) showPopup('시뮬레이션 데이터 생성 완료', seedPopupHtml(sim));
+  return true;
+}
+$('btn-reset').onclick = () => simCreate(true);
 $('btn-dataset').onclick = async () => {
   const m = Number($('ds-meet').value||0), p = Number($('ds-phone').value||0);
   const d = await call('PUT', `/api/v1/mock/dataset?meet=${m}&phone=${p}`, `Mock 규모 일배치 ${m}·${p} 적용`);

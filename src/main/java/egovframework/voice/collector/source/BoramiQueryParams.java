@@ -37,6 +37,7 @@ public record BoramiQueryParams(
         LocalDateTime from,
         LocalDateTime to,
         List<String> speclCodes,
-        int limit
+        int limit,
+        int offset
 ) {
 }

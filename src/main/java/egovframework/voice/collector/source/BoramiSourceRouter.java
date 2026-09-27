@@ -59,6 +59,16 @@ public class BoramiSourceRouter implements BoramiSourceClient {
     }
 
     @Override
+    public List<VoiceTarget> findMeetTargets(BatchWindow window, List<String> speclCodes, int limit, int offset) {
+        return current().findMeetTargets(window, speclCodes, limit, offset);
+    }
+
+    @Override
+    public List<VoiceTarget> findPhoneTargets(BatchWindow window, List<String> speclCodes, int limit, int offset) {
+        return current().findPhoneTargets(window, speclCodes, limit, offset);
+    }
+
+    @Override
     public String mode() {
         return state.source().name();
     }

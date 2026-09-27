@@ -32,9 +32,15 @@ public class JdbcBoramiSourceClient implements BoramiSourceClient {
 
     @Override
     public List<VoiceTarget> findMeetTargets(BatchWindow window, List<String> speclCodes, int limit) {
+        return findMeetTargets(window, speclCodes, limit, 0);
+    }
+
+    @Override
+    public List<VoiceTarget> findMeetTargets(BatchWindow window, List<String> speclCodes, int limit, int offset) {
         try {
-            List<VoiceTarget> rows = mapper.selectMeetTargets(params(window, speclCodes, limit));
-            log.info("[Source:JDBC] 접견 대상 {}건 (window={})", rows.size(), window);
+            List<VoiceTarget> rows = mapper.selectMeetTargets(params(window, speclCodes, limit, offset));
+            log.info("[Source:JDBC] 접견 대상 {}건 (window={}{})", rows.size(), window,
+                    offset > 0 ? ", offset=" + offset : "");
             return rows;
         } catch (Exception e) {
             throw explain("접견", e);
@@ -43,9 +49,15 @@ public class JdbcBoramiSourceClient implements BoramiSourceClient {
 
     @Override
     public List<VoiceTarget> findPhoneTargets(BatchWindow window, List<String> speclCodes, int limit) {
+        return findPhoneTargets(window, speclCodes, limit, 0);
+    }
+
+    @Override
+    public List<VoiceTarget> findPhoneTargets(BatchWindow window, List<String> speclCodes, int limit, int offset) {
         try {
-            List<VoiceTarget> rows = mapper.selectPhoneTargets(params(window, speclCodes, limit));
-            log.info("[Source:JDBC] 전화 대상 {}건 (window={})", rows.size(), window);
+            List<VoiceTarget> rows = mapper.selectPhoneTargets(params(window, speclCodes, limit, offset));
+            log.info("[Source:JDBC] 전화 대상 {}건 (window={}{})", rows.size(), window,
+                    offset > 0 ? ", offset=" + offset : "");
             return rows;
         } catch (Exception e) {
             throw explain("전화", e);
@@ -91,7 +103,7 @@ public class JdbcBoramiSourceClient implements BoramiSourceClient {
      */
     public int countByFlagShortcut(BatchWindow window, int limit) {
         return mapper.selectPhoneTargetsByFlag(
-                params(window, props.batch().speclMngSeCd(), limit)).size();
+                params(window, props.batch().speclMngSeCd(), limit, 0)).size();
     }
 
     /**
@@ -101,7 +113,7 @@ public class JdbcBoramiSourceClient implements BoramiSourceClient {
     public int probe() {
         BatchWindow now = BatchWindow.manual(
                 java.time.LocalDateTime.now(), java.time.LocalDateTime.now());
-        Integer n = mapper.probeImsc(params(now, props.batch().speclMngSeCd(), 1));
+        Integer n = mapper.probeImsc(params(now, props.batch().speclMngSeCd(), 1, 0));
         return n == null ? -1 : n;
     }
 
@@ -110,7 +122,7 @@ public class JdbcBoramiSourceClient implements BoramiSourceClient {
         return tables.describe();
     }
 
-    private BoramiQueryParams params(BatchWindow window, List<String> speclCodes, int limit) {
+    private BoramiQueryParams params(BatchWindow window, List<String> speclCodes, int limit, int offset) {
         VoiceProperties.Flag f = props.source().flag();
         return new BoramiQueryParams(
                 tables.imscPtprDt(),
@@ -125,7 +137,8 @@ public class JdbcBoramiSourceClient implements BoramiSourceClient {
                 window.from(),
                 window.to(),
                 speclCodes,
-                limit);
+                limit,
+                Math.max(0, offset));
     }
 
     @Override

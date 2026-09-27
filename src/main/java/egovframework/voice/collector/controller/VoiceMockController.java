@@ -69,6 +69,7 @@ public class VoiceMockController {
     private final egovframework.voice.collector.source.DbKindDetector dbKind;
     private final egovframework.voice.collector.config.DeployEnvPreset deployEnv;
     private final egovframework.voice.collector.logging.LogCollectorClient logCollector;
+    private final egovframework.voice.collector.stt.SttTempStore sttTemp;
 
     @Operation(summary = "시뮬레이션 데이터 생성 (Complete Clean & Seed)",
             description = """
@@ -157,7 +158,7 @@ public class VoiceMockController {
 
                     시뮬레이터에서 실행한 배치는 `JOB_ID=TEST_BATCH` 로 열려 EXEC_ID 의
                     작업코드 자리가 **`TST`** 가 됩니다 (예: `20260914TST001`).
-                    운영 배치는 `VOC`(음성)·`STR`(정형)·`EXT`(외부)라 **섞이지 않습니다.**
+                    운영 배치는 `VOC`(음성)·`STR`(정형)·`PUB`(공공)·`LAW`(법제처)라 **섞이지 않습니다.**
 
                     두 가지를 지웁니다.
 
@@ -165,7 +166,7 @@ public class VoiceMockController {
                        컬렉터가 `JOB_ID='TEST_BATCH'` 인 T1 과 하위 T2~T8 을 FK 안전 순서로
                        연쇄 삭제합니다. 삭제 SQL 에 작업코드 조건이 박혀 있어 운영 배치는
                        어떤 경우에도 걸리지 않습니다.
-                    2. **로컬 산출물** — 멱등 표식·수신 파일·작업 파일
+                    2. **로컬 산출물** — 멱등 표식·수신 파일·작업 파일·**재처리 보존물**(`{ROOT}/stt_temp/**` 전사 · `{ROOT}/xvram/decoding/decrypted_*` 복호화 오디오)
                     3. **STT 출력 폴더** — `{output}/{execId}/` 중 EXEC_ID 에 `TST` 가 든 폴더째
                     4. **시뮬레이션 데이터** — DB 의 SIM 접두 메타 행 일괄 DELETE + XVARM 원본 더미 파일 삭제 (= `DELETE /sim-data`)
 
@@ -610,6 +611,33 @@ public class VoiceMockController {
             out.put(e.getKey(), r.deleted());
             stuck.addAll(r.stuck());
         }
+        // ── 재처리용 중간 산출물 ─────────────────────────────────────────────
+        //   이것까지 지워야 '처음부터' 다. 남겨 두면 다음 재처리(FROM_ANALYZE·FROM_SEND)가
+        //   지난 시험의 보존물을 집어 가서, 새로 만든 데이터로 돌렸는데 옛 전사가 나온다.
+        //   보존물에는 평문 음성·전사(성명·주민번호)가 들어 있으니 PII 잔재이기도 하다.
+        //
+        //   ① {ROOT}/stt_temp/{execId}/  — 전사 결과(SEND 재처리용). 폴더째 지운다
+        out.put("sttTempFiles", sttTemp.clearAll());
+        //   ② {ROOT}/xvram/decoding/decrypted_*  — 복호화 오디오(ANALYZE 재처리용).
+        //      이 폴더에는 다른 것도 사니 우리 접두사만 지운다
+        int audio = 0;
+        Path work = Path.of(dirs.work());
+        if (Files.isDirectory(work)) {
+            try (Stream<Path> ws = Files.list(work)) {
+                for (Path f : ws.filter(Files::isRegularFile)
+                        .filter(f -> f.getFileName().toString().startsWith("decrypted_")).toList()) {
+                    if (StaleFiles.delete(f)) {
+                        audio++;
+                    } else {
+                        stuck.add(f.getFileName().toString());
+                    }
+                }
+            } catch (IOException e) {
+                log.warn("[Mock] 복호화 보존물 목록 실패 — {} ({})", work, e.getMessage());
+            }
+        }
+        out.put("decryptedAudio", audio);
+
         if (!stuck.isEmpty()) {
             out.put("stuckFiles", stuck);
             out.put("stuckWarning", "이 파일들을 지우지 못했습니다 — 다른 프로그램(탐색기 미리보기·재생기·백신)이 "
