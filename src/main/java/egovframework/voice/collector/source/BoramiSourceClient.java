@@ -36,6 +36,23 @@ public interface BoramiSourceClient {
      */
     List<VoiceTarget> findPhoneTargets(BatchWindow window, List<String> speclCodes, int limit);
 
+    /**
+     * 접견 대상 — <b>{@code offset} 행을 건너뛴 다음 페이지</b>. 정렬은 {@code CRT_DT, 키} 오름차순으로 고정이다.
+     *
+     * <p>창이 넓으면(주기배치 당일 전체 · [바로 실행] 30일) 앞쪽 행이 이미 처리된 건으로 상한을 다 채워,
+     * 뒤쪽의 미처리 건이 영영 조회되지 않는다. 호출 측이 페이지를 넘겨 가며 미처리 건을 모은다.</p>
+     *
+     * <p>페이지를 지원하지 않는 구현은 첫 페이지만 돌려준다 — 종전과 같은 동작이다.</p>
+     */
+    default List<VoiceTarget> findMeetTargets(BatchWindow window, List<String> speclCodes, int limit, int offset) {
+        return offset == 0 ? findMeetTargets(window, speclCodes, limit) : List.of();
+    }
+
+    /** 전화 대상 — 다음 페이지. {@link #findMeetTargets(BatchWindow, List, int, int)} 와 같은 규칙. */
+    default List<VoiceTarget> findPhoneTargets(BatchWindow window, List<String> speclCodes, int limit, int offset) {
+        return offset == 0 ? findPhoneTargets(window, speclCodes, limit) : List.of();
+    }
+
     /** 이 구현이 어떤 모드인지(진단·응답 표기용). */
     String mode();
 }

@@ -68,6 +68,14 @@ public class VoiceBatchController {
     private final egovframework.voice.collector.source.DbKindDetector db;
     private final egovframework.voice.collector.source.BoramiTableNames tables;
     private final egovframework.voice.collector.config.DeployEnvPreset deployEnv;
+    private final egovframework.voice.collector.batch.VerificationService verification;
+
+    /**
+     * [바로 실행]이 기본으로 되짚어 보는 기간(일). 이 기간 안의 <b>미처리 건 전부</b>를 처리한다.
+     * 마지막 성공 시점이 이보다 더 이르면 그 시점까지 넓힌다.
+     */
+    @org.springframework.beans.factory.annotation.Value("${voice.batch.catchup-lookback-days:30}")
+    private int catchupLookbackDays;
 
     @Operation(summary = "일배치 실행",
             description = """
@@ -86,7 +94,9 @@ public class VoiceBatchController {
 
     @Operation(summary = "주기배치 실행",
             description = """
-                    지금으로부터 periodic-lag-min 분 전까지를 처리한다(기본 20분).
+                    **당일 00:00 ~ 지금**을 처리한다(자정 직후에는 periodic-lag-min 만큼 어제로 넓힌다).
+                    최근 20분만 보면 스케줄러가 멈췄던 구간의 건이 다음 창에도 들어오지 않아 영영 빠진다.
+                    이미 성공한 건은 멱등 표식이 건너뛴다.
 
                     - `kinds=MEET` 접견만 · `kinds=PHONE` 전화만 · 비우면 둘 다
                     - `test=true` 면 EXEC_ID 가 `…TST…` 로 채번된다(시뮬레이터 기본)
@@ -189,36 +199,87 @@ public class VoiceBatchController {
         return healthProbe.health(force);
     }
 
-    @Operation(summary = "바로 실행 (온디맨드)",
+    @Operation(summary = "바로 실행 (온디맨드 · 미처리 전체 Catch-up)",
             description = """
-                    **마지막 성공 시점 ~ 지금**을 훑습니다. 기획서 배치 스케줄 목록의 [바로 실행] 버튼이 부르는 API 입니다.
+                    **과거의 미처리 건 전부 ~ 지금**을 한 번에 처리합니다. 기획서 배치 스케줄 목록의 [바로 실행] 버튼이 부르는 API 입니다.
 
-                    기록된 마지막 성공이 없으면(첫 실행·기준점 유실) `fallbackHours` 시간 전부터 봅니다(기본 24시간).
-                    마지막 성공이 너무 오래됐어도 같은 상한을 적용합니다 — 몇 주치를 한 번에 긁어
-                    브로커·STT 를 몰아치지 않기 위해서입니다.
+                    - 창: **최근 `lookbackDays` 일(기본 `voice.batch.catchup-lookback-days`=30) ~ 지금**.
+                      일배치 몫(어제)·주기배치 몫(오늘)을 가리지 않습니다
+                    - 마지막 성공 시점(`{ROOT}/state/last_success.txt`)이 그보다 더 이르면 **그 시점까지 넓힙니다** —
+                      서비스가 오래 멈춰 있었어도 그동안 쌓인 건을 놓치지 않게
+                    - 이미 성공한 건은 멱등 표식이 건너뜁니다. 창이 넓어도 같은 건을 두 번 처리하지 않습니다
 
-                    기준점은 **성공 건이 있는 배치만** 밉니다. 실패한 배치로 기준점을 옮기면 그 구간이 영영 빠집니다.
+                    **왜 당일로 한정하지 않나**: 당일 00:00 부터만 보면 어제 일배치가 실패했거나 스케줄러가 멈춰 있던
+                    구간의 건이 [바로 실행]으로도 주워지지 않았습니다. 수동 실행의 목적은 "밀린 것을 지금 다 처리" 입니다.
                     """)
     @PostMapping("/batches/on-demand")
     public VoiceBatchResult onDemand(@RequestParam(required = false) List<VoiceKind> kinds,
                                      @RequestParam(defaultValue = "false") boolean test,
-                                     @RequestParam(defaultValue = "24") int fallbackHours) {
-        LocalDateTime now = LocalDateTime.now();
+                                     @RequestParam(required = false) Integer lookbackDays) {
+        BatchWindow w = onDemandWindow(LocalDateTime.now(), lookbackDays);
+        log.info("[Batch] 바로 실행 — 마지막 성공 {} → 구간 {} (미처리 전체 Catch-up)",
+                lastSuccess.lastSuccessAt(), w);
+        return service.run(w, kinds, "ON_DEMAND", test);
+    }
+
+    /**
+     * [바로 실행]의 창 — 최근 {@code lookbackDays} 일 ~ 지금. 마지막 성공이 더 이르면 거기까지.
+     *
+     * <p>[미처리 건수]와 실제 실행이 <b>같은 창</b>을 써야 한다. 둘이 다르면 "0건이라 생성할까요?"
+     * 라고 물어 놓고 실행하면 무언가를 처리하거나, 그 반대가 된다.</p>
+     */
+    private BatchWindow onDemandWindow(LocalDateTime now, Integer lookbackDays) {
+        int days = lookbackDays == null ? catchupLookbackDays : Math.max(1, lookbackDays);
+        LocalDateTime from = now.minusDays(days);
         LocalDateTime last = lastSuccess.lastSuccessAt();
-        LocalDateTime todayStart = now.toLocalDate().atStartOfDay();
-        LocalDateTime floor = now.minusHours(Math.max(1, fallbackHours));
-        // 최소한 <b>당일 전체</b>를 본다. 마지막 성공 시점부터만 보면, 그보다 먼저 들어와 있던
-        //   미처리 건(시뮬레이션 데이터를 미리 만들어 두었거나 스케줄러가 멈췄던 구간)이
-        //   창에서 빠져 영영 수집되지 않는다. 이미 성공한 건은 멱등 표식이 건너뛴다.
-        LocalDateTime from = todayStart;
-        // 마지막 성공이 더 이르면 거기까지 넓힌다 — 어제 늦게 들어온 미처리 건도 주워 온다.
-        //   다만 상한(fallbackHours)은 지킨다: 몇 주치를 한 번에 긁어 브로커·STT 를 몰아치지 않는다.
-        if (last != null && last.isBefore(from) && !last.isBefore(floor)) {
+        if (last != null && last.isBefore(from)) {
             from = last;
         }
-        log.info("[Batch] 바로 실행 — 마지막 성공 {} · 당일 시작 {} → 구간 [{} ~ {})",
-                last, todayStart, from, now);
-        return service.run(BatchWindow.manual(from, now), kinds, "ON_DEMAND", test);
+        return BatchWindow.manual(from, now);
+    }
+
+    @Operation(summary = "미처리 건수 (실행 전 확인)",
+            description = """
+                    배치를 **열지 않고** 이 창을 돌리면 처리할 건이 몇 개인지 셉니다. 시뮬레이터가 실행 버튼을 누르기 직전에 부릅니다.
+
+                    - `type` — `daily`(어제 하루) · `periodic`(당일 00:00~지금) · `on-demand`(미처리 전체 Catch-up)
+                    - `pending` 이 0 이면 화면이 "시뮬레이션 데이터를 생성하시겠습니까?" 를 묻습니다.
+                      대상은 있는데 모두 처리가 끝난 경우(`total > 0`, `pending = 0`)도 0 입니다 —
+                      그대로 누르면 전부 '건너뜀' 으로 끝나 확인할 것이 없으니까요
+                    - 로그 컬렉터에 T1 을 남기지 않습니다. 보라미 조회와 멱등 표식 확인뿐입니다
+                    """)
+    @GetMapping("/batches/pending")
+    public Map<String, Object> pending(@RequestParam(defaultValue = "daily") String type,
+                                       @RequestParam(required = false) List<VoiceKind> kinds,
+                                       @RequestParam(required = false) Integer lookbackDays) {
+        LocalDateTime now = LocalDateTime.now();
+        BatchWindow w = switch (type.trim().toLowerCase()) {
+            case "daily" -> BatchWindow.daily(now);
+            case "periodic" -> BatchWindow.periodic(now, props.batch().periodicLagMin());
+            case "on-demand", "ondemand" -> onDemandWindow(now, lookbackDays);
+            default -> throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "type 은 daily · periodic · on-demand 중 하나입니다: " + type);
+        };
+        Map<String, Object> out = new java.util.LinkedHashMap<>(service.pending(w, kinds));
+        out.put("type", type);
+        return out;
+    }
+
+    @Operation(summary = "검증 패널 — DB·PV 현황과 수동 확인 명령",
+            description = """
+                    한 배치(EXEC_ID)의 결과가 **로그 테이블과 PV 에 실제로 어떻게 남았는지**를 한 장으로 돌려줍니다.
+
+                    - `db` — 로그 컬렉터를 통해 T1(`kcais.tb_batch_exec_log`) · T2(`tb_batch_step_log`) ·
+                      T4(`tb_file_proc_log`, 상태별) · T5(`tb_deident_send_log`, 상태별). 이 서비스는 로그 DB 에 직접 붙지 않습니다
+                    - `files` — 복호화 보존물(`{ROOT}/xvram/decoding/decrypted_*`) · 전사 보존물(`{ROOT}/stt_temp/{execId}`) ·
+                      STT 결과(`{ROOT}/xenon/{kind}/{execId}`) · 기준점(`{ROOT}/state/last_success.txt`)
+                    - `sql` · `cli` — 위를 **손으로** 확인할 때 그대로 복사해 쓰는 SQL 과 `ls`/`cat` 명령.
+                      배포 환경이면 `kubectl exec` 접두가 붙습니다
+                    """)
+    @GetMapping("/verify")
+    public Map<String, Object> verify(@RequestParam(required = false) String execId) {
+        return verification.verify(execId);
     }
 
     @Operation(summary = "마지막 성공 시점",

@@ -79,7 +79,7 @@
           AND R.RECRD_FILE_DEL_YN = #{p.flagNotDeleted}
           AND R.TBLT_VTR_FILE_ID IS NOT NULL
         ORDER BY R.CRT_DT, R.TARE_FILE_NO
-        FETCH FIRST #{p.limit} ROWS ONLY
+        OFFSET #{p.offset} ROWS FETCH NEXT #{p.limit} ROWS ONLY
     </select>
 
     <!--
@@ -112,7 +112,7 @@
           AND U.DEL_DT IS NULL
           AND U.TELP_RECRD_FILE_ID IS NOT NULL
         ORDER BY U.CRT_DT, U.VRFC_ESTL_ID
-        FETCH FIRST #{p.limit} ROWS ONLY
+        OFFSET #{p.offset} ROWS FETCH NEXT #{p.limit} ROWS ONLY
     </select>
 
     <!--
@@ -140,7 +140,7 @@
           AND U.DEL_DT IS NULL
           AND U.TELP_RECRD_FILE_ID IS NOT NULL
         ORDER BY U.CRT_DT, U.VRFC_ESTL_ID
-        FETCH FIRST #{p.limit} ROWS ONLY
+        OFFSET #{p.offset} ROWS FETCH NEXT #{p.limit} ROWS ONLY
     </select>
 
     <!-- 진단: 특이수용자 테이블에 실제로 접근되는지. 스키마 설정이 틀리면 여기서 먼저 터진다. -->

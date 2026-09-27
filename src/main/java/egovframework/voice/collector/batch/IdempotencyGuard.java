@@ -39,6 +39,27 @@ public class IdempotencyGuard {
         return Files.exists(markerOf(target));
     }
 
+    /**
+     * 처리 완료 표식 전체를 <b>한 번에</b> 읽어 둔다 — 넓은 창을 훑을 때 쓴다.
+     *
+     * <p>{@link #isProcessed} 는 건마다 파일을 stat 한다. 수신 폴더가 NFS 인 배포 환경에서 수천 건을
+     * 그렇게 물으면 그것만으로 수십 초가 간다. 폴더를 한 번 읽어(READDIR) 이름 집합으로 대조한다.</p>
+     */
+    public java.util.function.Predicate<VoiceTarget> snapshot() {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        Path dir = markerDir();
+        if (Files.isDirectory(dir)) {
+            try (var s = Files.list(dir)) {
+                s.forEach(p -> names.add(p.getFileName().toString()));
+            } catch (IOException e) {
+                // 목록을 못 읽으면 건별 판정으로 물러난다 — 느려도 틀리지는 않는다
+                log.warn("[Idempotency] 표식 목록 실패 — {} ({}) · 건별 판정으로 대신한다", dir, e.getMessage());
+                return this::isProcessed;
+            }
+        }
+        return t -> names.contains(markerOf(t).getFileName().toString());
+    }
+
     /** 처리 완료로 표시한다. */
     public void markProcessed(VoiceTarget target) {
         Path marker = markerOf(target);

@@ -322,24 +322,125 @@ public class VoiceCollectService {
         return new VoiceBatchResult.StepLog(stepTypeCd, stepLogId, sts, in, out, err, sec, logged);
     }
 
+    /**
+     * 이 창을 돌리면 <b>실제로 처리할 건이 몇 개인가</b> — 배치를 열지 않고 센다.
+     *
+     * <p>시뮬레이터가 실행 버튼을 누르기 직전에 부른다. 0건이면 T1 을 빈 배치로 하나 남기는 대신
+     * "시뮬레이션 데이터를 만들까요?" 를 먼저 묻는다. 대상은 있는데 모두 처리가 끝난 경우도
+     * 0건이다 — 누르면 전부 '건너뜀' 으로 끝나 아무것도 확인할 수 없으니 같은 취급이다.</p>
+     *
+     * <p>로그 컬렉터·브로커·파일은 건드리지 않는다. 보라미 조회와 멱등 표식 확인뿐이다.</p>
+     */
+    public Map<String, Object> pending(BatchWindow window, List<VoiceKind> kinds) {
+        List<VoiceKind> targets = (kinds == null || kinds.isEmpty())
+                ? List.of(VoiceKind.MEET, VoiceKind.PHONE) : kinds;
+        List<VoiceTarget> found = findTargets(window, targets, true);
+        long processed = found.stream().filter(idempotency::isProcessed).count();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("window", window.toString());
+        out.put("from", window.from().toString());
+        out.put("to", window.to().toString());
+        out.put("total", found.size());
+        out.put("processed", processed);
+        out.put("pending", found.size() - processed);
+        return out;
+    }
+
     private List<VoiceTarget> findTargets(BatchWindow window, List<VoiceKind> kinds) {
-        List<VoiceTarget> all = new ArrayList<>();
+        return findTargets(window, kinds, false);
+    }
+
+    private List<VoiceTarget> findTargets(BatchWindow window, List<VoiceKind> kinds, boolean quiet) {
         int limit = props.batch().maxFilesPerRun();
         List<String> codes = props.batch().speclMngSeCd();
+        java.util.function.Predicate<VoiceTarget> done = idempotency.snapshot();
+        List<VoiceTarget> all = new ArrayList<>();
         if (kinds.contains(VoiceKind.MEET)) {
-            log.info("[Track:MEET] ① 보라미 조회 — 4단 조인(특이수용자→녹취파일→공통파일→XVARM) via {}",
-                    source.mode());
-            all.addAll(source.findMeetTargets(window, codes, limit));
+            if (!quiet) {
+                log.info("[Track:MEET] ① 보라미 조회 — 4단 조인(특이수용자→녹취파일→공통파일→XVARM) via {}",
+                        source.mode());
+            }
+            all.addAll(scan("접견", (l, o) -> source.findMeetTargets(window, codes, l, o), limit, done));
         }
         if (kinds.contains(VoiceKind.PHONE)) {
-            log.info("[Track:PHONE] ① 보라미 조회 — 단일 테이블(TB_IMPH_UCDR_DS) via {}", source.mode());
-            all.addAll(source.findPhoneTargets(window, codes, limit));
+            if (!quiet) {
+                log.info("[Track:PHONE] ① 보라미 조회 — 단일 테이블(TB_IMPH_UCDR_DS) via {}", source.mode());
+            }
+            all.addAll(scan("전화", (l, o) -> source.findPhoneTargets(window, codes, l, o), limit, done));
         }
-        if (all.size() > limit) {
-            log.warn("[Batch] 대상이 상한을 넘어 잘라낸다 — {}건 → {}건", all.size(), limit);
-            return all.subList(0, limit);
+        // 상한은 '처리할 건' 기준으로 자른다. 건너뛸 건까지 세어 자르면, 이미 끝난 건이 자리를 차지해
+        //   정작 처리할 건이 밀려난다.
+        List<VoiceTarget> out = new ArrayList<>(all.size());
+        int pending = 0;
+        int dropped = 0;
+        for (VoiceTarget t : all) {
+            if (!done.test(t)) {
+                if (pending >= limit) {
+                    dropped++;
+                    continue;
+                }
+                pending++;
+            }
+            out.add(t);
         }
-        return all;
+        if (dropped > 0) {
+            log.warn("[Batch] 처리할 건이 상한({})을 넘어 {}건은 다음 실행으로 넘긴다", limit, dropped);
+        }
+        return out;
+    }
+
+    /** 페이지 하나를 가져오는 함수 — (limit, offset) → 행. */
+    @FunctionalInterface
+    private interface PageFetcher {
+        List<VoiceTarget> fetch(int limit, int offset);
+    }
+
+    /** 한 번의 조회로 훑는 최대 페이지 수 — 창이 비정상적으로 넓어도 끝이 있게. */
+    private static final int MAX_PAGES = 200;
+
+    /**
+     * 한 트랙을 <b>페이지로</b> 훑는다 — 이미 처리된 건이 상한을 다 채워 새 건이 밀려나지 않게.
+     *
+     * <p><b>왜 필요한가</b>: 조회는 {@code CRT_DT} 오름차순 + {@code FETCH FIRST {상한}} 이고, 이미 처리했는지는
+     * 조회 <b>뒤에</b> 멱등 표식으로 가린다. 창이 좁을 때(최근 20분)는 문제가 없었지만, 주기배치를
+     * 당일 전체로, [바로 실행]을 30일로 넓히자 앞쪽의 처리 끝난 건이 상한을 다 채웠다 — 운영 상한 500 에
+     * 하루 1,300건이면 오전 500건이 끝난 뒤로는 오후 건이 <b>영영 조회되지 않는다</b>.</p>
+     *
+     * <p>첫 페이지는 그대로 싣는다 — 이미 처리된 건은 '건너뜀' 으로 보고되는 종전 동작이다.
+     * 다음 페이지부터는 처리할 건만 싣는다 — 수만 건을 '건너뜀' 으로 늘어놓을 이유가 없고,
+     * 건너뛴 건은 T4 에 남지도 않는다.</p>
+     */
+    private List<VoiceTarget> scan(String track, PageFetcher f, int limit,
+                                   java.util.function.Predicate<VoiceTarget> done) {
+        List<VoiceTarget> out = new ArrayList<>();
+        int offset = 0;
+        int pages = 0;
+        int pending = 0;
+        while (true) {
+            List<VoiceTarget> page = f.fetch(limit, offset);
+            pages++;
+            for (VoiceTarget t : page) {
+                boolean processed = done.test(t);
+                if (pages == 1 || !processed) {
+                    out.add(t);
+                }
+                if (!processed) {
+                    pending++;
+                }
+            }
+            if (page.size() < limit || pending >= limit) {
+                break;
+            }
+            if (pages >= MAX_PAGES) {
+                log.warn("[Batch] {} 조회가 {}페이지({}행)에 닿아 멈춘다 — 창이 지나치게 넓다", track, pages, offset + page.size());
+                break;
+            }
+            offset += page.size();
+        }
+        if (pages > 1) {
+            log.info("[Batch] {} — 처리 끝난 건을 넘겨 {}페이지까지 훑었다(미처리 {}건)", track, pages, pending);
+        }
+        return out;
     }
 
     /**
