@@ -599,8 +599,10 @@ public class VoiceMockController {
      * <p>지운 건수만 돌려주던 때는 "3건 삭제" 라고 보고해 놓고 실제로는 이름이 잡혀 있어,
      * 다음 실행이 수신 대기 타임아웃으로 죽어도 그 연결을 아무도 못 봤다. 이제는 화면까지 올린다
      * — {@code stuckFiles} 가 비어 있지 않으면 초기화가 끝난 것이 아니다.</p>
+     *
+     * <p>성능 테스트가 매 회차 준비 단계에서도 부른다({@code PerfRunService}).</p>
      */
-    private Map<String, Object> clearLocalFiles() {
+    public Map<String, Object> clearLocalFiles() {
         Map<String, Object> out = new LinkedHashMap<>();
         List<String> stuck = new ArrayList<>();
         out.put("idempotencyMarkers", idempotency.clearAll());

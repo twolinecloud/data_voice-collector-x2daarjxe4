@@ -295,6 +295,51 @@
   .kv td:first-child { color:#6c757d; white-space:nowrap; }
   .pulse { animation:pulse 1.2s infinite; }
   @keyframes pulse { 0%{opacity:1} 50%{opacity:.45} 100%{opacity:1} }
+
+  /* ── 2번 탭 — [전체 실행 (10분 주기)] 보라 ───────────────────────────── */
+  .btn-purple { --bs-btn-color:#fff; --bs-btn-bg:#6f42c1; --bs-btn-border-color:#6f42c1;
+                --bs-btn-hover-color:#fff; --bs-btn-hover-bg:#5e35a8; --bs-btn-hover-border-color:#5e35a8;
+                --bs-btn-focus-shadow-rgb:111,66,193;
+                --bs-btn-active-color:#fff; --bs-btn-active-bg:#52308f; --bs-btn-active-border-color:#52308f;
+                --bs-btn-disabled-color:#fff; --bs-btn-disabled-bg:#6f42c1; --bs-btn-disabled-border-color:#6f42c1; }
+
+  /* ── 4번 탭 — 성능 테스트 ──────────────────────────────────────────── */
+  .pf-engine { font-size:.75rem; font-weight:700; padding:.15rem .6rem; border-radius:1rem; border:1px solid #ced4da;
+               color:#495057; background:#f8f9fa; white-space:nowrap; }
+  .pf-engine.MOCK { color:#0f5132; background:#d1e7dd; border-color:#a3cfbb; }
+  .pf-engine.NPU  { color:#842029; background:#f8d7da; border-color:#f1aeb5; }
+  .pf-preset.active { background:#212529; color:#fff; border-color:#212529; }
+  .pf-warn { font-size:.75rem; border:1px solid #ffe69c; background:#fff8e1; color:#664d03; border-radius:.4rem; padding:.4rem .6rem; }
+  .pf-warn code { font-size:.7rem; }
+  .pf-ph { font-size:.72rem; padding:0 .4rem; border-radius:.3rem; color:#868e96; background:#f1f3f5; }
+  .pf-ph.on { color:#fff; background:#0d6efd; } .pf-ph.done { color:#0f5132; background:#d1e7dd; }
+  .pf-arrow { color:#adb5bd; margin:0 .15rem; }
+  .pf-tiles { display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); gap:.5rem; margin-bottom:.6rem; }
+  @media (max-width: 992px) { .pf-tiles { grid-template-columns:repeat(3, minmax(0,1fr)); } }
+  @media (max-width: 576px) { .pf-tiles { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  .pf-tile { border:1px solid #dee2e6; border-radius:.45rem; padding:.45rem .6rem; background:#fcfcfd; min-width:0; }
+  .pf-tile .k { font-size:.7rem; color:#6c757d; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pf-tile .n { font-size:1.12rem; font-weight:700; font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pf-tile .n small { font-size:.7rem; font-weight:400; color:#6c757d; margin-left:.1rem; }
+  .pf-tile .s { font-size:.68rem; color:#6c757d; font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pf-stages { display:grid; gap:.3rem; margin-bottom:.6rem; }
+  .pf-stage { display:grid; grid-template-columns:3.6rem minmax(0,1fr) 9.5rem; gap:.5rem; align-items:center; font-size:.75rem; }
+  .pf-stage .lb { font-weight:600; }
+  .pf-stage .bo { height:.8rem; background:#e9ecef; border-radius:.4rem; overflow:hidden; }
+  .pf-stage .b { height:100%; border-radius:.4rem; background:#0d6efd; min-width:2px; }
+  .pf-stage .b.ACQUIRE { background:#fd7e14; } .pf-stage .b.DECRYPT { background:#20c997; } .pf-stage .b.FORMAT { background:#adb5bd; }
+  .pf-stage .b.STT { background:#6f42c1; } .pf-stage .b.TEMP { background:#74c0fc; } .pf-stage .b.SAVE { background:#0d6efd; }
+  .pf-stage .v { font-family:var(--mono); text-align:right; white-space:nowrap; }
+  .ok-t { color:#198754; font-weight:700; } .ng-t { color:#dc3545; font-weight:700; } .to-t { color:#fd7e14; font-weight:700; }
+  .pf-table { font-size:.74rem; }
+  .pf-table td, .pf-table th { white-space:nowrap; vertical-align:middle; }
+  .pf-table tbody tr[data-i] { cursor:pointer; }
+  .pf-tps { position:relative; min-width:6.5rem; height:1.1rem; background:#f1f3f5; border-radius:.3rem; overflow:hidden; }
+  .pf-tps .b { position:absolute; top:0; bottom:0; left:0; background:#d0bfff; }
+  .pf-tps span { position:relative; padding-left:.3rem; font-family:var(--mono); font-weight:600; }
+  /* 성능 테스트가 도는 동안 — 다른 탭의 배치·초기화 버튼을 막는다(같은 원천 데이터를 흔들면 측정이 망가진다) */
+  body.pf-running #controls button, body.pf-running #scen-box button,
+  body.pf-running #btn-reset, body.pf-running #btn-test-clear { pointer-events:none; opacity:.5; }
 </style>
 </head>
 <body>
@@ -329,7 +374,8 @@
     <li class="nav-item"><button type="button" class="nav-link active" data-tab="tab-env">1. 환경 &amp; 디렉터리 설정</button></li>
     <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-pipeline">2. 파이프라인 제어 &amp; 검증</button></li>
     <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-fault">3. 장애 &amp; 재처리 시나리오 <span class="hint" id="adv-sum"></span></button></li>
-    <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-perf">4. 성능 테스트</button></li>
+    <!-- 배포 화면에서는 ?perf=true 일 때만 보인다(applyPerfGate) — 검증이 끝나기 전까지 -->
+    <li class="nav-item d-none"><button type="button" class="nav-link" data-tab="tab-perf">4. 성능 테스트</button></li>
   </ul>
 
   <div id="tab-panes">
@@ -424,26 +470,23 @@
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white py-2"><strong>② 제어</strong></div>
     <div class="card-body py-2" id="controls">
-      <div class="mb-2 hint">배치 4종 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 7·전화 7 = 14건(트랙별 일배치 5 · 10분 주기 2)</div>
-      <!-- 1줄 — 주로 쓰는 두 가지. 나머지는 2줄의 세부 실행으로 -->
+      <div class="mb-2 hint">배치 — 실제 REST API 를 호출하고 응답을 ③ 요약 바에 남깁니다. 시뮬레이션 데이터는 접견 7·전화 7 = 14건(트랙별 일배치 5 · 10분 주기 2)</div>
+      <!-- 1줄 — 전체 실행 3종 -->
       <div class="d-flex flex-wrap gap-2 mb-2 align-items-center">
         <button class="btn btn-primary fw-semibold px-3" id="btn-daily" title="POST /api/v1/voice/batches/daily?test=true">전체 실행 (일배치)</button>
+        <button class="btn btn-purple fw-semibold px-3" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true — 당일 00:00 ~ 지금">전체 실행 (10분 주기)</button>
         <button class="btn btn-success fw-semibold px-3" id="btn-ondemand"
                 title="POST /api/v1/voice/batches/on-demand — DB 워터마크(T1 SUCCESS 배치의 MAX(target_to_dtm)) ~ 지금을 처리합니다. 성공한 배치가 없으면 최근 30일. 이미 성공한 건은 멱등으로 건너뜁니다">바로 실행 <span class="opacity-75 small" id="ondemand-hint">(워터마크 ~ 현재)</span></button>
         <button class="btn btn-danger d-none ms-auto" id="btn-cancel"
                 title="POST /api/v1/voice/batches/cancel — 처리 중인 건은 끝내고, 남은 건은 건너뜀으로 남깁니다">중단</button>
       </div>
-      <!-- 2줄 — 세부 실행 -->
+      <!-- 2줄 — 트랙별 실행 · 확인 -->
       <div class="d-flex flex-wrap gap-2 mb-2 align-items-center">
-        <span class="hint me-1">세부 실행</span>
-        <button class="btn btn-outline-primary btn-sm" id="btn-periodic" title="POST /api/v1/voice/batches/periodic?test=true">전체 실행 (10분 주기)</button>
         <button class="btn btn-outline-primary btn-sm" id="btn-meet" title="POST /api/v1/voice/batches/periodic?kinds=MEET&test=true">접견만 실행 <span class="opacity-75">(periodic · MEET)</span></button>
         <button class="btn btn-sm" id="btn-phone" style="color:#6f42c1;border-color:#6f42c1;background:#fff" title="POST /api/v1/voice/batches/periodic?kinds=PHONE&test=true">전화만 실행 <span class="opacity-75">(periodic · PHONE)</span></button>
-      </div>
-      <div class="d-flex flex-wrap gap-2 mb-2">
-        <button class="btn btn-outline-secondary btn-sm" id="btn-targets">처리 대상 미리보기</button>
+        <button class="btn btn-outline-secondary btn-sm" id="btn-targets">처리 대상 미리 보기</button>
         <button class="btn btn-outline-secondary btn-sm" id="btn-files">수신 파일 확인</button>
-        <button class="btn btn-outline-secondary btn-sm" id="btn-outputs">STT 출력 확인 (최근 배치)</button>
+        <button class="btn btn-outline-secondary btn-sm" id="btn-outputs" title="최근 배치의 STT 출력 폴더를 읽습니다">STT 출력 확인</button>
       </div>
 
       <!-- 진행률 — 배치가 도는 동안만 보인다. 배치 REST 는 동기라 서버 진행 상태를 따로 폴링한다. -->
@@ -544,13 +587,104 @@
   </div>
 
   <div class="tabp" id="tab-perf">
-  <!-- 대용량 -->
+  <!-- ① 성능 테스트 설정 -->
   <div class="card shadow-sm mb-3">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center py-2">
-      <strong>대용량 Mock 데이터 — OOM 방어 검증</strong>
-      <span class="hint">올린 건수는 <b>일배치 창</b>에 놓입니다</span>
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+      <strong>① 성능 테스트 설정 <span class="hint fw-normal">— 일일 한도 300건 안에서 실제 파이프라인(조회 → 확보 → 복호화 → 포맷 → STT → 저장 → T1·T2·T4)을 태웁니다. STT 만 MOCK</span></strong>
+      <span id="pf-engine" class="pf-engine">STT 엔진 확인 중…</span>
     </div>
-    <div class="card-body py-2">
+    <div class="card-body py-2" id="pf-box">
+      <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
+        <span class="hint me-1">시나리오</span>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="A" title="300건 · 워커 4 · 지연 0ms">A 순수 처리량</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="B" title="100건 · 워커 4 · 지연 1,000~5,000ms · 타임아웃 3,000ms">B NPU 지연</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="C" title="100건 · 지연 1,000ms · 동시성 1 → 2 → 4 → 8 을 한 번씩">C 동시성 비교</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="D" title="300건 · 워커 16 · 지연 500ms">D 최대 부하</button>
+      </div>
+      <div class="hint mb-2" id="pf-scen-desc">시나리오를 고르면 아래 칸이 채워집니다 — 값을 직접 바꿔도 됩니다.</div>
+      <div class="row g-2 align-items-end mb-2">
+        <div class="col-6 col-md-2"><label class="hint" for="pf-count">처리 건수 (10~300)</label>
+          <input type="number" class="form-control form-control-sm" id="pf-count" value="50" min="10" max="300" step="10"></div>
+        <div class="col-6 col-md-2"><label class="hint" for="pf-conc">동시성 (워커 수)</label>
+          <select class="form-select form-select-sm" id="pf-conc">
+            <option value="1">1</option><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="16">16</option>
+          </select></div>
+        <div class="col-12 col-md-5"><label class="hint" id="pf-lat-lbl" for="pf-lat">STT 가상 지연 — 고정 (ms, 0~5,000)</label>
+          <div class="input-group input-group-sm">
+            <select class="form-select form-select-sm" id="pf-lmode" style="max-width:6rem">
+              <option value="FIXED" selected>고정</option><option value="RANGE">범위</option>
+            </select>
+            <input type="number" class="form-control" id="pf-lat" value="500" min="0" max="5000" step="100">
+            <span class="input-group-text pf-range d-none">~</span>
+            <input type="number" class="form-control pf-range d-none" id="pf-latmax" value="5000" min="0" max="5000" step="100">
+          </div></div>
+        <div class="col-6 col-md-3"><label class="hint" for="pf-timeout">STT 타임아웃 (ms)</label>
+          <input type="number" class="form-control form-control-sm" id="pf-timeout" placeholder="비우면 적용 안 함" min="100" max="600000" step="500"></div>
+      </div>
+      <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+        <button class="btn btn-dark fw-semibold px-3" id="pf-start">성능 테스트 시작</button>
+        <button class="btn btn-outline-danger d-none" id="pf-cancel" title="준비 중이면 측정을 건너뛰고, 측정 중이면 처리 중인 건만 끝내고 멈춥니다. SIM 데이터는 지웁니다">중지</button>
+        <span class="hint" id="pf-est"></span>
+      </div>
+      <div class="pf-warn mb-1" id="pf-warn">대상 DB 확인 중…</div>
+      <div class="hint" id="pf-modes"></div>
+      <!-- 진행 — 준비 › 측정 › 검증 › 정리 -->
+      <div id="pprog-wrap" class="prog-wrap mt-2 d-none">
+        <div class="prog-head">
+          <span class="ttl" id="pprog-phase"></span>
+          <span class="pct" id="pprog-pct">0%</span>
+          <span class="font-monospace" id="pprog-cnt">0/0건</span>
+          <span class="hint ms-auto" id="pprog-sum"></span>
+        </div>
+        <div class="prog-bar-outer"><div class="prog-bar" id="pprog-bar"></div></div>
+        <div class="prog-cur" id="pprog-cur">대기 중…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② 결과 리포트 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+      <strong>② 결과 리포트</strong>
+      <span class="small text-secondary font-monospace" id="pf-last">—</span>
+    </div>
+    <div class="card-body py-2" id="pf-report">
+      <div class="hint">아직 실행한 회차가 없습니다. ① 에서 [성능 테스트 시작] 을 누르면 총 소요 · 평균 처리 시간 · TPS · 단계별 시간 · 자원이 여기에 나옵니다.</div>
+    </div>
+  </div>
+
+  <!-- ③ 실행 이력 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+      <span><strong>③ 실행 이력</strong> <span class="hint" id="pf-hist-file"></span></span>
+      <span class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-secondary" id="pf-csv">CSV 내보내기</button>
+        <button class="btn btn-sm btn-outline-danger" id="pf-hist-clear">이력 비우기</button>
+      </span>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive" style="max-height:420px">
+        <table class="table table-sm table-hover mb-0 pf-table">
+          <thead class="table-light sticky-top">
+            <tr><th>시각</th><th>시나리오</th><th class="text-end">건수</th><th class="text-end">동시성</th><th>지연</th>
+                <th class="text-end">타임아웃</th><th class="text-end">소요(초)</th><th class="text-end">평균(ms)</th><th>TPS</th>
+                <th>성공 / 실패 / 타임아웃</th><th class="text-end">Heap Peak</th><th class="text-end">Hikari</th><th>결과</th><th>EXEC_ID</th></tr>
+          </thead>
+          <tbody id="pf-hist"></tbody>
+        </table>
+      </div>
+      <div class="hint px-2 py-1">행을 누르면 위 ② 리포트에 그 회차가 나옵니다. 동시성을 바꿔 가며 돌리면 TPS 막대로 나란히 비교됩니다.</div>
+    </div>
+  </div>
+
+  <!-- ④ 고급 — 대용량 Mock 데이터 (접힘) -->
+  <div class="acc mb-3" id="pf-adv">
+    <div class="acc-head" data-acc="pf-adv">
+      <span class="grow small"><b>고급 — 대용량 Mock 데이터 (OOM 방어 검증)</b>
+        <span class="text-secondary">— 로컬 H2 전용 · 1,000~10,000건 규모. 올린 건수는 일배치 창에 놓입니다</span></span>
+      <button class="acc-tgl" type="button">&#9660;</button>
+    </div>
+    <div class="acc-body"><div class="acc-inner"><div class="pad">
       <div class="row g-2 align-items-end" style="max-width:38rem">
         <div class="col-4"><label class="hint">접견 건수</label>
           <input type="number" class="form-control form-control-sm" id="ds-meet" value="5" min="0" max="50000"></div>
@@ -564,24 +698,8 @@
         <button class="btn btn-sm btn-outline-secondary preset" data-m="2500" data-p="2500">5,000건</button>
         <button class="btn btn-sm btn-outline-secondary preset" data-m="5000" data-p="5000">10,000건</button>
       </div>
-      <div class="hint mt-2" id="ds-note">규모를 적용한 뒤 [1. 파이프라인 제어] 탭의 <b>[전체 실행 (일배치)]</b> 로 돌리세요. 건당 안정성 검사(100ms)가 곱해집니다.</div>
-    </div>
-  </div>
-
-  <div class="card shadow-sm mb-3">
-    <div class="card-header bg-white py-2"><strong>처리량·응답시간 측정 — 추후 개발 예정</strong></div>
-    <div class="card-body py-3">
-      <div class="hint">
-        아래 항목이 예정되어 있습니다. 현재는 위 [대용량 Mock 데이터] 로 건수를 올려
-        일배치를 돌리면서 <code>③ 최근 배치 결과</code> 의 소요 시간과 파드 메모리로 대신 확인합니다.
-        <ul class="mb-0 mt-2">
-          <li>건수별 처리량(TPS)·평균/최대 소요시간 그래프</li>
-          <li>STT 동시 요청 수에 따른 응답시간 곡선</li>
-          <li>힙 사용량 추이 — 스트리밍 처리가 메모리를 지키는지</li>
-          <li>로그 컬렉터 T4 적재 지연 측정</li>
-        </ul>
-      </div>
-    </div>
+      <div class="hint mt-2" id="ds-note">규모를 적용한 뒤 [2. 파이프라인 제어 &amp; 검증] 탭의 <b>[전체 실행 (일배치)]</b> 로 돌리세요. 건당 안정성 검사(100ms)가 곱해집니다.</div>
+    </div></div></div>
   </div>
   </div>
 
@@ -818,6 +936,7 @@ function showTab(id) {
   // 환경 탭에서는 하단 로그를 감춘다 — 여기서 하는 일(경로 대조·연결 확인)의 결과는
   // 카드 안에 그대로 남으므로 콘솔이 화면을 먹을 이유가 없다. 다른 탭으로 옮기면 다시 나온다.
   $('log-card').classList.toggle('d-none', id === 'tab-env');
+  if (id === 'tab-perf') pfOnShow();
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('#sim-tabs [data-tab]');
@@ -1311,7 +1430,7 @@ function renderFilesTable(r, byKey) {
 }
 
 // 배치 버튼 4개 — 실행 중에는 전부 disabled, 누른 버튼에는 스피너를 돌린다.
-const BATCH_BTNS = ['btn-meet', 'btn-phone', 'btn-periodic', 'btn-daily'];
+const BATCH_BTNS = ['btn-meet', 'btn-phone', 'btn-periodic', 'btn-daily', 'btn-ondemand'];
 function setBatchRunning(activeId, on) {
   BATCH_BTNS.forEach(id => {
     const b = $(id);
@@ -2142,12 +2261,473 @@ $('btn-log-tall').onclick = (e) => {
   if (logc === '1') toggleLog(true);
 })();
 
+// ── 4번 탭 — 성능 테스트 ───────────────────────────────────────────────
+// 실제 파이프라인을 N건으로 돌려 처리량·단계별 시간·자원을 잰다. 서버가 한 회차를 비동기로 돌리고
+//   (준비 → 측정 → 검증 → 정리), 화면은 GET /api/v1/mock/perf/runs/current 를 읽어 그린다.
+//
+// 배포 화면에서는 ?perf=true 일 때만 탭을 보인다 — 검증이 끝나기 전에 다른 사람이 공용 DB 에
+//   SIM 300건을 만들지 않게. 로컬(수집기가 local 프로파일 · 접속 호스트가 localhost)은 늘 보인다.
+const PERF_PARAM = new URLSearchParams(location.search).get('perf') === 'true';
+let ENV_KIND = null;          // loadConfig 가 채운다 — LOCAL | K8S
+let PERF_ALLOWED = false;
+function applyPerfGate() {
+  const deployed = ENV_KIND === 'K8S' || !isLocalHost(location.hostname);
+  PERF_ALLOWED = PERF_PARAM || !deployed;
+  const li = document.querySelector('#sim-tabs [data-tab="tab-perf"]')?.closest('.nav-item');
+  if (li) li.classList.toggle('d-none', !PERF_ALLOWED);
+  if (!PERF_ALLOWED && $('tab-perf').classList.contains('active')) showTab('tab-env');
+  return PERF_ALLOWED;
+}
+
+// 시나리오 프리셋 — 버튼을 누르면 입력칸을 채운다. 합격 기준은 기획안의 제안값이다.
+const PF_SCEN = {
+  A: { label:'A 순수 처리량', count:300, conc:4, mode:'FIXED', lat:0, max:null, timeout:null,
+       desc:'STT 지연 0ms — STT 를 뺀 나머지(확보·복호화·저장)의 한계입니다. 어느 단계가 병목인지 막대로 드러납니다. 합격: 실패 0 · T2 RUNNING 0 · T4 = 처리 건수' },
+  B: { label:'B NPU 지연', count:100, conc:4, mode:'RANGE', lat:1000, max:5000, timeout:3000,
+       desc:'지연 1,000~5,000ms 균등 · 타임아웃 3,000ms — 약 절반이 타임아웃으로 실패합니다. 타임아웃 건이 T4 에 사유와 함께 남고, 배치가 PARTIAL 로 닫히며, T2 에 RUNNING 이 남지 않는지 봅니다' },
+  C: { label:'C 동시성 비교', count:100, conc:1, mode:'FIXED', lat:1000, max:null, timeout:null,
+       desc:'지연 1,000ms 고정 — 동시성 1 → 2 → 4 → 8 로 한 번씩 돌리면 ③ 이력에 쌓여 TPS 를 나란히 비교합니다. 한 회차가 끝날 때마다 다음 동시성을 골라 둡니다' },
+  D: { label:'D 최대 부하', count:300, conc:16, mode:'FIXED', lat:500, max:null, timeout:null,
+       desc:'300건 · 워커 16 · 지연 500ms — Peak Heap 과 Hikari 최고 연결 수를 봅니다. 합격(제안): Peak Heap < 최대 힙의 70%' },
+};
+const PF_PHASES = [['PREPARING', '준비'], ['RUNNING', '측정'], ['VERIFYING', '검증'], ['CLEANING', '정리']];
+let PF_SCEN_KEY = null;
+let PF_INFO = null;
+let PF_HIST = [];
+let PF_TIMER = null;
+let PF_SEEN = '';
+let PF_PROG = null;
+let PF_FINISHING = false;
+
+/** 폴링용 조회 — 화면을 잠그지 않는다(callFull 은 호출마다 탭 전체를 잠근다). */
+async function quietGet(url) {
+  try {
+    const r = await fetch(API_BASE + url, { headers:{ 'Accept':'application/json' } });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
+
+function pfNum(id) { const v = String($(id).value).trim(); return v === '' ? null : Number(v); }
+
+function pfSyncRange() {
+  const range = $('pf-lmode').value === 'RANGE';
+  document.querySelectorAll('.pf-range').forEach(el => el.classList.toggle('d-none', !range));
+  $('pf-lat-lbl').textContent = range ? 'STT 가상 지연 — 범위 최소 ~ 최대 (ms, 0~5,000)' : 'STT 가상 지연 — 고정 (ms, 0~5,000)';
+}
+
+/** 프리셋을 고른 뒤 값을 바꿨으면 '(수정)' 을 붙인다 — 이력에서 A 와 A 변형이 섞이지 않게. C 는 동시성을 바꾸는 것이 본래 용도다. */
+function pfScenarioLabel() {
+  const s = PF_SCEN[PF_SCEN_KEY];
+  if (!s) return '직접 입력';
+  const same = pfNum('pf-count') === s.count && $('pf-lmode').value === s.mode && pfNum('pf-lat') === s.lat
+    && (s.mode !== 'RANGE' || pfNum('pf-latmax') === s.max) && pfNum('pf-timeout') === s.timeout
+    && (PF_SCEN_KEY === 'C' || Number($('pf-conc').value) === s.conc);
+  return s.label + (same ? '' : ' (수정)');
+}
+
+function pfRequest() {
+  const range = $('pf-lmode').value === 'RANGE';
+  return {
+    scenario: pfScenarioLabel(),
+    count: pfNum('pf-count'),
+    concurrency: Number($('pf-conc').value),
+    latencyMode: $('pf-lmode').value,
+    latencyMs: pfNum('pf-lat'),
+    latencyMaxMs: range ? pfNum('pf-latmax') : null,
+    sttTimeoutMs: pfNum('pf-timeout'),
+  };
+}
+
+function pfApplyPreset(key) {
+  const s = PF_SCEN[key]; if (!s) return;
+  PF_SCEN_KEY = key;
+  $('pf-count').value = s.count;
+  $('pf-conc').value = String(s.conc);
+  $('pf-lmode').value = s.mode;
+  $('pf-lat').value = s.lat;
+  $('pf-latmax').value = s.max ?? 5000;
+  $('pf-timeout').value = s.timeout ?? '';
+  document.querySelectorAll('.pf-preset').forEach(b => b.classList.toggle('active', b.dataset.s === key));
+  $('pf-scen-desc').innerHTML = `<b>${esc(s.label)}</b> — ${esc(s.desc)}`;
+  pfSyncRange();
+  pfEstimate();
+}
+
+/** [lo, hi] 균등 지연을 타임아웃 to 에서 자를 때의 평균 — 타임아웃 건은 to 만큼만 기다린다. */
+function pfAvgCapped(lo, hi, to) {
+  if (to >= hi) return (lo + hi) / 2;
+  if (to <= lo) return to;
+  const pIn = (to - lo) / (hi - lo);
+  return pIn * (lo + to) / 2 + (1 - pIn) * to;
+}
+
+/** STT 지연만으로 걸리는 시간 — 시작 전에 대략의 길이를 알린다. 확보·복호화·저장은 따로다. */
+function pfEstimate() {
+  const n = pfNum('pf-count') || 0, c = Number($('pf-conc').value) || 1;
+  const lo = pfNum('pf-lat') || 0;
+  const hi = $('pf-lmode').value === 'RANGE' ? Math.max(lo, pfNum('pf-latmax') || lo) : lo;
+  const to = pfNum('pf-timeout');
+  const avg = to && to > 0 ? pfAvgCapped(lo, hi, to) : (lo + hi) / 2;
+  const sec = Math.round(n * avg / c / 100) / 10;
+  const npu = PF_INFO?.sttMode === 'NPU';
+  $('pf-est').textContent = !n ? '' : npu
+    ? '실 NPU — 가상 지연은 쓰지 않습니다'
+    : `STT 지연만 약 ${sec}초 (${n}건 × 평균 ${Math.round(avg)}ms ÷ 워커 ${c}) · 확보·복호화·저장 시간은 별도`;
+}
+
+function pfRenderInfo() {
+  const i = PF_INFO, e = $('pf-engine');
+  if (!i) { e.className = 'pf-engine'; e.textContent = 'STT 엔진 — 조회 실패'; return; }
+  e.className = 'pf-engine ' + (i.sttMode || '');
+  e.textContent = i.sttMode === 'NPU' ? 'STT 엔진: NPU — 실제 부하 (가상 지연 무시)' : `STT 엔진: ${i.sttMode} — 가상 지연`;
+  e.title = `voice.stt.mode=${i.sttMode} · 1번 탭에서 바꿀 수 있습니다 · 실제 STT 읽기 타임아웃 ${i.sttTimeoutSec}초`;
+  const m = i.modes || {};
+  $('pf-modes').textContent = `지금 구성 — 조회 ${m.source} · 브로커 ${m.broker} · 전화 ${m.phone} · 복호화 ${m.decrypt}`
+    + ` · 운영 배치 동시성 ${i.batchConcurrency} · 배치 1회 상한 ${i.maxFilesPerRun}건`;
+  const shared = i.env === 'K8S' || /postgre/i.test(i.db || '');
+  $('pf-warn').innerHTML = (shared
+      ? `⚠ <b>공용 DB</b>(${esc(i.db)})에 SIM 데이터를 만들었다가 끝나면 <b>자동으로 지웁니다</b>. 다른 작업자의 시험과 겹치지 않게 <b>미리 알리고</b> 실행하십시오.`
+      : `대상 DB — ${esc(i.db)}. SIM 데이터를 만들었다가 끝나면 자동으로 지웁니다.`)
+    + ` 이력 파일 <code>${esc(i.historyFile)}</code>`;
+  pfEstimate();
+}
+
+async function pfStart() {
+  const req = pfRequest();
+  const i = PF_INFO || {};
+  const lat = req.latencyMode === 'RANGE' ? `${req.latencyMs}~${req.latencyMaxMs}ms 범위` : `${req.latencyMs}ms 고정`;
+  const shared = i.env === 'K8S' || /postgre/i.test(i.db || '');
+  const ok = await confirmPopup('성능 테스트 시작', `
+    <div class="pop-lead">${esc(req.scenario)} — ${req.count}건 · 워커 ${req.concurrency}개</div>
+    <ul class="pop-list">
+      <li><span class="lbl">STT:</span> <b>${esc(i.sttMode || '?')}</b>${i.sttMode === 'NPU'
+          ? ' — 가상 지연은 쓰지 않고 <b>실제 NPU</b> 로 요청이 갑니다'
+          : ` · 지연 ${esc(lat)} · 타임아웃 ${req.sttTimeoutMs ? req.sttTimeoutMs + 'ms' : '없음'}`}</li>
+      <li><span class="lbl">준비:</span> 로컬 산출물·지난 시험 출력 삭제 → SIM ${req.count}건 생성 (${esc(i.db || '')})</li>
+      <li><span class="lbl">끝나면:</span> SIM 행·원본 더미 파일 자동 삭제 · 로그(TST)와 STT 출력은 남습니다</li>
+    </ul>
+    ${shared ? '<div class="pop-note">⚠ 공용 DB 입니다 — 다른 작업자와 시간이 겹치지 않게 하십시오.</div>' : ''}`, '시작', '취소');
+  if (!ok) return;
+  const info = await callFull('POST', '/api/v1/mock/perf/runs', `성능 테스트 시작 — ${req.scenario}`, { json: req });
+  if (!info.ok) {
+    showPopup('성능 테스트를 시작하지 못했습니다',
+      `<div class="pop-lead">${esc(info.body?.message || info.error || ('HTTP ' + info.status))}</div>`);
+    return;
+  }
+  pfWatch();
+}
+
+async function pfCancel() {
+  const c = $('pf-cancel');
+  c.disabled = true;
+  c.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>중지하는 중…';
+  const d = await call('POST', '/api/v1/mock/perf/runs/cancel', '성능 테스트 중지 요청');
+  if (d) log(`  └ ${d.message}`, d.accepted ? 'wr' : 'ok');
+  if (!d || d.accepted === false) { c.disabled = false; c.textContent = '중지'; }
+}
+
+function pfLock(on) {
+  document.body.classList.toggle('pf-running', on);
+  document.querySelectorAll('#pf-box input, #pf-box select, .pf-preset').forEach(el => el.disabled = on);
+  const b = $('pf-start');
+  b.disabled = on;
+  b.innerHTML = on ? '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>실행 중…' : '성능 테스트 시작';
+  const c = $('pf-cancel');
+  c.classList.toggle('d-none', !on);
+  if (on) { c.disabled = false; c.textContent = '중지'; }
+}
+
+/** 한 회차가 끝날 때까지 서버 상태를 읽는다. 새로 고침해도 도는 회차를 이어서 보여 준다(pfInit). */
+function pfWatch() {
+  pfLock(true);
+  healthPause();          // 시험 중에는 자동 헬스체크를 멈춘다 — DB 커넥션·포트 간섭 방지
+  PF_SEEN = ''; PF_PROG = null; PF_FINISHING = false;
+  $('pprog-wrap').classList.remove('d-none', 'done', 'has-fail');
+  clearInterval(PF_TIMER);
+  const tick = async () => {
+    const c = await quietGet('/api/v1/mock/perf/runs/current');
+    if (!c || !c.runId || PF_FINISHING) return;
+    pfRenderProgress(c);
+    const seen = c.phase + '|' + c.message;
+    if (seen !== PF_SEEN) {
+      PF_SEEN = seen;
+      log(`  └ [성능 테스트 · ${c.phaseLabel}] ${c.message}`, c.phase === 'FAILED' ? 'er' : 'ok');
+    }
+    if (!c.active) {
+      PF_FINISHING = true;
+      clearInterval(PF_TIMER); PF_TIMER = null;
+      pfLock(false);
+      healthResume();
+      await pfFinish(c);
+    }
+  };
+  tick();
+  PF_TIMER = setInterval(tick, 800);
+}
+
+function pfPhaseCls(k, now) {
+  if (now === 'DONE') return 'done';
+  const order = PF_PHASES.map(x => x[0]);
+  const i = order.indexOf(k), j = order.indexOf(now);
+  return j < 0 ? '' : i < j ? 'done' : i === j ? 'on' : '';
+}
+
+function pfRenderProgress(c) {
+  if (c.progress) PF_PROG = c.progress;
+  // 끝났으면 결과의 건수로 맞춘다 — 폴링 간격 사이에 끝난 건이 진행률에 안 잡혔을 수 있다
+  if (c.result) {
+    const r = c.result;
+    PF_PROG = Object.assign({}, PF_PROG, { total: r.total, done: (r.success || 0) + (r.fail || 0) + (r.skipped || 0),
+      success: r.success, fail: r.fail, skipped: r.skipped });
+  }
+  const p = PF_PROG || {};
+  const total = p.total || 0, done = p.done || 0;
+  const pct = c.phase === 'PREPARING' ? 0 : total > 0 ? Math.round(done * 100 / total) : (c.active ? 0 : 100);
+  const w = $('pprog-wrap');
+  w.classList.toggle('done', c.phase === 'DONE');
+  w.classList.toggle('has-fail', c.phase === 'FAILED' || (p.fail || 0) > 0);
+  $('pprog-phase').innerHTML = PF_PHASES.map(([k, l]) => `<span class="pf-ph ${pfPhaseCls(k, c.phase)}">${l}</span>`)
+    .join('<span class="pf-arrow">›</span>') + (c.phase === 'FAILED' ? ' <span class="pf-ph" style="color:#842029;background:#f8d7da">실패</span>' : '');
+  $('pprog-bar').style.width = pct + '%';
+  $('pprog-pct').textContent = pct + '%';
+  $('pprog-cnt').textContent = `${done}/${total}건`;
+  const parts = [];
+  if (p.success) parts.push(`성공 ${p.success}`);
+  if (p.fail) parts.push(`실패 ${p.fail}`);
+  if (p.skipped) parts.push(`건너뜀 ${p.skipped}`);
+  parts.push(`경과 ${Math.round((c.elapsedMs || 0) / 100) / 10}초`);
+  $('pprog-sum').textContent = parts.join(' · ');
+  let cur = esc(c.message || '');
+  if (c.phase === 'RUNNING' && p.running) {
+    cur = c.cancelRequested
+      ? esc('중지하는 중 — 처리 중인 건을 끝내고 멈춥니다…')
+      : `처리 중 <b>${p.active ?? 0}</b>건 · 워커 ${p.concurrency ?? '?'}개`
+        + (p.currentFile ? ` · 최근 <span class="tag ${esc(p.currentKind || '')}">${esc(p.currentKind || '')}</span> ${esc(p.currentFile)}` : '');
+  }
+  $('pprog-cur').innerHTML = cur;
+}
+
+async function pfFinish(c) {
+  await pfLoadHistory();
+  if (c.result) {
+    const r = c.result;
+    pfRenderReport(r);
+    log(`✔ 성능 테스트 완료 — ${r.scenario} · ${r.count}건 · 워커 ${r.concurrency} · ${r.totalSec}초 · 평균 ${r.avgMs}ms · ${r.tps} TPS`
+      + ` · 성공 ${r.success} / 실패 ${r.fail} / 타임아웃 ${r.timeout} · Heap Peak ${r.heap?.peakMb}MB · Hikari ${r.hikari?.peak}`, 'ok');
+    showPopup('성능 테스트 완료', `<div class="pop-lead">${esc(r.scenario)} — ${r.count}건 · 워커 ${r.concurrency}개</div>
+      <ul class="pop-list">
+        <li><span class="lbl">처리량:</span> <span class="n">${r.tps}</span> TPS · 총 ${r.totalSec}초 · 건당 평균 ${r.avgMs}ms</li>
+        <li><span class="lbl">결과:</span> 성공 <span class="ok-t">${r.success}</span> · 실패 <span class="ng-t">${r.fail}</span> · 타임아웃 <span class="to-t">${r.timeout}</span> · ${esc(r.execStsCd)}</li>
+        <li><span class="lbl">정합성:</span> ${pfCheckBadge(r.checks)}</li>
+      </ul>
+      <div class="sub mt-2">② 결과 리포트 · ③ 실행 이력에 남았습니다.</div>`);
+    pfNextC(r);
+  } else {
+    log(`✖ 성능 테스트 실패 — ${c.error || c.message}`, 'er');
+    showPopup('성능 테스트 실패', `<div class="pop-lead">${esc(c.error || c.message || '')}</div>
+      <div class="hint mt-2">SIM 데이터 정리는 시도했습니다. 남아 있으면 [시뮬레이션 데이터 초기화] 로 지우십시오.</div>`);
+  }
+}
+
+/** C 동시성 비교 — 끝나면 다음 동시성을 골라 둔다(1 → 2 → 4 → 8). 자동으로 돌리지는 않는다. */
+function pfNextC(r) {
+  if (PF_SCEN_KEY !== 'C') return;
+  const seq = [1, 2, 4, 8];
+  const i = seq.indexOf(Number(r.concurrency));
+  if (i >= 0 && i < seq.length - 1) {
+    $('pf-conc').value = String(seq[i + 1]);
+    $('pf-scen-desc').innerHTML = `<b>C 동시성 비교</b> — 동시성 ${r.concurrency} 완료. 다음 비교를 위해 <b>동시성 ${seq[i + 1]}</b> 로 바꿔 두었습니다 — [성능 테스트 시작] 을 누르십시오.`;
+    pfEstimate();
+  } else if (i === seq.length - 1) {
+    $('pf-scen-desc').innerHTML = '<b>C 동시성 비교</b> — 1 · 2 · 4 · 8 을 모두 돌렸습니다. ③ 이력의 TPS 막대로 비교하십시오(16 도 보려면 동시성을 직접 고르십시오).';
+  }
+}
+
+function pfLatText(l) { return !l ? '' : l.mode === 'RANGE' ? `${l.ms}~${l.maxMs}ms` : `${l.ms}ms`; }
+function pfCheckBadge(c) {
+  if (!c || c.available === false) return `<span class="vf-b x" title="${esc(c?.reason || '')}">정합성 확인 불가</span>`;
+  return c.ok ? '<span class="vf-b SUCCESS">정합성 ✓</span>' : '<span class="vf-b FAIL">정합성 ✗</span>';
+}
+
+function pfRenderReport(r) {
+  if (!r) return;
+  $('pf-last').textContent = `${r.runId} · EXEC_ID ${r.execId || '—'}`;
+  const h = r.heap || {}, k = r.hikari || {}, c = r.checks || {}, m = r.modes || {};
+  const tile = (key, n, sub) => `<div class="pf-tile"><div class="k">${key}</div><div class="n">${n}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+  const tiles = [
+    tile('총 소요 시간', `${r.totalSec}<small>초</small>`, `준비 ${r.prepareSec}초는 제외`),
+    tile('평균 처리 시간', `${r.avgMs}<small>ms</small>`, '건당 확보 ~ 저장'),
+    tile('TPS', `${r.tps}`, '성공 건수 ÷ 총 소요'),
+    tile('전체 / 성공 / 실패 / 타임아웃',
+      `${r.total} / <span class="ok-t">${r.success}</span> / <span class="ng-t">${r.fail}</span> / <span class="to-t">${r.timeout}</span>`,
+      `${esc(r.execStsCd || '')}${r.skipped ? ' · 건너뜀 ' + r.skipped : ''}`),
+    tile('Heap 시작 → 종료', `${h.startMb}→${h.endMb}<small>MB</small>`, `Peak ${h.peakMb}MB / 최대 ${h.maxMb}MB`),
+    tile('Hikari Peak 연결', `${k.peak ?? 0}`, esc(k.pool || '원천 DB 풀')),
+  ].join('');
+  const st = r.stages || [];
+  const max = Math.max(1, ...st.map(x => Number(x.avgMs) || 0));
+  const bars = st.map(x => `<div class="pf-stage"><span class="lb">${esc(x.label)}</span>
+      <div class="bo"><div class="b ${esc(x.key)}" style="width:${Math.max(0.5, (Number(x.avgMs) || 0) * 100 / max)}%"></div></div>
+      <span class="v">${x.avgMs}ms <span class="hint">× ${x.count}건</span></span></div>`).join('');
+  let checks;
+  if (c.available === false || !Object.keys(c).length) {
+    checks = `<span class="vf-b x">확인 불가</span> <span class="hint">${esc(c.reason || '')}</span>`;
+  } else {
+    const b = (ok, txt) => `<span class="vf-b ${ok ? 'SUCCESS' : 'FAIL'}">${ok ? '✓' : '✗'} ${txt}</span>`;
+    const dup = c.t2Duplicated || [];
+    checks = [
+      `<span class="vf-b ${esc(c.t1Status || 'x')}">T1 ${esc(c.t1Status || '—')}</span>`,
+      b(c.t2Running === 0, `T2 RUNNING ${c.t2Running}건`),
+      b(!dup.length, `T2 단계 중복 ${dup.length ? esc(dup.join(',')) : '없음'}`),
+      b(c.t4Rows === c.t4Expected, `T4 ${c.t4Rows}행 = 처리 ${c.t4Expected}건`),
+      b(c.t1Success === c.t4Success, `T1 성공 ${c.t1Success} = T4 SUCCESS ${c.t4Success}`),
+    ].join(' ');
+  }
+  const cond = [esc(r.scenario), `${r.count}건`, `워커 ${r.concurrency}`, `지연 ${esc(pfLatText(r.latency))}`,
+    `타임아웃 ${r.sttTimeoutMs ? r.sttTimeoutMs + 'ms' : '없음'}`, `STT ${esc(r.sttMode)}`,
+    `조회 ${esc(m.source)} · 브로커 ${esc(m.broker)} · 복호화 ${esc(m.decrypt)}`, esc(r.db || '')].join(' · ');
+  const cl = r.cleanup || {};
+  const clean = cl.ok === false
+    ? `<span class="text-danger">SIM 정리 실패 — ${esc(cl.error || '')} · [시뮬레이션 데이터 초기화]로 지우십시오</span>`
+    : `SIM 정리 ${cl.counts?.dbRows ?? 0}행 · 더미 ${cl.counts?.dummyFiles ?? 0}개 삭제`;
+  $('pf-report').innerHTML = `
+    <div class="hint mb-2">${cond}</div>
+    <div class="pf-tiles">${tiles}</div>
+    <div class="d-flex flex-wrap align-items-baseline gap-2 mb-1"><b class="small">단계별 평균 소요 시간</b>
+      <span class="hint">건당 · 확보(브로커·NFS 도착) → 복호화 → 포맷 판별 → STT → 중간(stt_temp) → 저장</span></div>
+    <div class="pf-stages">${bars}</div>
+    <div class="d-flex flex-wrap align-items-center gap-1 mb-2"><b class="small me-1">정합성</b>${checks}</div>
+    <div class="d-flex flex-wrap align-items-center gap-2"><span class="hint">${clean} · 실행 ${esc(String(r.at || '').replace('T', ' '))}</span>
+      ${r.execId ? '<button class="btn btn-sm btn-outline-secondary ms-auto" type="button" data-pf-verify="1">🔍 상세 검증 (DB &amp; PV)</button>' : ''}</div>
+    <div class="mt-2" data-pf-vf="1"></div>`;
+  const vb = $('pf-report').querySelector('[data-pf-verify]');
+  if (vb) vb.onclick = async () => {
+    const v = await fetchVerify(r.execId);
+    if (!v) return;
+    $('pf-report').querySelector('[data-pf-vf]').innerHTML =
+      verifyAcc('pf-vf-acc', '🔍 성능 테스트 상세 검증 (DB & K8s PV)', `EXEC_ID ${esc(r.execId)}`, verifyBody(v, 'pf-vf'));
+    accToggle('pf-vf-acc', true);
+  };
+}
+
+async function pfLoadHistory() {
+  const h = await quietGet('/api/v1/mock/perf/runs');
+  PF_HIST = h?.items || [];
+  $('pf-hist-file').textContent = h ? `— ${h.total}회 · ${h.file}` : '— 이력을 읽지 못했습니다';
+  pfRenderHistory();
+}
+
+function pfRenderHistory() {
+  const body = $('pf-hist');
+  if (!PF_HIST.length) {
+    body.innerHTML = '<tr><td colspan="14" class="hint text-center py-3">아직 이력이 없습니다 — 성능 테스트를 돌리면 회차마다 한 줄씩 쌓입니다</td></tr>';
+    return;
+  }
+  const maxTps = Math.max(0.01, ...PF_HIST.map(x => Number(x.tps) || 0));
+  body.innerHTML = PF_HIST.map((x, i) => `<tr data-i="${i}" title="눌러서 ② 리포트에 표시">
+      <td class="font-monospace">${esc(String(x.at || '').replace('T', ' ').slice(5, 16))}</td>
+      <td>${esc(x.scenario)}</td>
+      <td class="text-end">${x.count}</td>
+      <td class="text-end">${x.concurrency}</td>
+      <td>${esc(pfLatText(x.latency))}</td>
+      <td class="text-end">${x.sttTimeoutMs ?? '—'}</td>
+      <td class="text-end">${x.totalSec}</td>
+      <td class="text-end">${x.avgMs}</td>
+      <td><div class="pf-tps"><div class="b" style="width:${(Number(x.tps) || 0) * 100 / maxTps}%"></div><span>${x.tps}</span></div></td>
+      <td><span class="ok-t">${x.success}</span> / <span class="ng-t">${x.fail}</span> / <span class="to-t">${x.timeout}</span></td>
+      <td class="text-end">${x.heap?.peakMb ?? ''}</td>
+      <td class="text-end">${x.hikari?.peak ?? ''}</td>
+      <td><span class="vf-b ${esc(x.execStsCd || 'x')}">${esc(x.execStsCd || '—')}</span> ${pfCheckBadge(x.checks)}</td>
+      <td class="font-monospace">${esc(x.execId || '')}</td></tr>`).join('');
+}
+
+/** 이력을 CSV 로 — 오래된 회차가 위. 엑셀이 한글을 깨지 않게 BOM 을 붙인다. */
+function pfCsv() {
+  if (!PF_HIST.length) { log('내보낼 성능 테스트 이력이 없습니다', 'wr'); return; }
+  const stageKeys = ['ACQUIRE', 'DECRYPT', 'FORMAT', 'STT', 'TEMP', 'SAVE'];
+  const head = ['실행ID', '시각', '시나리오', '건수', '동시성', '지연방식', '지연ms', '지연최대ms', '타임아웃ms', 'STT',
+    '총소요초', '평균ms', 'TPS', '전체', '성공', '실패', '타임아웃', '건너뜀', '배치상태',
+    '확보ms', '복호화ms', '포맷ms', 'STTms', '중간ms', '저장ms',
+    '힙시작MB', '힙종료MB', '힙PeakMB', '힙최대MB', 'HikariPeak', 'T2 RUNNING', 'T4행', '정합성',
+    'EXEC_ID', '조회', '브로커', '복호화', 'DB'];
+  const rows = PF_HIST.slice().reverse().map(x => {
+    const st = Object.fromEntries((x.stages || []).map(v => [v.key, v.avgMs]));
+    const c = x.checks || {}, h = x.heap || {}, m = x.modes || {}, l = x.latency || {};
+    return [x.runId, x.at, x.scenario, x.count, x.concurrency, l.mode, l.ms, l.maxMs ?? '', x.sttTimeoutMs ?? '', x.sttMode,
+      x.totalSec, x.avgMs, x.tps, x.total, x.success, x.fail, x.timeout, x.skipped, x.execStsCd,
+      ...stageKeys.map(k => st[k] ?? ''),
+      h.startMb, h.endMb, h.peakMb, h.maxMb, x.hikari?.peak ?? '', c.t2Running ?? '', c.t4Rows ?? '',
+      c.available === false ? '확인불가' : (c.ok ? 'OK' : 'NG'), x.execId, m.source, m.broker, m.decrypt, x.db];
+  });
+  const cell = v => { const t = String(v ?? ''); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const text = '﻿' + [head, ...rows].map(r => r.map(cell).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type:'text/csv;charset=utf-8' }));
+  const d = new Date(), pad = n => String(n).padStart(2, '0');
+  a.download = `perf_history_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  log(`  └ 성능 테스트 이력 ${rows.length}회를 CSV 로 내보냈습니다 — ${a.download}`, 'ok');
+}
+
+async function pfClearHistory() {
+  const ok = await confirmPopup('실행 이력 비우기',
+    `<div class="pop-lead">성능 테스트 이력 ${PF_HIST.length}회를 지웁니다.</div>
+     <div class="hint mt-2">이력 파일(<code>${esc(PF_INFO?.historyFile || '')}</code>)만 지웁니다. 로그 컬렉터의 TST 이력은 [시뮬레이션 데이터 초기화] 가 지웁니다. 먼저 [CSV 내보내기] 로 남겨 두십시오.</div>`,
+    '지우기', '취소');
+  if (!ok) return;
+  const d = await call('DELETE', '/api/v1/mock/perf/runs', '성능 테스트 이력 비우기');
+  if (d) log(`  └ 이력 ${d.deleted}회 삭제 — ${d.file}`, 'ok');
+  await pfLoadHistory();
+}
+
+/** 탭을 열 때 — STT 엔진은 1번 탭에서 바뀔 수 있으니 다시 읽는다. */
+async function pfOnShow() {
+  if (!PERF_ALLOWED || PF_TIMER) return;
+  PF_INFO = await quietGet('/api/v1/mock/perf/info');
+  pfRenderInfo();
+}
+
+async function pfInit() {
+  PF_INFO = await quietGet('/api/v1/mock/perf/info');
+  pfRenderInfo();
+  pfSyncRange();
+  await pfLoadHistory();
+  const c = await quietGet('/api/v1/mock/perf/runs/current');
+  if (c && c.active) {
+    log(`성능 테스트가 이미 돌고 있습니다 — ${c.runId} (${c.phaseLabel}) · 진행을 이어서 보여 줍니다`, 'hd');
+    pfWatch();
+  } else if (c && c.result) {
+    pfRenderReport(c.result);
+  } else if (PF_HIST.length) {
+    pfRenderReport(PF_HIST[0]);
+  }
+}
+
+document.querySelectorAll('.pf-preset').forEach(b => { b.onclick = () => pfApplyPreset(b.dataset.s); });
+['pf-count', 'pf-conc', 'pf-lmode', 'pf-lat', 'pf-latmax', 'pf-timeout'].forEach(id => {
+  $(id).addEventListener('input', () => { pfSyncRange(); pfEstimate(); });
+  $(id).addEventListener('change', () => { pfSyncRange(); pfEstimate(); });
+});
+$('pf-start').onclick = pfStart;
+$('pf-cancel').onclick = pfCancel;
+$('pf-csv').onclick = pfCsv;
+$('pf-hist-clear').onclick = pfClearHistory;
+$('pf-hist').onclick = (e) => {
+  const tr = e.target.closest('tr[data-i]');
+  if (tr) pfRenderReport(PF_HIST[Number(tr.dataset.i)]);
+};
+
+
 // 환경 자동 프리셋(GET /api/v1/voice/config) — 서버가 OS·profile 로 정한 ROOT_DIR·브로커·로그 컬렉터·DB 를 받아 화면을 맞춘다.
 //   경로 input 은 renderDirs, 브로커 라디오는 renderTracks(현재 주소와 같은 프리셋이 선택), 로그 컬렉터 카드·DB 줄은 loadStatus 가 그린다.
 async function loadConfig() {
   const c = await call('GET', '/api/v1/voice/config', '환경 설정 조회 (자동 프리셋)', true);
   if (!c || !c.env) { if (!API_DOWN) $('env-line').textContent = '환경 정보를 받지 못했습니다'; return; }
   const e = c.env;
+  ENV_KIND = e.kind;
   $('env-line').innerHTML = `환경 <b>${esc(e.kindLabel)}</b> · ${esc(e.os)} · profile ${esc((e.profiles||[]).join(','))}`
     + ` · ROOT_DIR <code>${esc(e.rootDir)}</code> <span class="text-secondary">(${esc(e.rootDirSource)})</span>`
     + ` · 브로커 <code>${esc(e.brokerBaseUrl)}</code> <span class="text-secondary">(${esc(e.brokerBaseUrlSource)})</span>`
@@ -2162,6 +2742,7 @@ log('접견과 전화는 연동 경로가 완전히 다릅니다 — 전화는 X
 (async () => {
   await detectApiBase();
   await loadConfig();
+  if (applyPerfGate()) pfInit();
   await loadStatus(false);
   await loadOnDemandHint();
   await checkHealth(true);

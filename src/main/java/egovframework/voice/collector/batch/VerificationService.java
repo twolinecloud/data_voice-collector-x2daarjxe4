@@ -62,7 +62,8 @@ public class VerificationService {
 
     // ── DB ────────────────────────────────────────────────────────────────
 
-    private Map<String, Object> db(String execId) {
+    /** DB(T1·T2·T4·T5) 대조만 — 성능 테스트가 끝난 뒤 정합성 점검에서도 쓴다. */
+    public Map<String, Object> db(String execId) {
         Map<String, Object> m = new LinkedHashMap<>();
         if (!logCollector.isEnabled()) {
             m.put("available", false);

@@ -27,9 +27,10 @@ import javax.sql.DataSource;
 public class BoramiDataSourceConfig {
 
     @Bean(name = "h2DataSource")
-    public DataSource h2DataSource(VoiceProperties props) {
+    public DataSource h2DataSource(VoiceProperties props, SourcePoolPeak peak) {
         VoiceProperties.LocalH2 h2 = props.source().localH2();
-        HikariDataSource ds = new HikariDataSource();
+        // 성능 테스트의 'Hikari 최고 연결 수' — 빌릴 때마다 사용 중 수를 한 번 읽는다. 풀 동작은 그대로다.
+        HikariDataSource ds = new SourcePoolPeak.Metered(peak);
         ds.setPoolName("borami-h2");
         ds.setJdbcUrl(h2.url());
         ds.setUsername(h2.username());
@@ -46,9 +47,9 @@ public class BoramiDataSourceConfig {
     }
 
     @Bean(name = "directDataSource")
-    public DataSource directDataSource(VoiceProperties props) {
+    public DataSource directDataSource(VoiceProperties props, SourcePoolPeak peak) {
         VoiceProperties.DirectDb d = props.source().directDb();
-        HikariDataSource ds = new HikariDataSource();
+        HikariDataSource ds = new SourcePoolPeak.Metered(peak);
         ds.setPoolName("borami-direct");
         ds.setJdbcUrl(d.url());
         if (d.driverClassName() != null && !d.driverClassName().isBlank()) {

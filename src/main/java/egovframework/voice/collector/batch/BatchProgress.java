@@ -44,9 +44,19 @@ public class BatchProgress {
     private final AtomicInteger success = new AtomicInteger();
     private final AtomicInteger fail = new AtomicInteger();
     private final AtomicInteger skipped = new AtomicInteger();
+    /** 지금 처리 중인 건 수 — 동시 처리(워커 N개)일 때 '처리 중 N건' 으로 보인다. 순차면 0 또는 1. */
+    private final AtomicInteger active = new AtomicInteger();
+    private volatile int concurrency = 1;
 
     /** 대상 수가 확정된 직후 — 총 건수를 알아야 진행률이 나온다. */
     public void begin(String execId, String window, int total) {
+        begin(execId, window, total, 1);
+    }
+
+    /** 위와 같되, 동시에 처리하는 워커 수를 함께 적는다. */
+    public void begin(String execId, String window, int total, int concurrency) {
+        this.concurrency = Math.max(1, concurrency);
+        active.set(0);
         this.execId = execId;
         this.window = window;
         this.total = total;
@@ -67,6 +77,7 @@ public class BatchProgress {
         if (!running) {
             return;
         }
+        active.incrementAndGet();
         this.currentKind = target.kind().name();
         this.currentFile = target.srcFileName() == null ? target.shortId() : target.srcFileName();
     }
@@ -76,6 +87,7 @@ public class BatchProgress {
         if (!running) {
             return;
         }
+        active.updateAndGet(v -> v > 0 ? v - 1 : 0);
         done.incrementAndGet();
         switch (status) {
             case SUCCESS -> success.incrementAndGet();
@@ -85,12 +97,30 @@ public class BatchProgress {
     }
 
     /**
+     * 시작하지 않은 건을 건너뜀으로 센다 — 동시 처리 중 중단됐을 때. {@link #finishFile} 과 달리
+     * '처리 중' 건수를 건드리지 않는다(다른 워커가 아직 처리 중이다).
+     */
+    public void skipFile() {
+        if (!running) {
+            return;
+        }
+        done.incrementAndGet();
+        skipped.incrementAndGet();
+    }
+
+    /** 배치가 돌고 있는가 — 성능 테스트가 겹쳐 시작하지 않게 본다. */
+    public boolean isRunning() {
+        return running;
+    }
+
+    /**
      * 배치가 끝났다. <b>마지막 상태를 지우지 않는다</b> — 화면이 폴링을 멈추기 전에 100% 를 한 번은
      * 봐야 하고, 끝난 뒤에도 직전 배치 요약을 읽을 수 있어야 한다.
      */
     public void end() {
         this.running = false;
         this.currentFile = null;
+        active.set(0);
         this.finishedAt = System.currentTimeMillis();
     }
 
@@ -125,6 +155,8 @@ public class BatchProgress {
         m.put("skipped", skipped.get());
         m.put("currentFile", currentFile);
         m.put("currentKind", currentKind);
+        m.put("active", active.get());
+        m.put("concurrency", concurrency);
         m.put("canceled", cancelRequested);
         m.put("elapsedMs", startedAt == 0 ? 0 : (running ? System.currentTimeMillis() : finishedAt) - startedAt);
         return m;

@@ -13,6 +13,8 @@ import egovframework.voice.collector.model.SttResult;
 import egovframework.voice.collector.model.VoiceFile;
 import egovframework.voice.collector.model.VoiceKind;
 import egovframework.voice.collector.model.VoiceTarget;
+import egovframework.voice.collector.perf.PerfStage;
+import egovframework.voice.collector.perf.PerfStageMeter;
 import egovframework.voice.collector.source.BoramiSourceClient;
 import egovframework.voice.collector.stt.SttClient;
 import egovframework.voice.collector.stt.SttOutputStore;
@@ -28,9 +30,16 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 음성 수집 배치의 본체 — <b>대상 선별 → 파일 확보 → 복호화 → STT → 출력 저장 → 처리 이력 적재</b>.
@@ -79,6 +88,16 @@ public class VoiceCollectService {
     private final egovframework.voice.collector.transfer.AgentConnectorClient agentConnector;
     private final StageFaultState stageFault;
     private final egovframework.voice.collector.stt.SttTempStore sttTemp;
+    private final PerfStageMeter meter;
+
+    /**
+     * 건을 동시에 처리할 워커 수 — <b>운영 기본은 1(순차)</b>.
+     *
+     * <p>성능 테스트가 실행마다 1/2/4/8/16 으로 바꿔 돌린다. 운영값은 그 결과를 보고 정한다 —
+     * 올리면 브로커(추출 스레드 4개 고정)·NFS·NPU 에 동시에 그만큼 부하가 간다.</p>
+     */
+    @org.springframework.beans.factory.annotation.Value("${voice.batch.concurrency:1}")
+    private int defaultConcurrency;
 
     /**
      * 실패한 건의 중간 산출물을 남길지 — <b>Resume 의 전제</b>.
@@ -122,7 +141,18 @@ public class VoiceCollectService {
      */
     public VoiceBatchResult run(BatchWindow window, List<VoiceKind> kinds, String triggerBy, boolean testRun,
                                 ResumeMode resume, String fromExecId) {
+        return run(window, kinds, triggerBy, testRun, resume, fromExecId, defaultConcurrency);
+    }
+
+    /**
+     * 배치를 1회 실행한다 — 워커 수를 정해서.
+     *
+     * @param concurrency 건을 동시에 처리할 워커 수. 1 이하면 순차(운영 기본). 성능 테스트가 쓴다
+     */
+    public VoiceBatchResult run(BatchWindow window, List<VoiceKind> kinds, String triggerBy, boolean testRun,
+                                ResumeMode resume, String fromExecId, int concurrency) {
         long startedAt = System.currentTimeMillis();
+        int workers = Math.max(1, concurrency);
         List<VoiceKind> targets = (kinds == null || kinds.isEmpty())
                 ? List.of(VoiceKind.MEET, VoiceKind.PHONE) : kinds;
 
@@ -153,31 +183,43 @@ public class VoiceCollectService {
 
         // 화면 진행률 — 대상 수가 확정된 지금부터 센다. 배치 REST 는 동기라 이것 없이는
         // 수 분짜리 배치가 도는지 죽었는지 화면에서 알 수 없다.
-        progress.begin(execId, window.toString(), found.size());
+        progress.begin(execId, window.toString(), found.size(), workers);
         // 부분 성공은 확률이 아니라 건수다 — 대상 수가 정해진 지금 몇 건을 떨어뜨릴지 확정한다.
         stageFault.beginBatch(found.size());
         boolean canceled = false;
+        boolean parallel = workers > 1 && found.size() > 1;
+        long loopStartedAt = System.currentTimeMillis();
         try {
-            for (VoiceTarget t : found) {
-                // 중단은 건과 건 사이에서만 받는다 — 처리 중인 건을 끊으면 복호화 원본이 남거나
-                //   반쯤 쓴 산출물이 생긴다. 남은 건은 '중단됨' 으로 세어 합계를 맞춘다.
-                if (progress.isCancelRequested()) {
-                    canceled = true;
-                    log.warn("[Batch] 중단 요청 — execId={} · 처리 {}건 · 남은 {}건은 건너뜀으로 남긴다",
-                            execId, outcomes.size(), found.size() - outcomes.size());
-                    for (VoiceTarget rest : found.subList(outcomes.size(), found.size())) {
-                        outcomes.add(FileProcOutcome.skipped(rest, "중단됨 — 사용자가 배치를 멈췄습니다"));
-                        progress.finishFile(ProcStatus.SKIPPED);
+            if (parallel) {
+                log.info("[Batch]   동시 처리 — 워커 {}개 (대상 {}건)", workers, found.size());
+                canceled = runConcurrently(found, ctx, resume, workers, outcomes);
+            } else {
+                for (VoiceTarget t : found) {
+                    // 중단은 건과 건 사이에서만 받는다 — 처리 중인 건을 끊으면 복호화 원본이 남거나
+                    //   반쯤 쓴 산출물이 생긴다. 남은 건은 '중단됨' 으로 세어 합계를 맞춘다.
+                    if (progress.isCancelRequested()) {
+                        canceled = true;
+                        log.warn("[Batch] 중단 요청 — execId={} · 처리 {}건 · 남은 {}건은 건너뜀으로 남긴다",
+                                execId, outcomes.size(), found.size() - outcomes.size());
+                        for (VoiceTarget rest : found.subList(outcomes.size(), found.size())) {
+                            outcomes.add(FileProcOutcome.skipped(rest, "중단됨 — 사용자가 배치를 멈췄습니다"));
+                            progress.finishFile(ProcStatus.SKIPPED);
+                        }
+                        break;
                     }
-                    break;
+                    progress.startFile(t);
+                    FileProcOutcome o = processOne(t, ctx, resume);
+                    progress.finishFile(o.status());
+                    outcomes.add(o);
                 }
-                progress.startFile(t);
-                FileProcOutcome o = processOne(t, ctx, resume);
-                progress.finishFile(o.status());
-                outcomes.add(o);
             }
         } finally {
             progress.end();
+        }
+        if (parallel) {
+            // 동시 처리에서는 건별 시간의 합이 실제로 흐른 시간을 넘는다(4건이 1초씩 겹치면 합은 4초).
+            //   T2 소요 시간은 '그 단계가 열려 있던 시간' 이므로 벽시계로 자른다.
+            ctx.capElapsed(System.currentTimeMillis() - loopStartedAt);
         }
 
         int success = (int) outcomes.stream().filter(FileProcOutcome::isSuccess).count();
@@ -238,6 +280,68 @@ public class VoiceCollectService {
         return result;
     }
 
+    /**
+     * 건을 워커 {@code workers} 개로 나눠 처리한다 — <b>성능 테스트용</b>. 운영 기본은 1(순차)이라 이 길을 타지 않는다.
+     *
+     * <p>풀에서 도는 것은 건 처리({@link #processOne})뿐이다. 대상 조회 · T1/T2 개시 · T4/T1 마감은 순차와 똑같이
+     * 이 스레드가 한다. 결과는 <b>대상 순서 그대로</b> 모은다 — T4 행 순서가 순차 실행과 같다.</p>
+     *
+     * <p>중단은 순차와 같은 원칙이다 — 처리 중인 건은 끝까지 가고, 아직 시작하지 않은 건만 '건너뜀' 으로 남긴다.</p>
+     *
+     * @return 중단됐는가
+     */
+    private boolean runConcurrently(List<VoiceTarget> found, RunContext ctx, ResumeMode resume, int workers,
+                                    List<FileProcOutcome> outcomes) {
+        AtomicBoolean canceled = new AtomicBoolean();
+        AtomicInteger seq = new AtomicInteger();
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(workers, found.size()), r -> {
+            Thread th = new Thread(r, "voice-worker-" + seq.incrementAndGet());
+            th.setDaemon(true);
+            return th;
+        });
+        List<Future<FileProcOutcome>> futures = new ArrayList<>(found.size());
+        try {
+            for (VoiceTarget t : found) {
+                futures.add(pool.submit(() -> {
+                    if (progress.isCancelRequested()) {
+                        canceled.set(true);
+                        progress.skipFile();
+                        return FileProcOutcome.skipped(t, "중단됨 — 사용자가 배치를 멈췄습니다");
+                    }
+                    progress.startFile(t);
+                    FileProcOutcome o = processOne(t, ctx, resume);
+                    progress.finishFile(o.status());
+                    return o;
+                }));
+            }
+        } finally {
+            pool.shutdown();   // 넣은 건은 끝까지 돈다 — 새 건만 받지 않는다
+        }
+        for (int i = 0; i < futures.size(); i++) {
+            outcomes.add(await(futures.get(i), found.get(i)));
+        }
+        if (canceled.get()) {
+            log.warn("[Batch] 중단 요청 — execId={} · 시작하지 않은 {}건은 건너뜀으로 남긴다", ctx.execId,
+                    outcomes.stream().filter(o -> o.status() == ProcStatus.SKIPPED
+                            && o.errMsg() != null && o.errMsg().startsWith("중단됨")).count());
+        }
+        return canceled.get();
+    }
+
+    /** 워커의 결과를 기다린다. processOne 은 예외를 밖으로 던지지 않으므로 여기서 실패가 나는 일은 드물다. */
+    private static FileProcOutcome await(Future<FileProcOutcome> f, VoiceTarget t) {
+        try {
+            return f.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return FileProcOutcome.fail(t, FileProcOutcome.STEP_COLLECT, "InterruptedException: 결과 대기 중 중단됨", 0L);
+        } catch (ExecutionException e) {
+            Throwable c = e.getCause() == null ? e : e.getCause();
+            return FileProcOutcome.fail(t, FileProcOutcome.STEP_COLLECT,
+                    c.getClass().getSimpleName() + ": " + shorten(c.getMessage()), 0L);
+        }
+    }
+
     // ── 단계별 ────────────────────────────────────────────────────────────
 
     /** 배치 1회 동안 단계 기록이 들고 다니는 상태 — 단계 ID 와 구간별 누적 시간. */
@@ -252,11 +356,32 @@ public class VoiceCollectService {
         long collectMs;
         long analyzeMs;
         long sendMs;
-        /** 이관에 넘길 산출물 — 1차 저장이 끝난 건만 담는다. */
-        final List<egovframework.voice.collector.transfer.AgentConnectorClient.Output> toTransfer = new ArrayList<>();
+        /** 이관에 넘길 산출물 — 1차 저장이 끝난 건만 담는다. 동시 처리에서는 여러 워커가 넣는다. */
+        final List<egovframework.voice.collector.transfer.AgentConnectorClient.Output> toTransfer =
+                Collections.synchronizedList(new ArrayList<>());
 
         RunContext(String execId) {
             this.execId = execId;
+        }
+
+        // 구간별 누적 — 동시 처리에서 여러 워커가 더하므로 잠그고 더한다. 순차에서는 경합이 없다.
+        synchronized void addCollect(long ms) {
+            collectMs += ms;
+        }
+
+        synchronized void addAnalyze(long ms) {
+            analyzeMs += ms;
+        }
+
+        synchronized void addSend(long ms) {
+            sendMs += ms;
+        }
+
+        /** 동시 처리 — 건별 시간의 합이 실제 경과 시간을 넘지 않게 자른다. */
+        synchronized void capElapsed(long wallMs) {
+            collectMs = Math.min(collectMs, wallMs);
+            analyzeMs = Math.min(analyzeMs, wallMs);
+            sendMs = Math.min(sendMs, wallMs);
         }
     }
 
@@ -286,22 +411,27 @@ public class VoiceCollectService {
 
     /** ANALYZE 단계를 연다 — 첫 STT 직전에 한 번. 컬렉터는 같은 단계 재호출을 기존 행으로 돌려보내므로 안전하다. */
     private void beginAnalyze(RunContext ctx) {
-        if (ctx.analyzeStarted) {
-            return;
+        // 동시 처리에서 두 워커가 같이 닿아도 T2 행은 하나만 연다 — 잠근 채로 확인하고 연다.
+        synchronized (ctx) {
+            if (ctx.analyzeStarted) {
+                return;
+            }
+            ctx.analyzeStarted = true;
+            ctx.analyzeStepId = logCollector.createStep(ctx.execId, (short) 2, FileProcOutcome.STEP_ANALYZE);
         }
-        ctx.analyzeStarted = true;
-        ctx.analyzeStepId = logCollector.createStep(ctx.execId, (short) 2, FileProcOutcome.STEP_ANALYZE);
         log.info("[Batch] T2 ANALYZE 시작 — stepLogId={}", ctx.analyzeStepId == null ? "(미연동)" : ctx.analyzeStepId);
     }
 
     /** SEND 단계를 연다 — 첫 출력 저장 직전에 한 번. ANALYZE 와 같은 방식이다. */
     private void beginSend(RunContext ctx) {
-        if (ctx.sendStarted) {
-            return;
+        synchronized (ctx) {
+            if (ctx.sendStarted) {
+                return;
+            }
+            ctx.sendStarted = true;
+            // 비정형 체인의 4번 칸(COLLECT 1 · ANALYZE 2 · DEIDENT 3 · SEND 4). DEIDENT 는 이 서비스의 범위가 아니다.
+            ctx.sendStepId = logCollector.createStep(ctx.execId, (short) 4, FileProcOutcome.STEP_SEND);
         }
-        ctx.sendStarted = true;
-        // 비정형 체인의 4번 칸(COLLECT 1 · ANALYZE 2 · DEIDENT 3 · SEND 4). DEIDENT 는 이 서비스의 범위가 아니다.
-        ctx.sendStepId = logCollector.createStep(ctx.execId, (short) 4, FileProcOutcome.STEP_SEND);
         log.info("[Batch] T2 SEND 시작 — stepLogId={}", ctx.sendStepId == null ? "(미연동)" : ctx.sendStepId);
     }
 
@@ -511,7 +641,9 @@ public class VoiceCollectService {
                 }
                 SttResult reused = target.hasSourceStt() ? tryReadSourceStt(target) : null;
                 if (reused == null) {
+                    long mAcq = meter.start();
                     VoiceFile file = acquire(target, ctx.execId);
+                    meter.add(PerfStage.ACQUIRE, mAcq);
                     toClean.add(file.path());
                     fileSize = file.sizeBytes();
 
@@ -527,7 +659,7 @@ public class VoiceCollectService {
                 readyAudio = plain.path();
             }
             long tCollected = System.currentTimeMillis();
-            ctx.collectMs += tCollected - t0;
+            ctx.addCollect(tCollected - t0);
 
             // ── ANALYZE — STT ─────────────────────────────────────────────────
             step = FileProcOutcome.STEP_ANALYZE;
@@ -537,16 +669,23 @@ public class VoiceCollectService {
                     throw StageFaultState.fault(StageFaultState.Stage.ANALYZE,
                             "STT 호출 실패(500/Timeout) 주입");
                 }
-                stt = sttClient.transcribe(plain);
+                long mStt = meter.start();
+                try {
+                    stt = sttClient.transcribe(plain);
+                } finally {
+                    meter.add(PerfStage.STT, mStt);   // 타임아웃도 기다린 만큼이 STT 시간이다
+                }
                 if (stt.isEmpty()) {
-                    ctx.analyzeMs += System.currentTimeMillis() - tCollected;
+                    ctx.addAnalyze(System.currentTimeMillis() - tCollected);
                     return FileProcOutcome.fail(target, step, "STT 결과가 비어 있음", System.currentTimeMillis() - t0);
                 }
                 // 전사 결과를 남긴다 — SEND 가 깨져도 STT 를 다시 돌리지 않게.
+                long mTemp = meter.start();
                 sttTemp.save(ctx.execId, target, stt, fileSize);
+                meter.add(PerfStage.TEMP, mTemp);
             }
             long tAnalyzed = System.currentTimeMillis();
-            ctx.analyzeMs += tAnalyzed - tCollected;
+            ctx.addAnalyze(tAnalyzed - tCollected);
 
             // ── SEND — 최종 저장(PV) ──────────────────────────────────────────
             step = FileProcOutcome.STEP_SEND;
@@ -555,8 +694,10 @@ public class VoiceCollectService {
                 throw StageFaultState.fault(StageFaultState.Stage.SEND,
                         "최종 저장 실패(Disk Full / IOException) 주입");
             }
+            long mSave = meter.start();
             SttOutputStore.Saved saved = outputStore.save(ctx.execId, target, stt, fileSize);
-            ctx.sendMs += System.currentTimeMillis() - tAnalyzed;
+            meter.add(PerfStage.SAVE, mSave);
+            ctx.addSend(System.currentTimeMillis() - tAnalyzed);
             // 이관은 배치 끝에 한 번에 넘긴다 — 건마다 부르면 커넥터가 죽어 있을 때 건당 대기가 쌓인다.
             ctx.toTransfer.add(new egovframework.voice.collector.transfer.AgentConnectorClient.Output(
                     target.kind(), saved.textFile().getFileName().toString(), stt.text()));
@@ -574,11 +715,11 @@ public class VoiceCollectService {
             log.warn("[Batch] 처리 실패 [{}] — {} ({})", step, target.shortId(), reason);
             long ms = System.currentTimeMillis() - t0;
             if (FileProcOutcome.STEP_COLLECT.equals(step)) {
-                ctx.collectMs += ms;
+                ctx.addCollect(ms);
             } else if (FileProcOutcome.STEP_SEND.equals(step)) {
-                ctx.sendMs += ms;
+                ctx.addSend(ms);
             } else {
-                ctx.analyzeMs += ms;
+                ctx.addAnalyze(ms);
             }
             return FileProcOutcome.fail(target, step, reason, ms);
 

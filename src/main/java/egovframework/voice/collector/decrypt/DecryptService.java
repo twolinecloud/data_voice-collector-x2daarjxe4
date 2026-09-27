@@ -3,6 +3,8 @@ package egovframework.voice.collector.decrypt;
 import egovframework.voice.collector.config.VoiceModeState;
 import egovframework.voice.collector.config.VoiceProperties.DecryptMode;
 import egovframework.voice.collector.model.VoiceFile;
+import egovframework.voice.collector.perf.PerfStage;
+import egovframework.voice.collector.perf.PerfStageMeter;
 import egovframework.voice.collector.util.AudioFormatDetector;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -30,6 +32,7 @@ public class DecryptService {
     private final VoiceModeState state;
     private final List<AudioDecryptor> decryptors;
     private final NoopDecryptor noop;
+    private final PerfStageMeter meter;
 
     public VoiceFile decrypt(VoiceFile file) {
         if (state.decrypt() == DecryptMode.SKIP) {
@@ -45,7 +48,14 @@ public class DecryptService {
                 .findFirst()
                 .orElse(noop);
         log.info("[Decrypt] {} 적용 — {}", chosen.name(), file.path().getFileName());
-        return redetectFormat(chosen.decrypt(file));
+        // 성능 테스트가 복호화와 포맷 판별을 따로 본다 — 꺼져 있으면 시계를 읽지 않는다.
+        long m = meter.start();
+        VoiceFile decrypted = chosen.decrypt(file);
+        meter.add(PerfStage.DECRYPT, m);
+        m = meter.start();
+        VoiceFile out = redetectFormat(decrypted);
+        meter.add(PerfStage.FORMAT, m);
+        return out;
     }
 
     /**
