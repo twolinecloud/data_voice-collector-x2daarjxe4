@@ -1,0 +1,101 @@
+package egovframework.voice.collector.controller;
+
+import egovframework.voice.collector.perf.PerfRequest;
+import egovframework.voice.collector.perf.PerfRunService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
+
+/**
+ * 성능 테스트 API — 시뮬레이터 4번 탭이 쓴다.
+ *
+ * <p><b>{@code /api/v1/mock/**} 아래에 둔다</b> — 공용 DB 에 SIM 데이터를 만들고 지우는 시험 기능이라
+ * 운영에서는 다른 시뮬레이터 API 와 함께 인그레스·게이트웨이에서 막는다.</p>
+ */
+@Tag(name = "10. 성능 테스트 (Mock 전용)",
+        description = "실제 파이프라인을 N건(최대 300)으로 돌려 처리량·단계별 시간·자원을 잰다. STT 만 MOCK(가상 지연). 운영에서는 /api/v1/mock/** 를 차단한다")
+@RestController
+@RequestMapping(value = "/api/v1/mock/perf", produces = MediaType.APPLICATION_JSON_VALUE)
+@RequiredArgsConstructor
+public class PerfController {
+
+    private final PerfRunService perf;
+
+    @Value("${voice.batch.concurrency:1}")
+    private int batchConcurrency;
+
+    @Operation(summary = "입력 범위 · 지금 구성",
+            description = "건수·지연·동시성의 범위, STT 엔진(MOCK/NPU), 조회·브로커·복호화 모드, 이력 파일 위치.")
+    @GetMapping("/info")
+    public Map<String, Object> info() {
+        return perf.info(batchConcurrency);
+    }
+
+    @Operation(summary = "성능 테스트 시작 (비동기)",
+            description = """
+                    한 회차를 시작하고 바로 돌아옵니다. 진행은 `GET /runs/current` 로 봅니다.
+
+                    1. **준비** — 로컬 산출물을 비우고 원천 DB 에 SIM 데이터 N건(접견·전화 반반)을 **어제 하루**에 만듭니다.
+                       개발계에서는 **공용 DB** 에 만들어지므로 다른 작업자와 시간이 겹치지 않게 하십시오
+                    2. **측정** — `[어제 00:00, 오늘 00:00)` 를 워커 N개로 처리합니다(`TEST_BATCH` · `MANUAL` · 실행 주체 `PERF`).
+                       STT 가 MOCK 이면 가상 지연·타임아웃을 겁니다
+                    3. **검증** — 로그 컬렉터에서 T1·T2·T4 를 되읽어 맞춰 봅니다
+                    4. **정리** — SIM 행과 원본 더미 파일을 지웁니다. 로그(TST)와 STT 출력은 남습니다
+
+                    - 400 — 범위 밖(건수 10~300 · 지연 0~5,000ms · 동시성 1/2/4/8/16 · 타임아웃 100~600,000ms)
+                    - 409 — 이미 성능 테스트나 배치가 돌고 있음
+                    """)
+    @PostMapping("/runs")
+    public ResponseEntity<Map<String, Object>> start(@RequestBody(required = false) PerfRequest req) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(perf.start(req));
+    }
+
+    @Operation(summary = "진행 중(또는 마지막) 회차",
+            description = "`phase` — PREPARING 준비 · RUNNING 측정 · VERIFYING 검증 · CLEANING 정리 · DONE 완료 · FAILED 실패. 측정 중에는 `progress` 가, 끝나면 `result` 가 실립니다.")
+    @GetMapping("/runs/current")
+    public Map<String, Object> current() {
+        return perf.current();
+    }
+
+    @Operation(summary = "성능 테스트 중단",
+            description = "준비 중이면 측정을 건너뛰고, 측정 중이면 처리 중인 건만 끝낸 뒤 멈춥니다. 어느 쪽이든 SIM 데이터는 지웁니다.")
+    @PostMapping("/runs/cancel")
+    public Map<String, Object> cancel() {
+        return perf.cancel();
+    }
+
+    @Operation(summary = "실행 이력", description = "`{ROOT}/perf/history.jsonl` — 최근 회차가 앞. 동시성을 바꿔 가며 돌린 결과를 나란히 비교합니다.")
+    @GetMapping("/runs")
+    public Map<String, Object> history() {
+        return perf.history();
+    }
+
+    @Operation(summary = "실행 이력 비우기", description = "이력 파일만 지웁니다. 로그 컬렉터의 TST 이력은 [시뮬레이션 데이터 초기화]가 지웁니다.")
+    @DeleteMapping("/runs")
+    public Map<String, Object> clearHistory() {
+        return perf.clearHistory();
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> badRequest(IllegalArgumentException e) {
+        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> conflict(IllegalStateException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", e.getMessage()));
+    }
+}

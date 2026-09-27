@@ -35,6 +35,7 @@ voice:
   batch:
     schedule-enabled: ${VOICE_SCHEDULE_ENABLED:true}
     retain-source-file: false     # 복호화된 원본 음성은 STT 후 지운다
+    concurrency: 1                # 건 동시 처리 — 운영은 순차 고정(환경변수로도 바꾸지 않는다). 성능 테스트 결과로 정한다
 
 log-collector:
   enabled: true

@@ -150,7 +150,8 @@ class PhoneSimAesDecryptorTest {
         VoiceModeState state = mock(VoiceModeState.class);
         when(state.decrypt()).thenReturn(VoiceProperties.DecryptMode.REAL);
         when(state.phone()).thenReturn(VoiceProperties.PhoneMode.MOCK);
-        DecryptService svc = new DecryptService(state, java.util.List.of(decryptor), new NoopDecryptor());
+        DecryptService svc = new DecryptService(state, java.util.List.of(decryptor), new NoopDecryptor(),
+                new egovframework.voice.collector.perf.PerfStageMeter());
 
         VoiceFile in = encryptedPhoneFile();
         VoiceFile mislabelled = new VoiceFile(in.target(), in.path(), in.sizeBytes(), "m4a", false);

@@ -174,6 +174,7 @@ voice:
     mode: ${VOICE_STT_MODE:MOCK}             # MOCK | NPU
     base-url: ${VOICE_STT_BASE_URL:}
     timeout-sec: ${VOICE_STT_TIMEOUT_SEC:300}
+    mock-latency-ms: ${VOICE_STT_MOCK_LATENCY_MS:0}   # MOCK 가상 지연(NPU 응답 흉내) — 성능 테스트가 회차마다 덮어쓴다
 
   batch:
     schedule-enabled: ${VOICE_SCHEDULE_ENABLED:false}
@@ -185,6 +186,7 @@ voice:
     job-id: ${VOICE_JOB_ID:VOICE_ANALYSIS}   # 컬렉터 JobId enum — VOICE_ANALYSIS → 작업코드 VOC
     data-type-cd: UNSTRUCTURED               # 컬렉터 C01 4종 중 비정형(음성). VOICE 는 C01 에 없는 코드였다
     retain-source-file: ${VOICE_RETAIN_SOURCE:false}
+    concurrency: ${VOICE_BATCH_CONCURRENCY:1}   # 건 동시 처리 워커 수 — 운영은 1(순차) 고정. 성능 테스트 결과를 보고 정한다
 
   inmate-pid:
     salt: ${VOICE_PID_SALT:kcais-voice-collector}

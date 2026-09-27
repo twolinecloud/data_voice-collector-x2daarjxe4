@@ -30,6 +30,7 @@ import java.util.List;
 public class MockSttClient implements SttClient {
 
     private final FaultInjector faultInjector;
+    private final MockSttLatency latency;
 
     private static final String PHONE_SCRIPT = """
             여보세요. 저 김수용인데요. 어머니 바꿔주세요.
@@ -57,6 +58,8 @@ public class MockSttClient implements SttClient {
         // 장애 시뮬레이션이 켜져 있으면 여기서 지연·예외가 난다.
         // 한 건이 터져도 배치가 끝까지 도는지(processOne 의 건별 격리) 확인하기 위한 지점이다.
         faultInjector.maybeInject(FaultInjector.Stage.STT);
+        // NPU 응답 시간 흉내 — 기본 0ms. 성능 테스트가 도는 동안만 지연·타임아웃이 걸린다.
+        simulateLatency(file);
 
         String script = (file.target().kind() == VoiceKind.MEET) ? MEET_SCRIPT : PHONE_SCRIPT;
         // 대본을 줄 단위로 끊어 구간을 만든다 — 실물 엔진이 segments 를 줄 때와 같은 모양이라야
@@ -77,6 +80,33 @@ public class MockSttClient implements SttClient {
         log.info("[STT:MOCK] {} — {}자 · {}초 · 구간 {}개",
                 file.path().getFileName(), body.length(), duration, segments.size());
         return new SttResult(body, "MOCK", duration, false, "ko", segments);
+    }
+
+    /**
+     * 가상 지연만큼 기다린다. 지연이 타임아웃을 넘으면 <b>타임아웃만큼만</b> 기다린 뒤 던진다 —
+     * 실제 호출도 타임아웃에서 끊기지, 응답이 올 때까지 기다리지 않는다.
+     */
+    private void simulateLatency(VoiceFile file) {
+        long delay = latency.draw();
+        long timeout = latency.timeoutMs();
+        if (timeout > 0 && delay > timeout) {
+            pause(timeout);
+            throw new SttTimeoutException("STT 응답 없음 — %dms 초과 (가상 지연 %dms · %s)"
+                    .formatted(timeout, delay, file.target().shortId()));
+        }
+        pause(delay);
+    }
+
+    private static void pause(long ms) {
+        if (ms <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("STT 가상 지연 중 중단됨", e);
+        }
     }
 
     /** 소수 첫째 자리 — Whisper 도 그 정도로 준다. 자릿수가 길면 산출물만 지저분해진다. */

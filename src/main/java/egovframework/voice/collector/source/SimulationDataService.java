@@ -69,8 +69,20 @@ public class SimulationDataService {
     private static final long DAY_SECONDS = 24L * 60 * 60;
     public static final int MEET_COUNT = DAILY_PER_KIND + PERIODIC_PER_KIND;
     public static final int PHONE_COUNT = DAILY_PER_KIND + PERIODIC_PER_KIND;
-    /** 이 건수를 넘는 대용량 시딩은 더미 파일을 쓰지 않는다(파이프라인은 브로커·Mock 이 만든 파일을 쓴다). */
-    public static final int FILE_LIMIT = 200;
+    /**
+     * 이 건수를 넘는 대용량 시딩은 더미 파일을 쓰지 않는다(파이프라인은 브로커·Mock 이 만든 파일을 쓴다).
+     *
+     * <p>성능 테스트 상한({@link #PERF_MAX_TOTAL})과 같게 둔다 — 브로커가 {@code REST} 면 이 원본을 그대로
+     * 가져가므로, 더미가 없으면 201번째 건부터 원본이 없어 실패한다.</p>
+     */
+    public static final int FILE_LIMIT = 300;
+    /**
+     * 성능 테스트 한 번에 만드는 최대 건수 — 운영 일일 처리 한도(300건)와 같다.
+     *
+     * <p>이 건수까지는 <b>개발계 공용 DB 에도</b> 만든다. 원천 조회·Hikari 가 실측이어야 성능 테스트가
+     * 의미가 있기 때문이다. SIM 접두라 초기화가 지울 수 있고, 성능 테스트는 끝나면 스스로 지운다.</p>
+     */
+    public static final int PERF_MAX_TOTAL = 300;
     /** 이 번호의 전화 건은 "보라미가 이미 STT 를 가지고 있는" 시나리오(계획서 Q1). */
     public static final int PHONE_WITH_SOURCE_STT = 3;
     /** 이 번호의 접견 건은 암호화되지 않은 파일 — 복호화가 통과(Noop)하는지 본다. */
@@ -132,16 +144,36 @@ public class SimulationDataService {
      */
     @Transactional
     public Map<String, Object> seed(int dailyMeet, int dailyPhone) {
-        if (dailyMeet < 0 || dailyPhone < 0) {
-            throw new IllegalArgumentException("건수는 음수일 수 없다");
-        }
         boolean bulk = dailyMeet > DAILY_PER_KIND || dailyPhone > DAILY_PER_KIND;
         if (bulk && !db.isH2()) {
             throw new IllegalStateException("대용량 시딩(일배치 " + dailyMeet + "·" + dailyPhone + ")은 로컬 H2 에서만 허용한다 — 지금 대상: " + db.label());
         }
+        return seed(dailyMeet, dailyPhone, PERIODIC_PER_KIND);
+    }
+
+    /**
+     * 성능 테스트용 Clean &amp; Seed — <b>정확히 접견 {@code meet} · 전화 {@code phone} 건</b>을 어제 하루
+     * ({@code [어제 00:00, 오늘 00:00)})에 고르게 만든다. 주기배치용 건은 만들지 않는다.
+     *
+     * <p>어제에 두는 이유: 주기배치(당일 00:00~지금)가 켜져 있어도 성능 테스트 데이터를 집어 가지 않는다.</p>
+     *
+     * <p>합계 {@link #PERF_MAX_TOTAL} 건까지는 개발계 공용 DB 에도 만든다(일반 대용량 시딩은 H2 전용).</p>
+     */
+    @Transactional
+    public Map<String, Object> seedPerf(int meet, int phone) {
+        if (meet + phone > PERF_MAX_TOTAL) {
+            throw new IllegalArgumentException("성능 테스트 데이터는 최대 " + PERF_MAX_TOTAL + "건이다: " + (meet + phone));
+        }
+        return seed(meet, phone, 0);
+    }
+
+    private Map<String, Object> seed(int dailyMeet, int dailyPhone, int periodicPerKind) {
+        if (dailyMeet < 0 || dailyPhone < 0) {
+            throw new IllegalArgumentException("건수는 음수일 수 없다");
+        }
         dataset.set(dailyMeet, dailyPhone);
-        int meetCount = dailyMeet + PERIODIC_PER_KIND;
-        int phoneCount = dailyPhone + PERIODIC_PER_KIND;
+        int meetCount = dailyMeet + periodicPerKind;
+        int phoneCount = dailyPhone + periodicPerKind;
         boolean writeFiles = meetCount + phoneCount <= FILE_LIMIT;
 
         SqlTrace trace = new SqlTrace();
@@ -246,8 +278,8 @@ public class SimulationDataService {
         // 화면 팝업이 쓰는 건수 — 일배치용/주기용을 나눠 센다. rows 는 테이블별이라 이 구분이 나오지 않는다.
         out.put("counts", Map.of(
                 "daily", Map.of("meet", dailyMeet, "phone", dailyPhone, "total", dailyMeet + dailyPhone),
-                "periodic", Map.of("meet", PERIODIC_PER_KIND, "phone", PERIODIC_PER_KIND,
-                        "total", PERIODIC_PER_KIND * 2,
+                "periodic", Map.of("meet", periodicPerKind, "phone", periodicPerKind,
+                        "total", periodicPerKind * 2,
                         "offsetMin", Map.of("meet", PERIODIC_OFFSET_MIN.get(VoiceKind.MEET),
                                 "phone", PERIODIC_OFFSET_MIN.get(VoiceKind.PHONE))),
                 "total", meetCount + phoneCount,
