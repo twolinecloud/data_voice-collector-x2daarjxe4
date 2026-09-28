@@ -148,7 +148,9 @@ public class SimulationDataService {
         if (bulk && !db.isH2()) {
             throw new IllegalStateException("대용량 시딩(일배치 " + dailyMeet + "·" + dailyPhone + ")은 로컬 H2 에서만 허용한다 — 지금 대상: " + db.label());
         }
-        return seed(dailyMeet, dailyPhone, PERIODIC_PER_KIND);
+        // 시연 기본 — 전화 3번 한 건만 '보라미가 이미 STT 를 가진' 건(계획서 Q1)
+        return seed(dailyMeet, dailyPhone, PERIODIC_PER_KIND,
+                i -> i == PHONE_WITH_SOURCE_STT && dailyPhone >= PHONE_WITH_SOURCE_STT);
     }
 
     /**
@@ -161,13 +163,44 @@ public class SimulationDataService {
      */
     @Transactional
     public Map<String, Object> seedPerf(int meet, int phone) {
+        return seedPerf(meet, phone, 0);
+    }
+
+    /**
+     * 위와 같되, 전화 중 {@code sttPercent}% 에 <b>보라미 기존 STT</b>({@code TELP_STT_FLPTH_NM})를 채운다.
+     *
+     * <p>수집기는 그 건의 복호화·STT 를 건너뛰고 기존 텍스트를 쓴다(Bypass). 그 건들은 순식간에 끝나
+     * 다른 워커의 긴 STT 와 나란히 저장·T4 적재에 닿는다 — 동시 처리의 경합을 보는 표본이다.
+     * 경로만 채우면 수집기가 파일을 못 찾아 일반 경로로 돌아가므로 더미 텍스트 파일도 같이 쓴다.</p>
+     *
+     * <p>고르는 방법: 반올림한 건수를 전화 번호 전체에 고르게 편다(예: 150건 3% → 5건, 16·46·76·106·136번).</p>
+     */
+    @Transactional
+    public Map<String, Object> seedPerf(int meet, int phone, int sttPercent) {
         if (meet + phone > PERF_MAX_TOTAL) {
             throw new IllegalArgumentException("성능 테스트 데이터는 최대 " + PERF_MAX_TOTAL + "건이다: " + (meet + phone));
         }
-        return seed(meet, phone, 0);
+        if (sttPercent < 0 || sttPercent > 100) {
+            throw new IllegalArgumentException("기 STT 비율은 0~100% 이어야 한다: " + sttPercent);
+        }
+        java.util.Set<Integer> withStt = sourceSttPicks(phone, sttPercent);
+        Map<String, Object> out = seed(meet, phone, 0, withStt::contains);
+        out.put("sourceSttPhones", withStt.size());
+        return out;
     }
 
-    private Map<String, Object> seed(int dailyMeet, int dailyPhone, int periodicPerKind) {
+    /** 전화 {@code phone} 건 중 {@code percent}% 를 번호 전체에 고르게 고른다(1부터). */
+    static java.util.Set<Integer> sourceSttPicks(int phone, int percent) {
+        int n = (int) Math.round(phone * percent / 100d);
+        java.util.Set<Integer> picks = new java.util.TreeSet<>();
+        for (int k = 0; k < n; k++) {
+            picks.add(Math.min(phone, 1 + (int) Math.floor((k + 0.5) * phone / n)));
+        }
+        return picks;
+    }
+
+    private Map<String, Object> seed(int dailyMeet, int dailyPhone, int periodicPerKind,
+                                     java.util.function.IntPredicate withSourceStt) {
         if (dailyMeet < 0 || dailyPhone < 0) {
             throw new IllegalArgumentException("건수는 음수일 수 없다");
         }
@@ -237,7 +270,7 @@ public class SimulationDataService {
             String fileNm = phoneFileName(i);
             Path file = phoneDir.resolve(fileNm);
             String sttPath = null;
-            if (i == PHONE_WITH_SOURCE_STT && dailyPhone >= PHONE_WITH_SOURCE_STT) {
+            if (withSourceStt.test(i)) {
                 Path stt = phoneDir.resolve("mock_phone_" + seq(i) + ".stt.txt");
                 files.add(writeText(stt, "(보라미 기존 STT / 시뮬레이션) 여보세요 저 김수용입니다. 어머니 잘 계시죠.\n"
                         + "연락처 010-9876-5432 로 전화 주세요. 주민번호는 900101-1234567 입니다.\n"));

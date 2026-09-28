@@ -641,9 +641,14 @@ public class VoiceCollectService {
                 }
                 SttResult reused = target.hasSourceStt() ? tryReadSourceStt(target) : null;
                 if (reused == null) {
-                    long mAcq = meter.start();
-                    VoiceFile file = acquire(target, ctx.execId);
-                    meter.add(PerfStage.ACQUIRE, mAcq);
+                    // 확보 대기는 끝나기 전에도 잰다 — 임계 성능 시험이 'XVARM 확보 대기 N초 초과' 로 멈춘다
+                    long mAcq = meter.start(PerfStage.ACQUIRE);
+                    VoiceFile file;
+                    try {
+                        file = acquire(target, ctx.execId);
+                    } finally {
+                        meter.add(PerfStage.ACQUIRE, mAcq);
+                    }
                     toClean.add(file.path());
                     fileSize = file.sizeBytes();
 
@@ -672,6 +677,12 @@ public class VoiceCollectService {
                 long mStt = meter.start();
                 try {
                     stt = sttClient.transcribe(plain);
+                } catch (RuntimeException e) {
+                    // 중단 요청으로 깬 가상 지연은 STT 에러가 아니다
+                    if (!progress.isCancelRequested()) {
+                        meter.error(PerfStage.STT);
+                    }
+                    throw e;
                 } finally {
                     meter.add(PerfStage.STT, mStt);   // 타임아웃도 기다린 만큼이 STT 시간이다
                 }

@@ -29,7 +29,8 @@ import java.util.stream.Stream;
  *
  * <p>여기서 세 가지를 같이 돌려준다.</p>
  * <ol>
- *   <li><b>DB</b> — 로그 컬렉터 {@code GET /api/v1/logs/batches/{execId}} 를 통해 T1·T2·T4·T5.
+ *   <li><b>DB</b> — 로그 컬렉터 {@code GET /api/v1/logs/batches/{execId}} 를 통해 T1·T2·T4.
+ *       T5(비식별 전송)는 수집기가 쓰지 않아 보지 않는다.
  *       이 서비스는 로그 DB 에 직접 붙지 않는다(적재도 조회도 컬렉터 API 로만).</li>
  *   <li><b>PV 파일</b> — 복호화 보존물·전사 보존물·STT 결과 폴더의 존재와 파일 수.</li>
  *   <li><b>손으로 확인할 명령</b> — 위를 조회한 것과 같은 SQL 과 {@code ls}/{@code cat} 명령.
@@ -42,7 +43,8 @@ public class VerificationService {
 
     /** 개발계 파드를 가리키는 kubectl 접두 — 차트의 배포 이름과 같다. */
     private static final String KUBECTL = "kubectl -n data-pipeline exec deploy/voice-collector-x2daarjxe4 -- ";
-    private static final int SAMPLE = 10;
+    /** 파일 목록의 처음·끝에서 보일 개수. */
+    private static final int EDGE = 2;
 
     private final VoiceDirState dirs;
     private final LogCollectorClient logCollector;
@@ -62,7 +64,7 @@ public class VerificationService {
 
     // ── DB ────────────────────────────────────────────────────────────────
 
-    /** DB(T1·T2·T4·T5) 대조만 — 성능 테스트가 끝난 뒤 정합성 점검에서도 쓴다. */
+    /** DB(T1·T2·T4) 대조만 — 성능 시험이 끝난 뒤 정합성 점검에서도 쓴다. T5 는 수집기가 쓰지 않는다. */
     public Map<String, Object> db(String execId) {
         Map<String, Object> m = new LinkedHashMap<>();
         if (!logCollector.isEnabled()) {
@@ -114,10 +116,6 @@ public class VerificationService {
         t4.put("total", num(rc, "file_cnt"));
         t4.put("byStatus", counts(ss.path("fileByStatus")));
         m.put("t4", t4);
-        Map<String, Object> t5 = new LinkedHashMap<>();
-        t5.put("total", num(rc, "send_cnt"));
-        t5.put("byStatus", counts(ss.path("sendByStatus")));
-        m.put("t5", t5);
         // 컬렉터가 옛 버전이면 상태별 집계가 없다 — 건수만 보이고, 화면이 그 사실을 말한다
         m.put("statusSummarySupported", !ss.isMissingNode());
 
@@ -174,7 +172,8 @@ public class VerificationService {
         m.put("path", dir.toString().replace('\\', '/'));
         boolean exists = Files.isDirectory(dir);
         m.put("exists", exists);
-        List<String> names = new ArrayList<>();
+        List<String> head = new ArrayList<>(EDGE);
+        java.util.ArrayDeque<String> tail = new java.util.ArrayDeque<>(EDGE);
         int count = 0;
         if (exists) {
             try (Stream<Path> s = Files.list(dir)) {
@@ -184,16 +183,23 @@ public class VerificationService {
                         continue;
                     }
                     count++;
-                    if (names.size() < SAMPLE) {
-                        names.add(n);
+                    if (head.size() < EDGE) {
+                        head.add(n);
+                        continue;
                     }
+                    if (tail.size() == EDGE) {
+                        tail.removeFirst();
+                    }
+                    tail.addLast(n);
                 }
             } catch (IOException ignored) {
                 // 목록을 못 읽어도 검증 화면이 에러를 내면 안 된다 — 0건으로 보인다
             }
         }
         m.put("count", count);
-        m.put("sample", names);
+        // 300건이면 파일이 600개다 — 전부 늘어놓지 않고 처음·끝만 보인다(건마다 .json·.txt 한 쌍이라 둘씩)
+        m.put("head", head);
+        m.put("tail", List.copyOf(tail));
         return m;
     }
 
@@ -229,11 +235,6 @@ public class VerificationService {
                         + " WHERE exec_sts_cd = 'SUCCESS'\n"
                         + "   AND data_type_cd = 'UNSTRUCTURED'\n"
                         + "   AND job_id = (SELECT job_id FROM kcais.tb_batch_exec_log WHERE exec_id = '" + id + "');"));
-        l.add(cmd("T5 전송 이력 — 상태별 (kcais.tb_deident_send_log)",
-                "SELECT send_sts_cd, COUNT(*)\n"
-                        + "  FROM kcais.tb_deident_send_log\n"
-                        + " WHERE exec_id = '" + id + "'\n"
-                        + " GROUP BY send_sts_cd;"));
         return l;
     }
 

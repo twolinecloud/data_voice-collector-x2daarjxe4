@@ -31,6 +31,11 @@ public class MockSttClient implements SttClient {
 
     private final FaultInjector faultInjector;
     private final MockSttLatency latency;
+    /** 중단 요청을 본다 — 가상 지연은 수 분이라, 다 기다리면 [중지]가 먹지 않는 것처럼 보인다. */
+    private final egovframework.voice.collector.batch.BatchProgress progress;
+
+    /** 가상 지연을 이 간격으로 잘라 자면서 중단 요청을 본다. */
+    private static final long PAUSE_SLICE_MS = 200L;
 
     private static final String PHONE_SCRIPT = """
             여보세요. 저 김수용인데요. 어머니 바꿔주세요.
@@ -87,7 +92,7 @@ public class MockSttClient implements SttClient {
      * 실제 호출도 타임아웃에서 끊기지, 응답이 올 때까지 기다리지 않는다.
      */
     private void simulateLatency(VoiceFile file) {
-        long delay = latency.draw();
+        long delay = latency.draw(file.target().kind());
         long timeout = latency.timeoutMs();
         if (timeout > 0 && delay > timeout) {
             pause(timeout);
@@ -97,12 +102,22 @@ public class MockSttClient implements SttClient {
         pause(delay);
     }
 
-    private static void pause(long ms) {
-        if (ms <= 0) {
-            return;
-        }
+    /**
+     * 가상 지연만큼 잔다 — <b>중단 요청이 오면 바로 깬다.</b>
+     *
+     * <p>실제 처리 중인 건은 끝까지 가는 것이 원칙이지만, 이것은 가짜 대기다. 접견 180초를 다 기다리면
+     * [중지]가 3분 동안 먹지 않는 것처럼 보인다. 깬 건은 ANALYZE 실패로 남고 복호화 오디오는 보존되어
+     * 재처리가 STT 부터 이어 간다.</p>
+     */
+    private void pause(long ms) {
+        long until = System.currentTimeMillis() + ms;
         try {
-            Thread.sleep(ms);
+            for (long left = ms; left > 0; left = until - System.currentTimeMillis()) {
+                if (progress.isCancelRequested()) {
+                    throw new IllegalStateException("중단됨 — STT 가상 지연 대기 중 멈췄습니다");
+                }
+                Thread.sleep(Math.min(left, PAUSE_SLICE_MS));
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("STT 가상 지연 중 중단됨", e);

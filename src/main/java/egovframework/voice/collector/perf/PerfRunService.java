@@ -49,16 +49,24 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 성능 테스트 — <b>실제 Java 파이프라인</b>을 N건으로 돌려 처리량·시간·자원을 잰다. STT 만 MOCK(가상 지연)이다.
+ * 성능 시험 — <b>실제 Java 파이프라인</b>을 N건으로 돌려 처리량·시간·자원을 잰다. STT 만 MOCK(가상 지연)이다.
  *
- * <p><b>한 회차의 순서</b></p>
+ * <p>두 가지를 돈다. 둘은 같은 엔진(준비 → 측정 → 검증 → 정리)을 쓰고, 한 번에 하나만 돈다.</p>
+ * <ul>
+ *   <li><b>기본 부하 검증</b>(4번 탭) — 정한 워커 수로 한 회차</li>
+ *   <li><b>임계 성능 시험</b>(5번 탭) — 워커를 단계마다 늘려 같은 건수를 처리하며 포화 지점을 찾는다.
+ *       최저 응답 뒤 연속으로 개선이 없거나, XVARM 확보 대기가 한도를 넘거나, STT 에러가 나면 멈춘다</li>
+ * </ul>
+ *
+ * <p><b>한 회차(한 단계)의 순서</b></p>
  * <ol>
- *   <li><b>준비</b> — 로컬 산출물(멱등 표식·수신 파일·보존물)과 지난 시험 출력 폴더를 비우고, 원천 DB 에
- *       SIM 데이터 N건(접견·전화 반반)을 <b>어제 하루</b>에 만든다. 준비 시간은 측정에 넣지 않는다</li>
+ *   <li><b>준비</b> — 로컬 산출물(멱등 표식·수신 파일·보존물)을 비우고, 원천 DB 에 SIM 데이터를 <b>어제 하루</b>에
+ *       만든다(접견·전화 건수, 전화 중 기 STT 비율). 준비 시간은 측정에 넣지 않는다</li>
  *   <li><b>측정</b> — {@code [어제 00:00, 오늘 00:00)} 를 수동 배치({@code TEST_BATCH} · {@code MANUAL} ·
  *       실행 주체 {@code PERF})로 워커 N개가 처리한다. 단계별 시간·힙·원천 풀 최고 연결 수를 함께 잰다</li>
  *   <li><b>검증</b> — 로그 컬렉터에서 되읽어 T2 에 RUNNING 이 남지 않았는지, 단계 행이 겹치지 않았는지,
@@ -67,10 +75,8 @@ import java.util.concurrent.Executors;
  *       [상세 검증]으로 볼 수 있게 한다(다음 회차 준비 때 출력 폴더는 지운다)</li>
  * </ol>
  *
- * <p>이력은 {@code {ROOT}/perf/history.jsonl} 에 한 줄씩 쌓는다 — PV 라 파드를 다시 띄워도 남고,
- * 여러 사람이 같은 이력을 본다.</p>
- *
- * <p>한 번에 한 회차만 돈다. 배치(스케줄러·화면)가 돌고 있으면 시작하지 않는다.</p>
+ * <p>이력은 {@code {ROOT}/perf/history.jsonl}(기본 부하) · {@code ramp-history.jsonl}(임계) 에 한 줄씩 쌓는다 —
+ * PV 라 파드를 다시 띄워도 남고, 여러 사람이 같은 이력을 본다.</p>
  */
 @Log4j2
 @Service
@@ -79,8 +85,13 @@ public class PerfRunService {
 
     private static final DateTimeFormatter RUN_ID = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final String HISTORY_FILE = "history.jsonl";
+    private static final String RAMP_HISTORY_FILE = "ramp-history.jsonl";
     /** 화면이 읽는 이력 최대 건수 — 파일은 자르지 않는다. */
     private static final int HISTORY_READ_MAX = 300;
+    /** 임계 시험 도중 조기 종료 조건을 보는 간격. */
+    private static final long MONITOR_MS = 500L;
+
+    public enum Kind { BASIC, RAMP }
 
     public enum Phase {
         PREPARING("준비"), RUNNING("측정"), VERIFYING("검증"), CLEANING("정리"), DONE("완료"), FAILED("실패");
@@ -131,10 +142,40 @@ public class PerfRunService {
 
     private volatile Run current;
 
+    /** STT 가상 지연 — 두 요청이 같은 모양으로 넘긴다. */
+    private record Load(MockSttLatency.Mode mode, long meetMs, long phoneMs, int jitterPercent, Long timeoutMs) {
+
+        static Load of(PerfRequest r) {
+            return new Load(r.mode(), r.meetLatencyMs(), r.phoneLatencyMs(), r.jitterPercent(), r.sttTimeoutMs());
+        }
+
+        static Load of(RampRequest r) {
+            return new Load(r.mode(), r.meetLatencyMs(), r.phoneLatencyMs(), r.jitterPercent(), r.sttTimeoutMs());
+        }
+
+        Map<String, Object> describe() {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("mode", mode.name());
+            m.put("meetMs", meetMs);
+            m.put("phoneMs", phoneMs);
+            m.put("jitterPercent", jitterPercent);
+            return m;
+        }
+    }
+
+    /** 준비 단계가 만든 것. */
+    private record Prepared(Map<String, Object> seed, Map<String, Object> cleared, int oldOutputs, long prepareMs) {}
+
+    /** 측정 한 번의 결과 — 배치 결과와 그동안의 자원·단계 시간. */
+    private record Measured(VoiceBatchResult result, long heapStart, long heapEnd, long heapPeak,
+                            List<Map<String, Object>> stages, Map<String, Object> hikari,
+                            double acquireMaxMs, long sttErrors, String earlyStop) {}
+
     /** 한 회차의 진행 상태 — 러너 스레드가 쓰고 API 스레드가 읽는다. */
     private static final class Run {
         final String id;
-        final PerfRequest req;
+        final Kind kind;
+        final Object req;
         final long startedAt = System.currentTimeMillis();
         volatile Phase phase = Phase.PREPARING;
         volatile String message = "준비 중…";
@@ -142,9 +183,17 @@ public class PerfRunService {
         volatile Map<String, Object> result;
         volatile String error;
         volatile boolean cancelRequested;
+        // 임계 시험 — 단계가 끝날 때마다 쌓인다(화면이 실시간으로 그린다)
+        final List<Map<String, Object>> steps = new CopyOnWriteArrayList<>();
+        volatile List<Integer> plan = List.of();
+        volatile int stepNo;
+        volatile int workers;
+        volatile int bestStep;
+        volatile String stopReason;
 
-        Run(String id, PerfRequest req) {
+        Run(String id, Kind kind, Object req) {
             this.id = id;
+            this.kind = kind;
             this.req = req;
         }
 
@@ -155,28 +204,47 @@ public class PerfRunService {
         }
     }
 
-    // ── 실행 ──────────────────────────────────────────────────────────────
+    // ── 시작 · 중단 · 상태 ──────────────────────────────────────────────────
 
     /**
-     * 한 회차를 시작한다 — 비동기. 바로 돌아오고, 진행은 {@link #current()} 로 본다.
+     * 기본 부하 검증 한 회차를 시작한다 — 비동기. 바로 돌아오고, 진행은 {@link #current()} 로 본다.
      *
      * @throws IllegalArgumentException 조건이 범위를 벗어났다(400)
-     * @throws IllegalStateException    이미 성능 테스트나 배치가 돌고 있다(409)
+     * @throws IllegalStateException    이미 성능 시험이나 배치가 돌고 있다(409)
      */
     public synchronized Map<String, Object> start(PerfRequest raw) {
-        PerfRequest req = (raw == null ? new PerfRequest(null, null, null, null, null, null, null) : raw).withDefaults();
+        PerfRequest req = (raw == null ? new PerfRequest(null, null, null, null, null, null, null, null, null, null) : raw)
+                .withDefaults();
         req.validate(props.batch().maxFilesPerRun());
+        ensureIdle();
+        Run run = new Run(LocalDateTime.now().format(RUN_ID), Kind.BASIC, req);
+        current = run;
+        runner.submit(() -> executeBasic(run));
+        return snapshot(run);
+    }
+
+    /** 임계 성능 시험(워커 램프업)을 시작한다 — 비동기. */
+    public synchronized Map<String, Object> startRamp(RampRequest raw) {
+        RampRequest req = (raw == null ? new RampRequest(null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null) : raw).withDefaults();
+        req.validate(props.batch().maxFilesPerRun());
+        ensureIdle();
+        Run run = new Run(LocalDateTime.now().format(RUN_ID), Kind.RAMP, req);
+        run.plan = List.copyOf(req.plan());
+        current = run;
+        runner.submit(() -> executeRamp(run));
+        return snapshot(run);
+    }
+
+    private void ensureIdle() {
         Run running = current;
         if (running != null && running.phase.active()) {
-            throw new IllegalStateException("성능 테스트가 이미 돌고 있습니다 — " + running.id + " (" + running.phase.label() + ")");
+            throw new IllegalStateException("성능 시험이 이미 돌고 있습니다 — " + running.id + " ("
+                    + (running.kind == Kind.RAMP ? "임계 성능" : "기본 부하") + " · " + running.phase.label() + ")");
         }
         if (progress.isRunning() || scheduler.isRunning()) {
             throw new IllegalStateException("다른 배치가 실행 중입니다 — 끝난 뒤 다시 시작하십시오");
         }
-        Run run = new Run(LocalDateTime.now().format(RUN_ID), req);
-        current = run;
-        runner.submit(() -> execute(run));
-        return snapshot(run);
     }
 
     /** 중단 — 준비 중이면 측정을 건너뛰고, 측정 중이면 처리 중인 건만 끝내고 멈춘다. */
@@ -185,7 +253,7 @@ public class PerfRunService {
         Map<String, Object> out = new LinkedHashMap<>();
         if (run == null || !run.phase.active()) {
             out.put("accepted", false);
-            out.put("message", "돌고 있는 성능 테스트가 없습니다");
+            out.put("message", "돌고 있는 성능 시험이 없습니다");
             return out;
         }
         run.cancelRequested = true;
@@ -217,6 +285,7 @@ public class PerfRunService {
     private Map<String, Object> snapshot(Run run) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("runId", run.id);
+        m.put("kind", run.kind.name());
         m.put("phase", run.phase.name());
         m.put("phaseLabel", run.phase.label());
         m.put("active", run.phase.active());
@@ -228,85 +297,363 @@ public class PerfRunService {
         if (run.phase == Phase.RUNNING || run.phase == Phase.VERIFYING || run.phase == Phase.CLEANING) {
             m.put("progress", progress.snapshot());
         }
+        if (run.kind == Kind.RAMP) {
+            m.put("plan", run.plan);
+            m.put("stepNo", run.stepNo);
+            m.put("workers", run.workers);
+            m.put("steps", List.copyOf(run.steps));
+            m.put("bestStep", run.bestStep);
+            m.put("stopReason", run.stopReason);
+            if (run.phase == Phase.RUNNING && meter.isActive()) {
+                // 지금 단계의 XVARM 확보 대기 — 한도에 얼마나 다가갔는지 화면이 본다
+                m.put("liveAcquireMs", Math.round(Math.max(meter.oldestInFlightMs(PerfStage.ACQUIRE),
+                        meter.maxMs(PerfStage.ACQUIRE))));
+                m.put("liveSttErrors", meter.errors(PerfStage.STT));
+            }
+        }
         m.put("result", run.result);
         m.put("error", run.error);
         return m;
     }
 
-    private void execute(Run run) {
-        PerfRequest req = run.req;
+    // ── 기본 부하 검증 ───────────────────────────────────────────────────────
+
+    private void executeBasic(Run run) {
+        PerfRequest req = (PerfRequest) run.req;
         Map<String, Object> result = null;
         String error = null;
         try {
-            // ── 준비 ────────────────────────────────────────────────────
-            long p0 = System.currentTimeMillis();
-            run.to(Phase.PREPARING, "로컬 산출물 정리 · 지난 시험 출력 삭제");
-            Map<String, Object> cleared = mock.clearLocalFiles();
-            int oldOutputs = outputStore.deleteTestOutputs();
-            run.to(Phase.PREPARING, "SIM 데이터 %d건 생성 (접견 %d · 전화 %d) — %s"
-                    .formatted(req.count(), req.meetCount(), req.phoneCount(), dbKind.label()));
-            Map<String, Object> seed = sim.seedPerf(req.meetCount(), req.phoneCount());
-            long prepareMs = System.currentTimeMillis() - p0;
+            Prepared prep = prepare(run, req.meetCount(), req.phoneCount(), req.sttPercent(), true, "");
             if (run.cancelRequested) {
                 throw new CanceledBeforeRun();
             }
-
-            // ── 측정 ────────────────────────────────────────────────────
             run.to(Phase.RUNNING, "워커 %d개로 %d건 처리 중".formatted(req.concurrency(), req.count()));
-            latency.apply(req.mode(), req.latencyMs(), req.latencyMaxMs() == null ? req.latencyMs() : req.latencyMaxMs(),
-                    req.sttTimeoutMs() == null ? 0L : req.sttTimeoutMs());
-            LocalDate today = LocalDate.now();
-            BatchWindow window = BatchWindow.manual(today.minusDays(1).atStartOfDay(), today.atStartOfDay());
-
-            List<MemoryPoolMXBean> heapPools = ManagementFactory.getMemoryPoolMXBeans().stream()
-                    .filter(p -> p.getType() == MemoryType.HEAP && p.isValid()).toList();
-            heapPools.forEach(MemoryPoolMXBean::resetPeakUsage);
-            long heapStart = heapUsed();
-            poolPeak.reset();
-            meter.begin();
-            VoiceBatchResult r;
-            try {
-                r = collect.run(window, null, "PERF", true, ResumeMode.FULL, null, req.concurrency());
-            } finally {
-                meter.end();
-                latency.clear();
-            }
-            long heapEnd = heapUsed();
-            long heapPeak = heapPools.stream().mapToLong(p -> {
-                MemoryUsage u = p.getPeakUsage();
-                return u == null ? 0L : u.getUsed();
-            }).sum();
-
-            // ── 검증 ────────────────────────────────────────────────────
-            run.to(Phase.VERIFYING, "로그 컬렉터에서 T1·T2·T4 되읽기 — " + r.execId());
-            Map<String, Object> checks = checks(r);
-
-            result = summarize(run, r, seed, cleared, oldOutputs, prepareMs, checks,
-                    new long[] {heapStart, heapEnd, heapPeak});
+            Measured d = measure(Load.of(req), req.concurrency(), null, run);
+            run.to(Phase.VERIFYING, "로그 컬렉터에서 T1·T2·T4 되읽기 — " + d.result().execId());
+            Map<String, Object> checks = checks(d.result());
+            result = summarizeBasic(run, req, d, prep, checks);
         } catch (CanceledBeforeRun e) {
             error = "측정 전에 중단했습니다";
         } catch (Exception e) {
             error = rootMessage(e);
             log.warn("[Perf] {} 실패 — {}", run.id, error, e);
-        } finally {
-            latency.clear();
-            meter.end();
+        }
+        finish(run, result, error, HISTORY_FILE);
+    }
+
+    private Map<String, Object> summarizeBasic(Run run, PerfRequest req, Measured d, Prepared prep,
+                                               Map<String, Object> checks) {
+        VoiceBatchResult r = d.result();
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("runId", run.id);
+        m.put("at", LocalDateTime.now().withNano(0).toString());
+        m.put("scenario", req.scenario());
+        m.put("count", req.count());
+        m.put("meetCount", req.meetCount());
+        m.put("phoneCount", req.phoneCount());
+        m.put("sttPercent", req.sttPercent());
+        m.put("sourceSttPhones", prep.seed().get("sourceSttPhones"));
+        m.put("concurrency", req.concurrency());
+        m.put("latency", Load.of(req).describe());
+        m.put("sttTimeoutMs", req.sttTimeoutMs());
+        common(m, prep);
+        m.putAll(batchMetrics(d));
+        m.put("checks", checks);
+        m.put("prepareSec", round(prep.prepareMs() / 1000d, 1));
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("idempotencyMarkers", prep.cleared().get("idempotencyMarkers"));
+        p.put("sttTempFiles", prep.cleared().get("sttTempFiles"));
+        p.put("oldOutputDirs", prep.oldOutputs());
+        p.put("filesWritten", ((List<?>) prep.seed().getOrDefault("files", List.of())).size());
+        m.put("prepare", p);
+        return m;
+    }
+
+    // ── 임계 성능 시험 (워커 램프업) ──────────────────────────────────────────
+
+    private void executeRamp(Run run) {
+        RampRequest req = (RampRequest) run.req;
+        List<Integer> plan = run.plan;
+        String stop = null;
+        String error = null;
+        Prepared first = null;
+        Double bestSec = null;
+        int sinceBest = 0;
+        try {
+            for (int i = 0; i < plan.size(); i++) {
+                if (run.cancelRequested) {
+                    stop = "사용자가 중지했습니다";
+                    break;
+                }
+                int w = plan.get(i);
+                run.stepNo = i + 1;
+                run.workers = w;
+                String tag = "단계 %d/%d · 워커 %d".formatted(i + 1, plan.size(), w);
+                Prepared prep = prepare(run, req.meetCount(), req.phoneCount(), req.sttPercent(), i == 0, tag + " — ");
+                if (first == null) {
+                    first = prep;
+                }
+                if (run.cancelRequested) {
+                    stop = "사용자가 중지했습니다";
+                    break;
+                }
+                run.to(Phase.RUNNING, "%s 로 %d건 처리 중".formatted(tag, req.count()));
+                Measured d = measure(Load.of(req), w, req, run);
+                run.to(Phase.VERIFYING, tag + " — 로그 컬렉터 되읽기");
+                Map<String, Object> checks = checks(d.result());
+
+                Map<String, Object> step = stepRow(i + 1, w, d, checks, prep);
+                VoiceBatchResult r = d.result();
+                // 도중에 끊긴 단계는 건수가 달라 응답 시간을 비교하지 않는다
+                if (!r.canceled()) {
+                    double sec = r.elapsedMs() / 1000d;
+                    if (bestSec == null || sec < bestSec) {
+                        bestSec = sec;
+                        sinceBest = 0;
+                        run.bestStep = i + 1;
+                    } else {
+                        sinceBest++;
+                    }
+                }
+                step.put("sinceBest", sinceBest);
+                run.steps.add(step);
+
+                if (d.earlyStop() != null) {
+                    stop = d.earlyStop();
+                    break;
+                }
+                if (run.cancelRequested) {
+                    stop = "사용자가 중지했습니다";
+                    break;
+                }
+                if (sinceBest >= req.patience()) {
+                    Map<String, Object> best = run.steps.get(run.bestStep - 1);
+                    stop = "최저 응답(워커 %s · %s초) 이후 %d회 연속 개선 없음 — 포화로 판단"
+                            .formatted(best.get("workers"), best.get("totalSec"), sinceBest);
+                    break;
+                }
+            }
+            if (stop == null) {
+                stop = "최대 워커 %d 까지 모든 단계를 마쳤습니다".formatted(plan.get(plan.size() - 1));
+            }
+        } catch (Exception e) {
+            error = rootMessage(e);
+            log.warn("[Perf] {} 임계 시험 실패 — {}", run.id, error, e);
+        }
+        run.stopReason = stop != null ? stop : error;
+
+        Map<String, Object> result = null;
+        if (!run.steps.isEmpty() && first != null) {
+            result = new LinkedHashMap<>();
+            result.put("runId", run.id);
+            result.put("at", LocalDateTime.now().withNano(0).toString());
+            result.put("request", req);
+            result.put("plan", plan);
+            result.put("latency", Load.of(req).describe());
+            common(result, first);
+            result.put("steps", List.copyOf(run.steps));
+            result.put("bestStep", run.bestStep);
+            if (run.bestStep > 0) {
+                Map<String, Object> b = run.steps.get(run.bestStep - 1);
+                Map<String, Object> best = new LinkedHashMap<>();
+                best.put("step", run.bestStep);
+                best.put("workers", b.get("workers"));
+                best.put("totalSec", b.get("totalSec"));
+                best.put("tps", b.get("tps"));
+                result.put("best", best);
+            }
+            result.put("stopReason", stop == null ? error : stop);
+        }
+        finish(run, result, result == null ? (error == null ? stop : error) : null, RAMP_HISTORY_FILE);
+    }
+
+    /** 임계 시험의 표 한 줄. */
+    private Map<String, Object> stepRow(int no, int workers, Measured d, Map<String, Object> checks, Prepared prep) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("step", no);
+        m.put("workers", workers);
+        m.putAll(batchMetrics(d));
+        m.put("acquireAvgMs", stageAvg(d.stages(), PerfStage.ACQUIRE));
+        m.put("acquireMaxMs", round(d.acquireMaxMs(), 1));
+        m.put("sttAvgMs", stageAvg(d.stages(), PerfStage.STT));
+        m.put("sttErrors", d.sttErrors());
+        m.put("checksOk", checks.get("available") == Boolean.TRUE ? checks.get("ok") : null);
+        m.put("sourceSttPhones", prep.seed().get("sourceSttPhones"));
+        m.put("earlyStop", d.earlyStop());
+        return m;
+    }
+
+    private static Object stageAvg(List<Map<String, Object>> stages, PerfStage s) {
+        return stages.stream().filter(x -> s.name().equals(x.get("key"))).findFirst().map(x -> x.get("avgMs")).orElse(0d);
+    }
+
+    /**
+     * 조기 종료 조건 — 단계 도중에 반 초마다, 끝난 뒤에 한 번 더 본다.
+     *
+     * @return 걸렸으면 사유, 아니면 null
+     */
+    private String breach(RampRequest req) {
+        if (req.acquireLimitSec() > 0) {
+            double worst = Math.max(meter.oldestInFlightMs(PerfStage.ACQUIRE), meter.maxMs(PerfStage.ACQUIRE));
+            if (worst > req.acquireLimitSec() * 1000d) {
+                return "XVARM 확보 대기 %.1f초 — 한도 %d초 초과".formatted(worst / 1000d, req.acquireLimitSec());
+            }
+        }
+        long errs = meter.errors(PerfStage.STT);
+        if (Boolean.TRUE.equals(req.stopOnSttError()) && errs > 0) {
+            return "STT 에러·타임아웃 %d건 발생".formatted(errs);
+        }
+        return null;
+    }
+
+    /** 단계 도중 조기 종료를 지켜보는 스레드 — 걸리면 배치를 멈추고 사유를 남긴다. */
+    private final class Monitor implements AutoCloseable {
+        private final Thread thread;
+        private volatile String reason;
+
+        Monitor(RampRequest req, Run run) {
+            thread = new Thread(() -> {
+                try {
+                    while (!Thread.currentThread().isInterrupted()) {
+                        String why = breach(req);
+                        if (why != null) {
+                            reason = why;
+                            run.message = "조기 종료 — " + why + " · 처리 중인 건을 끝내고 멈춥니다";
+                            log.warn("[Perf] {} 조기 종료 — {}", run.id, why);
+                            progress.cancel();
+                            return;
+                        }
+                        Thread.sleep(MONITOR_MS);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "perf-ramp-monitor");
+            thread.setDaemon(true);
+            thread.start();
         }
 
-        // ── 정리 — 공용 DB 의 SIM 행을 지운다 (실패·중단이어도) ─────────────────
+        String reason() {
+            return reason;
+        }
+
+        @Override
+        public void close() {
+            thread.interrupt();
+            try {
+                thread.join(2_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    // ── 공통 엔진 ───────────────────────────────────────────────────────────
+
+    /** 준비 — 로컬 산출물을 비우고 SIM 데이터를 만든다. 지난 시험 출력 폴더는 회차 처음에만 지운다. */
+    private Prepared prepare(Run run, int meet, int phone, int sttPercent, boolean deleteOutputs, String tag) {
+        long p0 = System.currentTimeMillis();
+        run.to(Phase.PREPARING, tag + "로컬 산출물 정리" + (deleteOutputs ? " · 지난 시험 출력 삭제" : ""));
+        Map<String, Object> cleared = mock.clearLocalFiles();
+        int oldOutputs = deleteOutputs ? outputStore.deleteTestOutputs() : 0;
+        run.to(Phase.PREPARING, "%sSIM 데이터 %d건 생성 (접견 %d · 전화 %d · 기 STT %d%%) — %s"
+                .formatted(tag, meet + phone, meet, phone, sttPercent, dbKind.label()));
+        Map<String, Object> seed = sim.seedPerf(meet, phone, sttPercent);
+        return new Prepared(seed, cleared, oldOutputs, System.currentTimeMillis() - p0);
+    }
+
+    /**
+     * 측정 — 워커 {@code workers} 개로 어제 하루 창을 처리하며 힙·원천 풀·단계 시간을 잰다.
+     *
+     * @param guard 임계 시험이면 조기 종료 조건, 기본 부하면 null
+     */
+    private Measured measure(Load load, int workers, RampRequest guard, Run run) {
+        latency.apply(load.mode(), load.meetMs(), load.phoneMs(), load.jitterPercent(),
+                load.timeoutMs() == null ? 0L : load.timeoutMs());
+        LocalDate today = LocalDate.now();
+        BatchWindow window = BatchWindow.manual(today.minusDays(1).atStartOfDay(), today.atStartOfDay());
+        List<MemoryPoolMXBean> heapPools = ManagementFactory.getMemoryPoolMXBeans().stream()
+                .filter(p -> p.getType() == MemoryType.HEAP && p.isValid()).toList();
+        heapPools.forEach(MemoryPoolMXBean::resetPeakUsage);
+        long heapStart = heapUsed();
+        poolPeak.reset();
+        meter.begin();
+        VoiceBatchResult r;
+        String early = null;
+        try (Monitor mon = guard == null ? null : new Monitor(guard, run)) {
+            r = collect.run(window, null, "PERF", true, ResumeMode.FULL, null, workers);
+            if (mon != null) {
+                early = mon.reason();
+            }
+        } finally {
+            meter.end();
+            latency.clear();
+        }
+        if (guard != null && early == null) {
+            early = breach(guard);   // 반 초 사이에 끝난 건이 넘었을 수 있다
+        }
+        long heapEnd = heapUsed();
+        long heapPeak = heapPools.stream().mapToLong(p -> {
+            MemoryUsage u = p.getPeakUsage();
+            return u == null ? 0L : u.getUsed();
+        }).sum();
+        return new Measured(r, heapStart, heapEnd, heapPeak, meter.snapshot(), poolPeak.snapshot(),
+                meter.maxMs(PerfStage.ACQUIRE), meter.errors(PerfStage.STT), early);
+    }
+
+    /** 배치 한 번의 처리량·결과·자원 — 기본 부하 결과와 임계 시험 표가 같이 쓴다. */
+    private static Map<String, Object> batchMetrics(Measured d) {
+        VoiceBatchResult r = d.result();
+        List<FileProcOutcome> done = r.outcomes().stream().filter(o -> o.status() != ProcStatus.SKIPPED).toList();
+        double sec = r.elapsedMs() / 1000d;
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("execId", r.execId());
+        m.put("execStsCd", r.execStsCd());
+        m.put("canceled", r.canceled());
+        m.put("totalSec", round(sec, 2));
+        m.put("avgMs", done.isEmpty() ? 0d : round(done.stream().mapToLong(FileProcOutcome::elapsedMs).average().orElse(0d), 1));
+        m.put("tps", sec <= 0 ? 0d : round(r.successCnt() / sec, 3));
+        m.put("total", r.targetCnt());
+        m.put("success", r.successCnt());
+        m.put("fail", r.failCnt());
+        m.put("timeout", done.stream().filter(PerfRunService::isTimeout).count());
+        m.put("skipped", r.skippedCnt());
+        m.put("stages", d.stages());
+        Map<String, Object> h = new LinkedHashMap<>();
+        h.put("startMb", mb(d.heapStart()));
+        h.put("endMb", mb(d.heapEnd()));
+        h.put("peakMb", mb(d.heapPeak()));
+        h.put("maxMb", mb(Runtime.getRuntime().maxMemory()));
+        m.put("heap", h);
+        m.put("hikari", d.hikari());
+        return m;
+    }
+
+    /** 두 결과가 같이 싣는 환경 — STT 엔진 · 모드 · DB. */
+    private void common(Map<String, Object> m, Prepared prep) {
+        m.put("sttMode", sttClient.mode());
+        m.put("modes", modes());
+        m.put("env", deployEnv.snapshot().get("kind"));
+        m.put("db", prep.seed().get("db"));
+    }
+
+    /** 끝 — 공용 DB 의 SIM 행을 지우고(실패·중단이어도) 이력을 남긴다. */
+    private void finish(Run run, Map<String, Object> result, String error, String historyFile) {
         run.to(Phase.CLEANING, "공용 DB 의 SIM 행 · 원본 더미 파일 삭제");
         Map<String, Object> cleanup = cleanup();
         if (result != null) {
             result.put("cleanup", cleanup);
-            appendHistory(result);
+            appendHistory(historyFile, result);
         }
         run.result = result;
         run.error = error;
         run.finishedAt = System.currentTimeMillis();
-        if (error == null) {
-            run.to(Phase.DONE, "완료 — %s · %.1f TPS · %s초".formatted(result.get("execStsCd"), result.get("tps"), result.get("totalSec")));
-        } else {
+        if (error != null) {
             run.to(Phase.FAILED, error);
+        } else if (run.kind == Kind.RAMP) {
+            run.to(Phase.DONE, "완료 — " + result.get("stopReason"));
+        } else {
+            run.to(Phase.DONE, "완료 — %s · %s TPS · %s초".formatted(result.get("execStsCd"), result.get("tps"), result.get("totalSec")));
         }
     }
 
@@ -330,64 +677,6 @@ public class PerfRunService {
             out.put("error", e.getMessage());
         }
         return out;
-    }
-
-    // ── 결과 ──────────────────────────────────────────────────────────────
-
-    private Map<String, Object> summarize(Run run, VoiceBatchResult r, Map<String, Object> seed,
-                                          Map<String, Object> cleared, int oldOutputs, long prepareMs,
-                                          Map<String, Object> checks, long[] heap) {
-        PerfRequest req = run.req;
-        List<FileProcOutcome> done = r.outcomes().stream().filter(o -> o.status() != ProcStatus.SKIPPED).toList();
-        long timeouts = done.stream().filter(PerfRunService::isTimeout).count();
-        double sec = r.elapsedMs() / 1000d;
-
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("runId", run.id);
-        m.put("at", LocalDateTime.now().withNano(0).toString());
-        m.put("scenario", req.scenario());
-        m.put("count", req.count());
-        m.put("concurrency", req.concurrency());
-        Map<String, Object> lat = new LinkedHashMap<>();
-        lat.put("mode", req.latencyMode());
-        lat.put("ms", req.latencyMs());
-        lat.put("maxMs", req.latencyMaxMs());
-        m.put("latency", lat);
-        m.put("sttTimeoutMs", req.sttTimeoutMs());
-        m.put("sttMode", sttClient.mode());
-        m.put("modes", modes());
-        m.put("env", deployEnv.snapshot().get("kind"));
-        m.put("db", seed.get("db"));
-
-        m.put("execId", r.execId());
-        m.put("execStsCd", r.execStsCd());
-        m.put("canceled", r.canceled());
-        m.put("totalSec", round(sec, 2));
-        m.put("avgMs", done.isEmpty() ? 0d : round(done.stream().mapToLong(FileProcOutcome::elapsedMs).average().orElse(0d), 1));
-        m.put("tps", sec <= 0 ? 0d : round(r.successCnt() / sec, 2));
-        m.put("total", r.targetCnt());
-        m.put("success", r.successCnt());
-        m.put("fail", r.failCnt());
-        m.put("timeout", timeouts);
-        m.put("skipped", r.skippedCnt());
-        m.put("stages", meter.snapshot());
-
-        Map<String, Object> h = new LinkedHashMap<>();
-        h.put("startMb", mb(heap[0]));
-        h.put("endMb", mb(heap[1]));
-        h.put("peakMb", mb(heap[2]));
-        h.put("maxMb", mb(Runtime.getRuntime().maxMemory()));
-        m.put("heap", h);
-        m.put("hikari", poolPeak.snapshot());
-        m.put("checks", checks);
-        m.put("prepareSec", round(prepareMs / 1000d, 1));
-        Map<String, Object> prep = new LinkedHashMap<>();
-        prep.put("idempotencyMarkers", cleared.get("idempotencyMarkers"));
-        prep.put("sttTempFiles", cleared.get("sttTempFiles"));
-        prep.put("oldOutputDirs", oldOutputs);
-        prep.put("filesWritten", ((List<?>) seed.getOrDefault("files", List.of())).size());
-        m.put("prepare", prep);
-        return m;
     }
 
     /** STT 타임아웃 — MOCK 의 가상 타임아웃이거나, NPU 호출의 읽기 타임아웃. */
@@ -469,28 +758,32 @@ public class PerfRunService {
         m.put("sttMode", sttClient.mode());
         m.put("sttTimeoutSec", props.stt().timeoutSec());
         m.put("mockLatency", latency.snapshot());
-        m.put("minCount", PerfRequest.MIN_COUNT);
-        m.put("maxCount", PerfRequest.MAX_COUNT);
+        m.put("minTotal", PerfRequest.MIN_TOTAL);
+        m.put("maxTotal", PerfRequest.MAX_TOTAL);
         m.put("maxLatencyMs", PerfRequest.MAX_LATENCY_MS);
+        m.put("maxTimeoutMs", PerfRequest.MAX_TIMEOUT_MS);
         m.put("concurrencyOptions", PerfRequest.CONCURRENCY_OPTIONS);
+        m.put("rampMaxWorkers", RampRequest.MAX_WORKERS);
+        m.put("rampMaxSteps", RampRequest.MAX_STEPS);
         m.put("batchConcurrency", defaultConcurrency);
         m.put("maxFilesPerRun", props.batch().maxFilesPerRun());
         m.put("modes", modes());
         m.put("env", deployEnv.snapshot().get("kind"));
         m.put("db", dbKind.label());
-        m.put("historyFile", historyFile().toString().replace('\\', '/'));
+        m.put("historyFile", historyFile(HISTORY_FILE).toString().replace('\\', '/'));
+        m.put("rampHistoryFile", historyFile(RAMP_HISTORY_FILE).toString().replace('\\', '/'));
         m.put("active", isActive());
         return m;
     }
 
     // ── 이력 ──────────────────────────────────────────────────────────────
 
-    private Path historyFile() {
-        return Path.of(dirs.baseDir(), "perf", HISTORY_FILE);
+    private Path historyFile(String name) {
+        return Path.of(dirs.baseDir(), "perf", name);
     }
 
-    private synchronized void appendHistory(Map<String, Object> result) {
-        Path f = historyFile();
+    private synchronized void appendHistory(String name, Map<String, Object> result) {
+        Path f = historyFile(name);
         try {
             Files.createDirectories(f.getParent());
             String line = objectMapper.writeValueAsString(result) + "\n";
@@ -500,9 +793,27 @@ public class PerfRunService {
         }
     }
 
-    /** 이력 — 최근 것이 앞. 한 줄이 깨져 있어도 나머지는 읽는다. */
-    public synchronized Map<String, Object> history() {
-        Path f = historyFile();
+    /** 기본 부하 검증 이력 — 최근 것이 앞. */
+    public Map<String, Object> history() {
+        return readHistory(HISTORY_FILE);
+    }
+
+    /** 임계 성능 시험 이력 — 최근 것이 앞. */
+    public Map<String, Object> rampHistory() {
+        return readHistory(RAMP_HISTORY_FILE);
+    }
+
+    public Map<String, Object> clearHistory() {
+        return deleteHistory(HISTORY_FILE);
+    }
+
+    public Map<String, Object> clearRampHistory() {
+        return deleteHistory(RAMP_HISTORY_FILE);
+    }
+
+    /** 한 줄이 깨져 있어도 나머지는 읽는다. */
+    private synchronized Map<String, Object> readHistory(String name) {
+        Path f = historyFile(name);
         List<Map<String, Object>> items = new ArrayList<>();
         int broken = 0;
         if (Files.isRegularFile(f)) {
@@ -530,8 +841,8 @@ public class PerfRunService {
         return out;
     }
 
-    public synchronized Map<String, Object> clearHistory() {
-        Path f = historyFile();
+    private synchronized Map<String, Object> deleteHistory(String name) {
+        Path f = historyFile(name);
         Map<String, Object> out = new LinkedHashMap<>();
         int n = 0;
         try {

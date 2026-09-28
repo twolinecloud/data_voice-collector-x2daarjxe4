@@ -19,10 +19,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 성능 테스트 한 회차 — 준비(SIM N건) → 측정(워커 N개) → 정리(SIM 삭제) → 이력 한 줄.
+ * 성능 시험 — 기본 부하 한 회차와 임계 시험(워커 램프업)을 끝까지 돌린다.
  *
- * <p>로컬 H2 · 브로커 MOCK · 로그 컬렉터 미연동으로 끝까지 돌린다. 정합성 점검은 컬렉터가 없어
- * '확인 불가' 로 남는 것이 맞다.</p>
+ * <p>로컬 H2 · 브로커 MOCK · 로그 컬렉터 미연동. 정합성 점검은 컬렉터가 없어 '확인 불가' 로 남는 것이 맞다.</p>
  */
 @SpringBootTest
 @ActiveProfiles("local")
@@ -53,53 +52,38 @@ class PerfRunServiceTest {
     private SimulationDataService sim;
 
     @Test
-    @DisplayName("10건 · 워커 2 · 고정 50ms — 전건 성공, 단계별 시간·힙·Hikari 가 잡히고, SIM 은 지워지고, 이력이 한 줄 남는다")
-    void oneRunEndToEnd() throws Exception {
+    @DisplayName("기본 부하 — 접견 5 · 전화 5 · 기 STT 20% · 워커 2 — 전건 성공, 1건은 STT Bypass, SIM 은 지워지고 이력이 한 줄 남는다")
+    @SuppressWarnings("unchecked")
+    void basicRunEndToEnd() throws Exception {
         perf.clearHistory();
 
-        Map<String, Object> started = perf.start(new PerfRequest("A", 10, 2, "FIXED", 50L, null, null));
+        Map<String, Object> started = perf.start(new PerfRequest("A", 5, 5, 20, 2, "FIXED", 60L, 40L, null, null));
         assertThat(started.get("active")).isEqualTo(true);
-        // 도는 동안에는 두 번째를 받지 않는다
-        assertThatThrownBy(() -> perf.start(new PerfRequest("A", 10, 2, "FIXED", 50L, null, null)))
-                .isInstanceOf(IllegalStateException.class);
+        assertThat(started.get("kind")).isEqualTo("BASIC");
+        // 도는 동안에는 두 번째(임계 시험도)를 받지 않는다
+        assertThatThrownBy(() -> perf.startRamp(null)).isInstanceOf(IllegalStateException.class);
 
         Map<String, Object> cur = waitDone();
         assertThat(cur.get("phase")).as("오류: %s", cur.get("error")).isEqualTo("DONE");
 
-        @SuppressWarnings("unchecked")
         Map<String, Object> r = (Map<String, Object>) cur.get("result");
         assertThat(r.get("total")).isEqualTo(10);
         assertThat(r.get("success")).isEqualTo(10);
-        assertThat(r.get("timeout")).isEqualTo(0L);
+        assertThat(r.get("sourceSttPhones")).isEqualTo(1);
         assertThat((Double) r.get("tps")).isPositive();
-        assertThat((Double) r.get("avgMs")).isPositive();
 
-        @SuppressWarnings("unchecked")
         List<Map<String, Object>> stages = (List<Map<String, Object>>) r.get("stages");
         assertThat(stages).extracting(s -> s.get("key"))
                 .containsExactly("ACQUIRE", "DECRYPT", "FORMAT", "STT", "TEMP", "SAVE");
-        Map<String, Object> stt = stages.get(3);
-        assertThat(((Number) stt.get("count")).intValue()).isEqualTo(9);   // 전화 3번은 보라미 STT 재사용
-        assertThat((Double) stt.get("avgMs")).isGreaterThanOrEqualTo(50d);
+        assertThat(((Number) stages.get(3).get("count")).intValue()).as("기 STT 1건은 STT 를 부르지 않는다").isEqualTo(9);
+        assertThat((Double) stages.get(3).get("avgMs")).isGreaterThanOrEqualTo(40d);
+        assertThat((Integer) ((Map<String, Object>) r.get("hikari")).get("peak")).isGreaterThanOrEqualTo(1);
+        assertThat(((Map<String, Object>) r.get("checks")).get("available")).isEqualTo(false);
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> heap = (Map<String, Object>) r.get("heap");
-        assertThat((Double) heap.get("peakMb")).isPositive();
-        @SuppressWarnings("unchecked")
-        Map<String, Object> hikari = (Map<String, Object>) r.get("hikari");
-        assertThat((Integer) hikari.get("peak")).as("대상 조회가 원천 풀에서 연결을 빌린다").isGreaterThanOrEqualTo(1);
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> checks = (Map<String, Object>) r.get("checks");
-        assertThat(checks.get("available")).as("로그 컬렉터 미연동").isEqualTo(false);
-
-        // 정리 — SIM 행이 남지 않는다
-        @SuppressWarnings("unchecked")
         Map<String, Object> rows = (Map<String, Object>) sim.status().get("rows");
         assertThat(rows.get("meet")).isEqualTo(0);
         assertThat(rows.get("phone")).isEqualTo(0);
 
-        // 이력 — 한 줄, PV 파일에
         Map<String, Object> h = perf.history();
         assertThat(h.get("total")).isEqualTo(1);
         assertThat(Files.isRegularFile(Path.of((String) h.get("file")))).isTrue();
@@ -107,14 +91,57 @@ class PerfRunServiceTest {
     }
 
     @Test
-    @DisplayName("범위 밖이면 시작하지 않는다 — 301건")
+    @DisplayName("임계 시험 — 워커 1 → 2 → 4 · 단계마다 같은 6건 — 모든 단계를 마치고 최적 워커와 이력이 남는다")
+    @SuppressWarnings("unchecked")
+    void rampRunsEveryStep() throws Exception {
+        perf.clearRampHistory();
+
+        Map<String, Object> started = perf.startRamp(new RampRequest(3, 3, 0, "FIXED", 150L, 150L, null, null,
+                1, "MULTIPLY", 2, 4, 3, 0, true));
+        assertThat(started.get("kind")).isEqualTo("RAMP");
+        assertThat((List<Integer>) started.get("plan")).containsExactly(1, 2, 4);
+
+        Map<String, Object> cur = waitDone();
+        assertThat(cur.get("phase")).as("오류: %s", cur.get("error")).isEqualTo("DONE");
+        Map<String, Object> r = (Map<String, Object>) cur.get("result");
+        List<Map<String, Object>> steps = (List<Map<String, Object>>) r.get("steps");
+        assertThat(steps).extracting(s -> s.get("workers")).containsExactly(1, 2, 4);
+        assertThat(steps).allSatisfy(s -> assertThat(s.get("success")).isEqualTo(6));
+        assertThat(steps).allSatisfy(s -> assertThat(s).containsKeys("acquireAvgMs", "acquireMaxMs", "tps", "totalSec"));
+        assertThat((String) r.get("stopReason")).contains("모든 단계");
+        // STT 150ms × 6건 — 워커 1 은 0.9초 넘게, 워커 4 는 그보다 빨라야 한다
+        assertThat((Double) steps.get(2).get("totalSec")).isLessThan((Double) steps.get(0).get("totalSec"));
+        assertThat(((Map<String, Object>) r.get("best")).get("workers")).isNotNull();
+
+        assertThat(perf.rampHistory().get("total")).isEqualTo(1);
+        Map<String, Object> rows = (Map<String, Object>) sim.status().get("rows");
+        assertThat(rows.get("meet")).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("임계 시험 조기 종료 — STT 타임아웃이 나면 첫 단계에서 멈춘다")
+    @SuppressWarnings("unchecked")
+    void rampStopsOnSttError() throws Exception {
+        perf.startRamp(new RampRequest(3, 3, 0, "FIXED", 400L, 400L, null, 100L,
+                1, "MULTIPLY", 2, 8, 3, 0, true));
+
+        Map<String, Object> cur = waitDone();
+        Map<String, Object> r = (Map<String, Object>) cur.get("result");
+        List<Map<String, Object>> steps = (List<Map<String, Object>>) r.get("steps");
+        assertThat(steps).hasSize(1);
+        assertThat((String) r.get("stopReason")).contains("STT");
+        assertThat(((Number) steps.get(0).get("sttErrors")).longValue()).isPositive();
+    }
+
+    @Test
+    @DisplayName("범위 밖이면 시작하지 않는다 — 합계 301건")
     void rejectsOutOfRange() {
-        assertThatThrownBy(() -> perf.start(new PerfRequest("A", 301, 4, "FIXED", 0L, null, null)))
+        assertThatThrownBy(() -> perf.start(new PerfRequest("A", 151, 150, 3, 4, "FIXED", 0L, 0L, null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     private Map<String, Object> waitDone() throws InterruptedException {
-        long until = System.currentTimeMillis() + 90_000;
+        long until = System.currentTimeMillis() + 120_000;
         Map<String, Object> cur = perf.current();
         while (System.currentTimeMillis() < until) {
             cur = perf.current();
@@ -123,6 +150,6 @@ class PerfRunServiceTest {
             }
             Thread.sleep(100);
         }
-        throw new AssertionError("성능 테스트가 90초 안에 끝나지 않았다 — " + cur);
+        throw new AssertionError("성능 시험이 120초 안에 끝나지 않았다 — " + cur);
     }
 }
