@@ -323,7 +323,7 @@
   .pf-tile .n small { font-size:.7rem; font-weight:400; color:#6c757d; margin-left:.1rem; }
   .pf-tile .s { font-size:.68rem; color:#6c757d; font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .pf-stages { display:grid; gap:.3rem; margin-bottom:.6rem; }
-  .pf-stage { display:grid; grid-template-columns:3.6rem minmax(0,1fr) 9.5rem; gap:.5rem; align-items:center; font-size:.75rem; }
+  .pf-stage { display:grid; grid-template-columns:5rem minmax(0,1fr) 9.5rem; gap:.5rem; align-items:center; font-size:.75rem; }
   .pf-stage .lb { font-weight:600; }
   .pf-stage .bo { height:.8rem; background:#e9ecef; border-radius:.4rem; overflow:hidden; }
   .pf-stage .b { height:100%; border-radius:.4rem; background:#0d6efd; min-width:2px; }
@@ -339,6 +339,8 @@
   .pf-tps span { position:relative; padding-left:.3rem; font-family:var(--mono); font-weight:600; }
   .pf-ph.warn { color:#664d03; background:#fff3cd; }
   .pf-help { font-size:.68rem; color:#6c757d; margin-top:.15rem; }
+  /* 한 줄 설명 — 칸 안에 두면 두 줄로 깨지고 옆 칸 높이까지 흔들어 행 아래에 한 줄로 둔다 */
+  .pf-help-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:-.2rem; }
   /* 5번 탭 — 임계 성능 테스트 */
   .rp-banner { font-size:.8rem; border-radius:.4rem; padding:.45rem .65rem; margin-bottom:.6rem; background:#f1f3f5; color:#343a40; }
   .rp-banner.stop { background:#fff3cd; color:#664d03; } .rp-banner.ok { background:#d1e7dd; color:#0f5132; }
@@ -606,17 +608,21 @@
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
       <strong>① 기본 부하 검증 설정 <span class="hint fw-normal">— 일일 한도 300건 안에서 실제 파이프라인(조회 → 확보 → 복호화 → 포맷 → STT → 저장 → T1·T2·T4)을 태웁니다. STT 만 MOCK</span></strong>
-      <span id="pf-engine" class="pf-engine">STT 엔진 확인 중…</span>
+      <span class="d-flex align-items-center gap-3 flex-wrap ms-auto">
+        <span class="form-check form-switch m-0" title="끄면(기본) 고속 모드 — STT 를 기다리지 않고 즉시 통과시키고, 리포트에 건당 처리 시간을 워커에 나눈 가상 시간을 더합니다">
+          <input class="form-check-input" type="checkbox" role="switch" id="pf-real">
+          <label class="form-check-label small" for="pf-real">실제 대기 모드 (Real Sleep)</label>
+        </span>
+        <span id="pf-engine" class="pf-engine">STT 엔진 확인 중…</span>
+      </span>
     </div>
     <div class="card-body py-2" id="pf-box">
       <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
         <span class="hint me-1">시나리오</span>
-        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="A" title="접견 150 · 전화 150 · 워커 4 · STT 지연 0ms">A 순수 처리량</button>
-        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="B" title="접견 8 · 전화 8 · 워커 8 · 접견 180초/전화 120초 ±50% · 타임아웃 150초">B NPU 지연</button>
-        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="C" title="접견 4 · 전화 4 · 접견 180초/전화 120초 · 동시성 1 → 2 → 4 → 8 을 한 번씩">C 동시성 비교</button>
-        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="D" title="접견 150 · 전화 150 · 워커 16 · 접견 180초/전화 120초">D 최대 부하</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="A" title="접견 150 · 전화 150 · 워커 4 · 건당 처리 시간 접견 180초 / 전화 120초 · 타임아웃 없음">A 기본 검증</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="B" title="접견 150 · 전화 150 · 워커 4 · 접견 180초 / 전화 120초 ±50% · 타임아웃 200초">B STT 장애/타임아웃 검증</button>
       </div>
-      <div class="hint mb-2" id="pf-scen-desc">시나리오를 고르면 아래 칸이 채워집니다 — 값을 직접 바꿔도 됩니다. 기본값은 현실 지연(접견 180초 · 전화 120초)입니다.</div>
+      <div class="hint mb-2" id="pf-scen-desc">시나리오를 고르면 아래 칸이 채워집니다 — 값을 직접 바꿔도 됩니다. 워커 수를 바꿔 가며 비교하는 시험은 5번 탭(임계 성능 테스트)에서 합니다.</div>
       <div class="row g-2 align-items-end mb-2">
         <div class="col-4 col-md-2"><label class="hint" for="pf-meet">접견 건수</label>
           <input type="number" class="form-control form-control-sm" id="pf-meet" value="150" min="0" max="300" step="1"></div>
@@ -625,24 +631,24 @@
         <div class="col-4 col-md-2"><span class="hint">합계 (2~300)</span>
           <div class="form-control form-control-sm bg-light font-monospace" id="pf-total">300건</div></div>
         <div class="col-6 col-md-3"><label class="hint" for="pf-sttpct">기 STT 존재 비율 (%)</label>
-          <input type="number" class="form-control form-control-sm" id="pf-sttpct" value="3" min="0" max="100" step="1">
-          <div class="pf-help">전화 중 이 비율에 원천 <code>TELP_STT_FLPTH_NM</code> 을 채워 STT 를 건너뜁니다(Bypass)</div></div>
+          <input type="number" class="form-control form-control-sm" id="pf-sttpct" value="3" min="0" max="100" step="1"></div>
         <div class="col-6 col-md-3"><label class="hint" for="pf-conc">동시성 (워커 수)</label>
           <select class="form-select form-select-sm" id="pf-conc">
             <option value="1">1</option><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="16">16</option>
           </select></div>
       </div>
+      <div class="row mb-2"><div class="col-12 col-md-6 offset-md-6 pf-help pf-help-line" title="전화 건 중 이 비율만큼 원천 DB(TELP_STT_FLPTH_NM)에 더미를 채워 STT 단계를 스킵(Bypass)합니다.">전화 건 중 이 비율만큼 원천 DB(TELP_STT_FLPTH_NM)에 더미를 채워 STT 단계를 스킵(Bypass)합니다.</div></div>
       <div class="row g-2 align-items-start mb-2">
-        <div class="col-6 col-md-2"><label class="hint" for="pf-lmode">STT 가상 지연 방식</label>
+        <div class="col-6 col-md-2"><label class="hint" for="pf-lmode">건당 STT 처리 시간 방식</label>
           <select class="form-select form-select-sm" id="pf-lmode">
             <option value="FIXED" selected>고정</option><option value="RANGE">범위 (± 변동 폭)</option>
           </select></div>
-        <div class="col-6 col-md-3"><label class="hint" for="pf-lat-meet">접견 STT 지연 (ms)</label>
+        <div class="col-6 col-md-3"><label class="hint" for="pf-lat-meet">접견 건당 STT 처리 시간 (ms)</label>
           <input type="number" class="form-control form-control-sm" id="pf-lat-meet" value="180000" min="0" max="600000" step="10000">
-          <div class="pf-help">접견 (평균 접견 15분 → 예상 변환 180초)</div></div>
-        <div class="col-6 col-md-3"><label class="hint" for="pf-lat-phone">전화 STT 지연 (ms)</label>
+          <div class="pf-help">접견 (평균 접견 15분 → 건당 처리 시간 180초)</div></div>
+        <div class="col-6 col-md-3"><label class="hint" for="pf-lat-phone">전화 건당 STT 처리 시간 (ms)</label>
           <input type="number" class="form-control form-control-sm" id="pf-lat-phone" value="120000" min="0" max="600000" step="10000">
-          <div class="pf-help">전화 (평균 통화 5분 → 예상 변환 120초)</div></div>
+          <div class="pf-help">전화 (평균 통화 5분 → 건당 처리 시간 120초)</div></div>
         <div class="col-6 col-md-1 pf-range d-none"><label class="hint" for="pf-jitter">± 변동 (%)</label>
           <input type="number" class="form-control form-control-sm" id="pf-jitter" value="50" min="0" max="100" step="5"></div>
         <div class="col-6 col-md-3"><label class="hint" for="pf-timeout">STT 타임아웃 (ms)</label>
@@ -735,53 +741,63 @@
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
       <strong>① 임계 성능 테스트 — 워커 램프업 <span class="hint fw-normal">— 워커를 단계마다 늘려 <b>같은 건수</b>를 처리하며 포화 지점을 찾습니다. 단계마다 SIM 데이터를 새로 만듭니다</span></strong>
-      <span id="rp-engine" class="pf-engine">STT 엔진 확인 중…</span>
+      <span class="d-flex align-items-center gap-3 flex-wrap ms-auto">
+        <span class="form-check form-switch m-0" title="끄면(기본) 고속 모드 — STT 를 기다리지 않고 즉시 통과시키고, 리포트에 건당 처리 시간을 워커에 나눈 가상 시간을 더합니다">
+          <input class="form-check-input" type="checkbox" role="switch" id="rp-real">
+          <label class="form-check-label small" for="rp-real">실제 대기 모드 (Real Sleep)</label>
+        </span>
+        <span id="rp-engine" class="pf-engine">STT 엔진 확인 중…</span>
+      </span>
     </div>
     <div class="card-body py-2" id="rp-box">
       <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
         <span class="hint me-1">프리셋</span>
-        <button class="btn btn-sm btn-outline-dark rp-preset" data-s="real">현실 지연 램프업</button>
+        <button class="btn btn-sm btn-outline-dark rp-preset" data-s="real">기본 램프업 (+1)</button>
         <button class="btn btn-sm btn-outline-dark rp-preset" data-s="fast">빠른 탐색 (STT 0ms)</button>
       </div>
       <div class="hint mb-2" id="rp-scen-desc">응답 시간 = 단계 총 소요(같은 건수를 처리한 시간). 워커를 늘려도 더 빨라지지 않으면 어딘가(브로커·NFS·DB)가 포화된 것입니다.</div>
       <div class="rp-sec hint fw-semibold mb-1">워커 램프업</div>
       <div class="row g-2 align-items-end mb-2">
         <div class="col-6 col-md-2"><label class="hint" for="rp-w0">시작 워커</label>
-          <input type="number" class="form-control form-control-sm" id="rp-w0" value="4" min="1" max="64"></div>
+          <input type="number" class="form-control form-control-sm" id="rp-w0" value="1" min="1" max="64"></div>
         <div class="col-6 col-md-2"><label class="hint" for="rp-smode">증가 방식</label>
           <select class="form-select form-select-sm" id="rp-smode">
-            <option value="MULTIPLY" selected>× 배수</option><option value="ADD">+ 더하기</option>
+            <option value="ADD" selected>+ 더하기</option><option value="MULTIPLY">× 배수</option>
           </select></div>
-        <div class="col-6 col-md-2"><label class="hint" id="rp-svalue-lbl" for="rp-svalue">증가 배수 (×N)</label>
-          <input type="number" class="form-control form-control-sm" id="rp-svalue" value="2" min="1" max="32"></div>
+        <div class="col-6 col-md-2"><label class="hint" id="rp-svalue-lbl" for="rp-svalue">증가 값 (+N)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-svalue" value="1" min="1" max="32"></div>
         <div class="col-6 col-md-2"><label class="hint" for="rp-max">최대 워커 (≤64)</label>
           <input type="number" class="form-control form-control-sm" id="rp-max" value="32" min="1" max="64"></div>
         <div class="col-12 col-md-4"><div class="hint" id="rp-plan">계획 —</div></div>
       </div>
-      <div class="rp-sec hint fw-semibold mb-1">단계마다 처리할 데이터 · STT 가상 지연</div>
-      <div class="row g-2 align-items-start mb-2">
-        <div class="col-4 col-md-1"><label class="hint" for="rp-meet">접견</label>
-          <input type="number" class="form-control form-control-sm" id="rp-meet" value="16" min="0" max="300"></div>
-        <div class="col-4 col-md-1"><label class="hint" for="rp-phone">전화</label>
-          <input type="number" class="form-control form-control-sm" id="rp-phone" value="16" min="0" max="300"></div>
-        <div class="col-4 col-md-1"><span class="hint">합계</span>
-          <div class="form-control form-control-sm bg-light font-monospace" id="rp-total">32건</div></div>
-        <div class="col-6 col-md-1"><label class="hint" for="rp-sttpct">기 STT %</label>
+      <div class="rp-sec hint fw-semibold mb-1">단계마다 처리할 데이터</div>
+      <div class="row g-2 align-items-end mb-1">
+        <div class="col-4 col-md-2"><label class="hint" for="rp-meet">접견 건수</label>
+          <input type="number" class="form-control form-control-sm" id="rp-meet" value="150" min="0" max="300"></div>
+        <div class="col-4 col-md-2"><label class="hint" for="rp-phone">전화 건수</label>
+          <input type="number" class="form-control form-control-sm" id="rp-phone" value="150" min="0" max="300"></div>
+        <div class="col-4 col-md-2"><span class="hint">합계 (2~300)</span>
+          <div class="form-control form-control-sm bg-light font-monospace" id="rp-total">300건</div></div>
+        <div class="col-6 col-md-3"><label class="hint" for="rp-sttpct">기 STT 존재 비율 (%)</label>
           <input type="number" class="form-control form-control-sm" id="rp-sttpct" value="3" min="0" max="100"></div>
-        <div class="col-6 col-md-2"><label class="hint" for="rp-lmode">지연 방식</label>
+      </div>
+      <div class="row mb-2"><div class="col-12 col-md-6 offset-md-6 pf-help pf-help-line" title="전화 건 중 이 비율만큼 원천 DB(TELP_STT_FLPTH_NM)에 더미를 채워 STT 단계를 스킵(Bypass)합니다.">전화 건 중 이 비율만큼 원천 DB(TELP_STT_FLPTH_NM)에 더미를 채워 STT 단계를 스킵(Bypass)합니다.</div></div>
+      <div class="rp-sec hint fw-semibold mb-1">건당 STT 처리 시간</div>
+      <div class="row g-2 align-items-start mb-2">
+        <div class="col-6 col-md-2"><label class="hint" for="rp-lmode">건당 STT 처리 시간 방식</label>
           <select class="form-select form-select-sm" id="rp-lmode">
             <option value="FIXED" selected>고정</option><option value="RANGE">범위 (± 변동 폭)</option>
           </select></div>
-        <div class="col-6 col-md-2"><label class="hint" for="rp-lat-meet">접견 STT 지연 (ms)</label>
+        <div class="col-6 col-md-3"><label class="hint" for="rp-lat-meet">접견 건당 STT 처리 시간 (ms)</label>
           <input type="number" class="form-control form-control-sm" id="rp-lat-meet" value="180000" min="0" max="600000" step="10000">
-          <div class="pf-help">평균 접견 15분 → 180초</div></div>
-        <div class="col-6 col-md-2"><label class="hint" for="rp-lat-phone">전화 STT 지연 (ms)</label>
+          <div class="pf-help">접견 (평균 접견 15분 → 건당 처리 시간 180초)</div></div>
+        <div class="col-6 col-md-3"><label class="hint" for="rp-lat-phone">전화 건당 STT 처리 시간 (ms)</label>
           <input type="number" class="form-control form-control-sm" id="rp-lat-phone" value="120000" min="0" max="600000" step="10000">
-          <div class="pf-help">평균 통화 5분 → 120초</div></div>
-        <div class="col-6 col-md-1 pf-range d-none"><label class="hint" for="rp-jitter">± (%)</label>
+          <div class="pf-help">전화 (평균 통화 5분 → 건당 처리 시간 120초)</div></div>
+        <div class="col-6 col-md-1 pf-range d-none"><label class="hint" for="rp-jitter">± 변동 (%)</label>
           <input type="number" class="form-control form-control-sm" id="rp-jitter" value="50" min="0" max="100" step="5"></div>
-        <div class="col-6 col-md-1"><label class="hint" for="rp-timeout">타임아웃 ms</label>
-          <input type="number" class="form-control form-control-sm" id="rp-timeout" placeholder="없음" min="100" max="1800000" step="10000"></div>
+        <div class="col-6 col-md-3"><label class="hint" for="rp-timeout">STT 타임아웃 (ms)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-timeout" placeholder="비우면 적용 안 함" min="100" max="1800000" step="10000"></div>
       </div>
       <div class="rp-sec hint fw-semibold mb-1">조기 종료 (Early Exit)</div>
       <div class="row g-2 align-items-end mb-2">
@@ -2437,25 +2453,21 @@ $('btn-log-tall').onclick = (e) => {
 //   (준비 → 측정 → 검증 → 정리), 화면은 GET /api/v1/mock/perf/runs/current 를 읽어 그린다.
 //   두 탭은 같은 엔진을 쓰고 한 번에 하나만 돈다 — 폴링도 하나이고 kind(BASIC·RAMP)로 그릴 탭을 가른다.
 
-// 시나리오 프리셋 — 현실 지연(전화 120초 · 접견 180초) 기준. 건수는 끝나는 시간을 보고 정했다(예상 시간 참고).
+// 시나리오 프리셋 — 건당 STT 처리 시간(접견 180초 · 전화 120초) 기준. 워커 수별 비교는 5번 탭이 맡는다.
 const PF_SCEN = {
-  A: { label:'A 순수 처리량', meet:150, phone:150, stt:3, conc:4, mode:'FIXED', meetMs:0, phoneMs:0, jitter:50, timeout:null,
-       desc:'STT 지연 0ms · 일일 한도 300건 — STT 를 뺀 나머지(확보·복호화·저장)의 한계입니다. 어느 단계가 병목인지 막대로 드러납니다. 합격: 실패 0 · T2 RUNNING 0 · T4 = 처리 건수' },
-  B: { label:'B NPU 지연', meet:8, phone:8, stt:3, conc:8, mode:'RANGE', meetMs:180000, phoneMs:120000, jitter:50, timeout:150000,
-       desc:'접견 90~270초 · 전화 60~180초(±50%) · 타임아웃 150초 — 약 절반이 타임아웃으로 실패합니다. 타임아웃 건이 T4 에 사유와 함께 남고, 배치가 PARTIAL 로 닫히며, T2 에 RUNNING 이 남지 않는지 봅니다' },
-  C: { label:'C 동시성 비교', meet:4, phone:4, stt:0, conc:1, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
-       desc:'접견 180초 · 전화 120초 고정 · 8건 — 동시성 1 → 2 → 4 → 8 로 한 번씩 돌리면 ③ 이력에 쌓여 TPS 를 나란히 비교합니다. 한 회차가 끝날 때마다 다음 동시성을 골라 둡니다(동시성 1 은 약 20분)' },
-  D: { label:'D 최대 부하', meet:150, phone:150, stt:3, conc:16, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
-       desc:'일일 한도 300건 · 워커 16 · 현실 지연 — 하루치가 몇 분에 끝나는지, Peak Heap 과 Hikari 최고 연결 수를 봅니다(약 45분). 합격(제안): Peak Heap < 최대 힙의 70%' },
+  A: { label:'A 기본 검증', meet:150, phone:150, stt:3, conc:4, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
+       desc:'일일 한도 300건 · 워커 4 · 건당 처리 시간 접견 180초 / 전화 120초 · 타임아웃 없음 — 하루치가 끝까지 도는지, 단계별 시간·자원·정합성을 봅니다. 합격: 실패 0 · T2 RUNNING 0 · T4 = 처리 건수' },
+  B: { label:'B STT 장애/타임아웃 검증', meet:150, phone:150, stt:3, conc:4, mode:'RANGE', meetMs:180000, phoneMs:120000, jitter:50, timeout:200000,
+       desc:'접견 90~270초 · 전화 60~180초(±50%) · 타임아웃 200초 — 접견 약 40%가 타임아웃 실패로 T4 에 남고 배치가 PARTIAL 로 닫히는지, T2 에 RUNNING 이 남지 않는지 봅니다. 타임아웃은 정상 접견(180초)보다 길게 두어 정상 건까지 실패하는 모순을 피했습니다' },
 };
 // 임계 시험 프리셋
 const RP_SCEN = {
-  real: { label:'현실 지연 램프업', meet:16, phone:16, stt:3, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
-          start:4, smode:'MULTIPLY', svalue:2, max:32, patience:3, acq:60, sttStop:true,
-          desc:'단계마다 32건 · 워커 4 → 8 → 16 → 32 · 접견 180초/전화 120초 — 실제 변환 시간 아래에서 워커를 늘려도 확보(브로커·NFS)가 버티는지 봅니다(약 40분)' },
-  fast: { label:'빠른 탐색 (STT 0ms)', meet:30, phone:30, stt:3, mode:'FIXED', meetMs:0, phoneMs:0, jitter:50, timeout:null,
+  real: { label:'기본 램프업 (+1)', meet:150, phone:150, stt:3, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
+          start:1, smode:'ADD', svalue:1, max:32, patience:3, acq:60, sttStop:true,
+          desc:'단계마다 300건 · 워커 1 → 2 → 3 → … → 32 · 건당 처리 시간 접견 180초 / 전화 120초 — 워커를 하나씩 늘려 확보(브로커·NFS)가 버티는 지점을 찾습니다. 최저 응답 뒤 3회 개선이 없으면 멈춥니다' },
+  fast: { label:'빠른 탐색 (STT 0ms)', meet:150, phone:150, stt:3, mode:'FIXED', meetMs:0, phoneMs:0, jitter:50, timeout:null,
           start:1, smode:'MULTIPLY', svalue:2, max:32, patience:3, acq:30, sttStop:true,
-          desc:'단계마다 60건 · 워커 1 → 2 → … → 32 · STT 0ms — 확보·복호화·저장만 남겨 브로커(추출 스레드 4개)·NFS 의 포화 지점을 빨리 찾습니다' },
+          desc:'단계마다 300건 · 워커 1 → 2 → 4 → … → 32 · STT 0ms — 확보·복호화·저장만 남겨 브로커(추출 스레드 4개)·NFS 의 포화 지점을 빨리 찾습니다' },
 };
 const PF_PHASES = [['PREPARING', '준비'], ['RUNNING', '측정'], ['VERIFYING', '검증'], ['CLEANING', '정리']];
 let PF_SCEN_KEY = null;
@@ -2507,7 +2519,7 @@ function trackAvg(base, mode, jitter, to) {
 }
 /** 기 STT 비율로 STT 를 건너뛸 전화 건수 — 서버와 같은 반올림. */
 function bypassCount(phone, pct) { return Math.round(phone * (pct || 0) / 100); }
-/** STT 지연만으로 걸리는 대략의 시간(초) — 건별 대기의 합 ÷ 워커. 확보·복호화·저장은 따로다. */
+/** 건당 STT 처리 시간만으로 걸리는 대략의 시간(초) — 건별 시간의 합 ÷ 워커. 확보·복호화·저장은 따로다. */
 function sttEstimateSec(meet, phone, pct, workers, mode, meetMs, phoneMs, jitter, to) {
   const work = meet * trackAvg(meetMs, mode, jitter, to) + (phone - bypassCount(phone, pct)) * trackAvg(phoneMs, mode, jitter, to);
   return work / Math.max(1, workers) / 1000;
@@ -2529,7 +2541,7 @@ function engineBadge(id) {
   const i = PF_INFO, e = $(id);
   if (!i) { e.className = 'pf-engine'; e.textContent = 'STT 엔진 — 조회 실패'; return; }
   e.className = 'pf-engine ' + (i.sttMode || '');
-  e.textContent = i.sttMode === 'NPU' ? 'STT 엔진: NPU — 실제 부하 (가상 지연 무시)' : `STT 엔진: ${i.sttMode} — 가상 지연`;
+  e.textContent = i.sttMode === 'NPU' ? 'STT 엔진: NPU — 실제 부하 (건당 처리 시간 무시)' : `STT 엔진: ${i.sttMode} — 건당 처리 시간`;
   e.title = `voice.stt.mode=${i.sttMode} · 1번 탭에서 바꿀 수 있습니다`;
 }
 function sharedDb() { const i = PF_INFO || {}; return i.env === 'K8S' || /postgre/i.test(i.db || ''); }
@@ -2558,7 +2570,7 @@ function pfScenarioLabel() {
   const same = pfNum('pf-meet') === s.meet && pfNum('pf-phone') === s.phone && pfNum('pf-sttpct') === s.stt
     && $('pf-lmode').value === s.mode && pfNum('pf-lat-meet') === s.meetMs && pfNum('pf-lat-phone') === s.phoneMs
     && (s.mode !== 'RANGE' || pfNum('pf-jitter') === s.jitter) && pfNum('pf-timeout') === s.timeout
-    && (PF_SCEN_KEY === 'C' || Number($('pf-conc').value) === s.conc);
+    && Number($('pf-conc').value) === s.conc;
   return s.label + (same ? '' : ' (수정)');
 }
 
@@ -2575,6 +2587,7 @@ function pfRequest() {
     phoneLatencyMs: pfNum('pf-lat-phone'),
     jitterPercent: range ? pfNum('pf-jitter') : 0,
     sttTimeoutMs: pfNum('pf-timeout'),
+    realSleep: $('pf-real').checked,
   };
 }
 
@@ -2600,11 +2613,14 @@ function pfEstimate() {
   const q = pfRequest();
   const n = (q.meetCount || 0) + (q.phoneCount || 0);
   if (!n) { $('pf-est').textContent = ''; return; }
-  if (PF_INFO?.sttMode === 'NPU') { $('pf-est').textContent = '실 NPU — 가상 지연은 쓰지 않습니다'; return; }
+  if (PF_INFO?.sttMode === 'NPU') { $('pf-est').textContent = '실 NPU — 건당 처리 시간·고속 모드는 쓰지 않습니다'; return; }
   const sec = sttEstimateSec(q.meetCount || 0, q.phoneCount || 0, q.sttPercent, q.concurrency, q.latencyMode,
     q.meetLatencyMs || 0, q.phoneLatencyMs || 0, q.jitterPercent, q.sttTimeoutMs);
   const by = bypassCount(q.phoneCount || 0, q.sttPercent);
-  $('pf-est').textContent = `예상 — STT 대기만 약 ${fmtSec(sec)} (${n}건 ÷ 워커 ${q.concurrency}${by ? ` · 기 STT ${by}건은 건너뜀` : ''}) · 확보·복호화·저장 시간은 별도`;
+  const basis = `${n}건 ÷ 워커 ${q.concurrency}${by ? ` · 기 STT ${by}건은 건너뜀` : ''}`;
+  $('pf-est').textContent = q.realSleep
+    ? `실제 대기 모드 — STT 를 실제로 약 ${fmtSec(sec)} 기다립니다 (${basis}) · 확보·복호화·저장 시간은 별도`
+    : `고속 모드 — STT 를 기다리지 않고 즉시 통과합니다. 리포트에 가상 STT 시간(약 ${fmtSec(sec)})을 더합니다 (${basis})`;
 }
 
 function pfRenderInfo() {
@@ -2631,9 +2647,9 @@ async function pfStart() {
     <div class="pop-lead">${esc(req.scenario)} — 접견 ${req.meetCount} · 전화 ${req.phoneCount}건 · 워커 ${req.concurrency}개</div>
     <ul class="pop-list">
       <li><span class="lbl">STT:</span> <b>${esc(i.sttMode || '?')}</b>${i.sttMode === 'NPU'
-          ? ' — 가상 지연은 쓰지 않고 <b>실제 NPU</b> 로 요청이 갑니다'
+          ? ' — 건당 처리 시간은 쓰지 않고 <b>실제 NPU</b> 로 요청이 갑니다'
           : ` · ${esc(latText({ mode:req.latencyMode, meetMs:req.meetLatencyMs, phoneMs:req.phoneLatencyMs, jitterPercent:req.jitterPercent }))}`
-            + ` · 타임아웃 ${req.sttTimeoutMs ? fmtMs(req.sttTimeoutMs) : '없음'}`}</li>
+            + ` · 타임아웃 ${req.sttTimeoutMs ? fmtMs(req.sttTimeoutMs) : '없음'} · <b>${req.realSleep ? '실제 대기 모드' : '고속 모드'}</b>`}</li>
       <li><span class="lbl">준비:</span> 로컬 산출물·지난 시험 출력 삭제 → SIM ${req.meetCount + req.phoneCount}건 생성 (기 STT ${by}건) · ${esc(i.db || '')}</li>
       <li><span class="lbl">예상:</span> ${esc($('pf-est').textContent.replace('예상 — ', ''))}</li>
       <li><span class="lbl">끝나면:</span> SIM 행·원본 더미 파일 자동 삭제 · 로그(TST)와 STT 출력은 남습니다</li>
@@ -2662,7 +2678,7 @@ async function pfCancel() {
 /** 성능 시험이 도는 동안 — 두 탭의 입력·시작 버튼과 다른 탭의 배치 버튼을 막는다. */
 function pfLock(on, kind) {
   document.body.classList.toggle('pf-running', on);
-  document.querySelectorAll('#pf-box input, #pf-box select, .pf-preset, #rp-box input, #rp-box select, .rp-preset')
+  document.querySelectorAll('#pf-box input, #pf-box select, .pf-preset, #rp-box input, #rp-box select, .rp-preset, #pf-real, #rp-real')
     .forEach(el => el.disabled = on);
   [['pf-start', 'BASIC', '기본 부하 검증 시작'], ['rp-start', 'RAMP', '임계 성능 테스트 시작']].forEach(([id, k, label]) => {
     const b = $(id);
@@ -2772,25 +2788,10 @@ async function pfFinish(c) {
         <li><span class="lbl">정합성:</span> ${pfCheckBadge(r.checks)}</li>
       </ul>
       <div class="sub mt-2">② 결과 리포트 · ③ 실행 이력에 남았습니다.</div>`);
-    pfNextC(r);
   } else {
     log(`✖ 기본 부하 검증 실패 — ${c.error || c.message}`, 'er');
     showPopup('기본 부하 검증 실패', `<div class="pop-lead">${esc(c.error || c.message || '')}</div>
       <div class="hint mt-2">SIM 데이터 정리는 시도했습니다. 남아 있으면 [시뮬레이션 데이터 초기화] 로 지우십시오.</div>`);
-  }
-}
-
-/** C 동시성 비교 — 끝나면 다음 동시성을 골라 둔다(1 → 2 → 4 → 8). 자동으로 돌리지는 않는다. */
-function pfNextC(r) {
-  if (PF_SCEN_KEY !== 'C') return;
-  const seq = [1, 2, 4, 8];
-  const i = seq.indexOf(Number(r.concurrency));
-  if (i >= 0 && i < seq.length - 1) {
-    $('pf-conc').value = String(seq[i + 1]);
-    $('pf-scen-desc').innerHTML = `<b>C 동시성 비교</b> — 동시성 ${r.concurrency} 완료. 다음 비교를 위해 <b>동시성 ${seq[i + 1]}</b> 로 바꿔 두었습니다 — [기본 부하 검증 시작] 을 누르십시오.`;
-    pfEstimate();
-  } else if (i === seq.length - 1) {
-    $('pf-scen-desc').innerHTML = '<b>C 동시성 비교</b> — 1 · 2 · 4 · 8 을 모두 돌렸습니다. ③ 이력의 TPS 막대로 비교하십시오(16 도 보려면 동시성을 직접 고르십시오).';
   }
 }
 
@@ -2800,9 +2801,10 @@ function pfRenderReport(r) {
   const h = r.heap || {}, k = r.hikari || {}, c = r.checks || {}, m = r.modes || {};
   const tile = (key, n, sub) => `<div class="pf-tile"><div class="k">${key}</div><div class="n">${n}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
   const tiles = [
-    tile('총 소요 시간', esc(fmtSec(r.totalSec)), `준비 ${r.prepareSec}초는 제외`),
-    tile('평균 처리 시간', esc(fmtMs(r.avgMs)), '건당 확보 ~ 저장'),
-    tile('TPS', fmtTps(r.tps), '성공 건수 ÷ 총 소요'),
+    tile('총 소요 시간', esc(fmtSec(r.totalSec)), r.fastForward
+      ? `실제 ${esc(fmtSec(r.realSec))} + 가상 STT ${esc(fmtSec(r.virtualSttSec))}` : `실제 대기 · 준비 ${r.prepareSec}초 제외`),
+    tile('평균 처리 시간', esc(fmtMs(r.avgMs)), r.fastForward ? '건당 확보 ~ 저장 (STT 가상)' : '건당 확보 ~ 저장'),
+    tile('TPS', fmtTps(r.tps), r.fastForward === undefined ? '성공 건수 ÷ 총 소요' : '처리 건수 ÷ 총 소요'),
     tile('전체 / 성공 / 실패 / 타임아웃',
       `${r.total} / <span class="ok-t">${r.success}</span> / <span class="ng-t">${r.fail}</span> / <span class="to-t">${r.timeout}</span>`,
       `${esc(r.execStsCd || '')}${r.skipped ? ' · 건너뜀 ' + r.skipped : ''}`),
@@ -2813,7 +2815,7 @@ function pfRenderReport(r) {
   //   동시 처리에서 건이 빠진 것처럼 읽혔다.
   const st = r.stages || [];
   const max = Math.max(1, ...st.map(x => Number(x.avgMs) || 0));
-  const bars = st.map(x => `<div class="pf-stage"><span class="lb">${esc(x.label)}</span>
+  const bars = st.map(x => `<div class="pf-stage"><span class="lb">${esc(x.label)}${x.virtual ? ' <span class="hint">(가상)</span>' : ''}</span>
       <div class="bo"><div class="b ${esc(x.key)}" style="width:${Math.max(0.5, (Number(x.avgMs) || 0) * 100 / max)}%"></div></div>
       <span class="v">${esc(fmtMs(x.avgMs))}</span></div>`).join('');
   let checks;
@@ -2832,7 +2834,8 @@ function pfRenderReport(r) {
   }
   const data = r.meetCount !== undefined
     ? `접견 ${r.meetCount} · 전화 ${r.phoneCount}건 (기 STT ${r.sttPercent}% → ${r.sourceSttPhones ?? 0}건)` : `${r.count}건`;
-  const cond = [esc(r.scenario), data, `워커 ${r.concurrency}`, `지연 ${esc(latText(r.latency))}`,
+  const mode = r.fastForward === undefined ? '' : (r.fastForward ? '고속 모드' : '실제 대기 모드');
+  const cond = [esc(r.scenario), data, `워커 ${r.concurrency}`, `건당 STT ${esc(latText(r.latency))}`, mode,
     `타임아웃 ${r.sttTimeoutMs ? fmtMs(r.sttTimeoutMs) : '없음'}`, `STT ${esc(r.sttMode)}`,
     `조회 ${esc(m.source)} · 브로커 ${esc(m.broker)} · 복호화 ${esc(m.decrypt)}`, esc(r.db || '')].join(' · ');
   const cl = r.cleanup || {};
@@ -2892,7 +2895,8 @@ function pfRenderHistory() {
       <td><span class="ok-t">${x.success}</span> / <span class="ng-t">${x.fail}</span> / <span class="to-t">${x.timeout}</span></td>
       <td class="text-end">${x.heap?.peakMb ?? ''}</td>
       <td class="text-end">${x.hikari?.peak ?? ''}</td>
-      <td><span class="vf-b ${esc(x.execStsCd || 'x')}">${esc(x.execStsCd || '—')}</span> ${pfCheckBadge(x.checks)}</td>
+      <td><span class="vf-b ${esc(x.execStsCd || 'x')}">${esc(x.execStsCd || '—')}</span> ${pfCheckBadge(x.checks)}
+        <span class="vf-b x" title="${x.fastForward ? `실제 ${fmtSec(x.realSec)} + 가상 STT ${fmtSec(x.virtualSttSec)}` : '실제로 기다림'}">${x.fastForward ? '고속' : '실제'}</span></td>
       <td class="font-monospace">${esc(x.execId || '')}</td></tr>`).join('');
 }
 
@@ -2915,7 +2919,7 @@ function pfCsv() {
   if (!PF_HIST.length) { log('내보낼 기본 부하 검증 이력이 없습니다', 'wr'); return; }
   const stageKeys = ['ACQUIRE', 'DECRYPT', 'FORMAT', 'STT', 'TEMP', 'SAVE'];
   const head = ['실행ID', '시각', '시나리오', '접견', '전화', '기STT%', '기STT건', '동시성', '지연방식', '접견지연ms', '전화지연ms', '변동폭%',
-    '타임아웃ms', 'STT', '총소요초', '평균ms', 'TPS', '전체', '성공', '실패', '타임아웃', '건너뜀', '배치상태',
+    '타임아웃ms', 'STT', '모드', '실제초', '가상STT초', '총소요초', '평균ms', 'TPS', '전체', '성공', '실패', '타임아웃', '건너뜀', '배치상태',
     '확보ms', '복호화ms', '포맷ms', 'STTms', '중간ms', '저장ms',
     '힙시작MB', '힙종료MB', '힙PeakMB', '힙최대MB', 'HikariPeak', 'T2 RUNNING', 'T4행', '정합성',
     'EXEC_ID', '조회', '브로커', '복호화', 'DB'];
@@ -2924,7 +2928,7 @@ function pfCsv() {
     const c = x.checks || {}, h = x.heap || {}, m = x.modes || {}, l = x.latency || {};
     return [x.runId, x.at, x.scenario, x.meetCount ?? '', x.phoneCount ?? x.count, x.sttPercent ?? '', x.sourceSttPhones ?? '',
       x.concurrency, l.mode, l.meetMs ?? l.ms, l.phoneMs ?? l.ms, l.jitterPercent ?? '', x.sttTimeoutMs ?? '', x.sttMode,
-      x.totalSec, x.avgMs, x.tps, x.total, x.success, x.fail, x.timeout, x.skipped, x.execStsCd,
+      x.fastForward ? '고속' : '실제', x.realSec ?? x.totalSec, x.virtualSttSec ?? 0, x.totalSec, x.avgMs, x.tps, x.total, x.success, x.fail, x.timeout, x.skipped, x.execStsCd,
       ...stageKeys.map(k => st[k] ?? ''),
       h.startMb, h.endMb, h.peakMb, h.maxMb, x.hikari?.peak ?? '', c.t2Running ?? '', c.t4Rows ?? '',
       c.available === false ? '확인불가' : (c.ok ? 'OK' : 'NG'), x.execId, m.source, m.broker, m.decrypt, x.db];
@@ -2976,6 +2980,7 @@ function rpRequest() {
     jitterPercent: range ? pfNum('rp-jitter') : 0, sttTimeoutMs: pfNum('rp-timeout'),
     startWorkers: pfNum('rp-w0'), stepMode: $('rp-smode').value, stepValue: pfNum('rp-svalue'), maxWorkers: pfNum('rp-max'),
     patience: pfNum('rp-patience'), acquireLimitSec: pfNum('rp-acq') ?? 0, stopOnSttError: $('rp-sttstop').checked,
+    realSleep: $('rp-real').checked,
   };
 }
 
@@ -2986,7 +2991,9 @@ function rpPlanPreview() {
   if (PF_INFO?.sttMode !== 'NPU' && n) {
     const sec = plan.reduce((s, w) => s + sttEstimateSec(q.meetCount || 0, q.phoneCount || 0, q.sttPercent, w, q.latencyMode,
       q.meetLatencyMs || 0, q.phoneLatencyMs || 0, q.jitterPercent, q.sttTimeoutMs), 0);
-    est = ` · 전 단계를 다 돌면 STT 대기만 약 ${fmtSec(sec)} (조기 종료되면 더 짧다 · 확보·복호화·준비 시간 별도)`;
+    est = q.realSleep
+      ? ` · 실제 대기 모드 — 전 단계를 다 돌면 STT 대기만 약 ${fmtSec(sec)} (조기 종료되면 더 짧다 · 확보·복호화·준비 시간 별도)`
+      : ` · 고속 모드 — STT 를 기다리지 않습니다(실제 소요는 파이프라인 시간뿐). 단계마다 가상 STT 시간을 리포트에 더합니다`;
   }
   $('rp-plan').innerHTML = `계획 — 워커 <b>${plan.join(' → ')}</b> (${plan.length}단계${plan.length > 20 ? ' · 20단계 초과 — 줄이십시오' : ''})`
     + ` · 단계마다 ${n}건${esc(est)}`;
@@ -3014,7 +3021,7 @@ async function rpStart() {
     <ul class="pop-list">
       <li><span class="lbl">STT:</span> <b>${esc(i.sttMode || '?')}</b>${i.sttMode === 'NPU' ? ' — 실제 NPU 로 요청이 갑니다'
           : ` · ${esc(latText({ mode:req.latencyMode, meetMs:req.meetLatencyMs, phoneMs:req.phoneLatencyMs, jitterPercent:req.jitterPercent }))}`
-            + ` · 타임아웃 ${req.sttTimeoutMs ? fmtMs(req.sttTimeoutMs) : '없음'}`}</li>
+            + ` · 타임아웃 ${req.sttTimeoutMs ? fmtMs(req.sttTimeoutMs) : '없음'} · <b>${req.realSleep ? '실제 대기 모드' : '고속 모드'}</b>`}</li>
       <li><span class="lbl">조기 종료:</span> 최저 응답 뒤 ${req.patience}회 연속 개선 없음 · XVARM 확보 대기
         ${req.acquireLimitSec ? req.acquireLimitSec + '초 초과' : '(보지 않음)'} · STT 에러·타임아웃 ${req.stopOnSttError ? '즉시 중단' : '무시'}</li>
       <li><span class="lbl">단계마다:</span> 로컬 산출물 정리 → SIM ${req.meetCount + req.phoneCount}건 생성 → 측정 → 검증. 끝나면 SIM 자동 삭제</li>
@@ -3061,7 +3068,8 @@ function rpStopBanner(reason, bestStep, steps, active) {
     return;
   }
   const early = /초과|STT|포화|중지/.test(reason);
-  el.innerHTML = `<div class="rp-banner ${early ? 'stop' : 'ok'}"><b>${early ? '⏹ 조기 종료' : '✔ 완료'}</b> — ${esc(reason)}${bestHtml ? `<br>${bestHtml}` : ''}</div>`;
+  const ff = steps.length && steps[0].fastForward ? ' · <span class="hint">고속 모드 — 응답 시간에 가상 STT 포함(* 표시)</span>' : '';
+  el.innerHTML = `<div class="rp-banner ${early ? 'stop' : 'ok'}"><b>${early ? '⏹ 조기 종료' : '✔ 완료'}</b> — ${esc(reason)}${bestHtml ? `<br>${bestHtml}${ff}` : ff}</div>`;
 }
 
 /** 단계 표 — 차트의 표 보기이기도 하다(색만으로 읽지 않게 값은 여기 다 있다). */
@@ -3081,7 +3089,7 @@ function rpTable(steps, bestStep) {
       : s.checksOk ? '<span class="vf-b SUCCESS">✓</span>' : '<span class="vf-b FAIL">✗</span>';
     return `<tr class="${s.step === bestStep ? 'table-success' : ''}">
       <td class="text-end">${s.step}</td><td class="text-end fw-semibold">${s.workers}</td>
-      <td class="text-end">${esc(fmtSec(s.totalSec))}</td><td class="text-end">${fmtTps(s.tps)}</td>
+      <td class="text-end" title="${s.fastForward ? esc(`실제 ${fmtSec(s.realSec)} + 가상 STT ${fmtSec(s.virtualSttSec)}`) : '실제로 기다림'}">${esc(fmtSec(s.totalSec))}${s.fastForward ? '<span class="hint"> *</span>' : ''}</td><td class="text-end">${fmtTps(s.tps)}</td>
       <td class="text-end">${esc(fmtMs(s.avgMs))}</td>
       <td class="text-end">${esc(fmtMs(s.acquireAvgMs))}</td><td class="text-end">${esc(fmtMs(s.acquireMaxMs))}</td>
       <td class="text-end">${esc(fmtMs(s.sttAvgMs))}</td>
@@ -3248,10 +3256,11 @@ async function rpLoadHistory() {
 
 function rpCsv() {
   if (!RP_HIST.length) { log('내보낼 임계 성능 테스트 이력이 없습니다', 'wr'); return; }
-  const head = ['실행ID', '시각', '단계', '워커', '응답초', 'TPS', '평균ms', '확보평균ms', '확보최대ms', 'STT평균ms',
+  const head = ['실행ID', '시각', '단계', '워커', '모드', '실제초', '가상STT초', '응답초', 'TPS', '평균ms', '확보평균ms', '확보최대ms', 'STT평균ms',
     '성공', '실패', '타임아웃', '힙PeakMB', 'HikariPeak', '정합성', '최저응답', '조기종료', 'EXEC_ID', '종료사유'];
   const rows = [];
-  RP_HIST.slice().reverse().forEach(x => (x.steps || []).forEach(s => rows.push([x.runId, x.at, s.step, s.workers, s.totalSec, s.tps,
+  RP_HIST.slice().reverse().forEach(x => (x.steps || []).forEach(s => rows.push([x.runId, x.at, s.step, s.workers,
+    s.fastForward ? '고속' : '실제', s.realSec ?? s.totalSec, s.virtualSttSec ?? 0, s.totalSec, s.tps,
     s.avgMs, s.acquireAvgMs, s.acquireMaxMs, s.sttAvgMs, s.success, s.fail, s.timeout, s.heap?.peakMb ?? '', s.hikari?.peak ?? '',
     s.checksOk === null || s.checksOk === undefined ? '확인불가' : (s.checksOk ? 'OK' : 'NG'),
     s.step === x.bestStep ? 'Y' : '', s.earlyStop || '', s.execId, x.stopReason])));
@@ -3301,6 +3310,8 @@ document.querySelectorAll('.rp-preset').forEach(b => { b.onclick = () => rpApply
  'rp-w0', 'rp-smode', 'rp-svalue', 'rp-max', 'rp-patience', 'rp-acq', 'rp-sttstop'].forEach(id => {
   ['input', 'change'].forEach(ev => $(id).addEventListener(ev, () => { rpSyncInputs(); rpPlanPreview(); }));
 });
+$('pf-real').addEventListener('change', pfEstimate);
+$('rp-real').addEventListener('change', rpPlanPreview);
 $('pf-start').onclick = pfStart;
 $('pf-cancel').onclick = pfCancel;
 $('pf-csv').onclick = pfCsv;
