@@ -337,6 +337,21 @@
   .pf-tps { position:relative; min-width:6.5rem; height:1.1rem; background:#f1f3f5; border-radius:.3rem; overflow:hidden; }
   .pf-tps .b { position:absolute; top:0; bottom:0; left:0; background:#d0bfff; }
   .pf-tps span { position:relative; padding-left:.3rem; font-family:var(--mono); font-weight:600; }
+  .pf-ph.warn { color:#664d03; background:#fff3cd; }
+  .pf-help { font-size:.68rem; color:#6c757d; margin-top:.15rem; }
+  /* 5번 탭 — 임계 성능 테스트 */
+  .rp-banner { font-size:.8rem; border-radius:.4rem; padding:.45rem .65rem; margin-bottom:.6rem; background:#f1f3f5; color:#343a40; }
+  .rp-banner.stop { background:#fff3cd; color:#664d03; } .rp-banner.ok { background:#d1e7dd; color:#0f5132; }
+  .rp-charts { display:grid; grid-template-columns:1fr 1fr; gap:.8rem; margin-bottom:.6rem; }
+  @media (max-width: 992px) { .rp-charts { grid-template-columns:1fr; } }
+  .rp-chart { border:1px solid #dee2e6; border-radius:.45rem; padding:.45rem .55rem; background:#fcfcfb; min-width:0; }
+  .rp-chart .ttl { font-size:.78rem; font-weight:700; margin-bottom:.15rem; }
+  .rp-svg { width:100%; height:auto; display:block; }
+  .rp-legend { display:flex; gap:.8rem; font-size:.72rem; color:#495057; }
+  .rp-legend i { display:inline-block; width:.8rem; height:.25rem; border-radius:.2rem; vertical-align:middle; margin-right:.25rem; }
+  .rp-legend i.dash { background:repeating-linear-gradient(90deg,#868e96 0 5px,transparent 5px 9px); }
+  #rp-tip { position:fixed; z-index:1080; pointer-events:none; white-space:pre; font-size:.72rem; font-family:var(--mono);
+            background:#212529; color:#f8f9fa; border-radius:.3rem; padding:.3rem .5rem; box-shadow:0 2px 8px rgba(0,0,0,.2); }
   /* 성능 테스트가 도는 동안 — 다른 탭의 배치·초기화 버튼을 막는다(같은 원천 데이터를 흔들면 측정이 망가진다) */
   body.pf-running #controls button, body.pf-running #scen-box button,
   body.pf-running #btn-reset, body.pf-running #btn-test-clear { pointer-events:none; opacity:.5; }
@@ -374,7 +389,8 @@
     <li class="nav-item"><button type="button" class="nav-link active" data-tab="tab-env">1. 환경 &amp; 디렉터리 설정</button></li>
     <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-pipeline">2. 파이프라인 제어 &amp; 검증</button></li>
     <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-fault">3. 장애 &amp; 재처리 시나리오 <span class="hint" id="adv-sum"></span></button></li>
-    <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-perf">4. 성능 테스트</button></li>
+    <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-perf">4. 기본 부하 검증</button></li>
+    <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-ramp">5. 임계 성능 테스트</button></li>
   </ul>
 
   <div id="tab-panes">
@@ -589,39 +605,51 @@
   <!-- ① 성능 테스트 설정 -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
-      <strong>① 성능 테스트 설정 <span class="hint fw-normal">— 일일 한도 300건 안에서 실제 파이프라인(조회 → 확보 → 복호화 → 포맷 → STT → 저장 → T1·T2·T4)을 태웁니다. STT 만 MOCK</span></strong>
+      <strong>① 기본 부하 검증 설정 <span class="hint fw-normal">— 일일 한도 300건 안에서 실제 파이프라인(조회 → 확보 → 복호화 → 포맷 → STT → 저장 → T1·T2·T4)을 태웁니다. STT 만 MOCK</span></strong>
       <span id="pf-engine" class="pf-engine">STT 엔진 확인 중…</span>
     </div>
     <div class="card-body py-2" id="pf-box">
       <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
         <span class="hint me-1">시나리오</span>
-        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="A" title="300건 · 워커 4 · 지연 0ms">A 순수 처리량</button>
-        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="B" title="100건 · 워커 4 · 지연 1,000~5,000ms · 타임아웃 3,000ms">B NPU 지연</button>
-        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="C" title="100건 · 지연 1,000ms · 동시성 1 → 2 → 4 → 8 을 한 번씩">C 동시성 비교</button>
-        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="D" title="300건 · 워커 16 · 지연 500ms">D 최대 부하</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="A" title="접견 150 · 전화 150 · 워커 4 · STT 지연 0ms">A 순수 처리량</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="B" title="접견 8 · 전화 8 · 워커 8 · 접견 180초/전화 120초 ±50% · 타임아웃 150초">B NPU 지연</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="C" title="접견 4 · 전화 4 · 접견 180초/전화 120초 · 동시성 1 → 2 → 4 → 8 을 한 번씩">C 동시성 비교</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="D" title="접견 150 · 전화 150 · 워커 16 · 접견 180초/전화 120초">D 최대 부하</button>
       </div>
-      <div class="hint mb-2" id="pf-scen-desc">시나리오를 고르면 아래 칸이 채워집니다 — 값을 직접 바꿔도 됩니다.</div>
+      <div class="hint mb-2" id="pf-scen-desc">시나리오를 고르면 아래 칸이 채워집니다 — 값을 직접 바꿔도 됩니다. 기본값은 현실 지연(접견 180초 · 전화 120초)입니다.</div>
       <div class="row g-2 align-items-end mb-2">
-        <div class="col-6 col-md-2"><label class="hint" for="pf-count">처리 건수 (10~300)</label>
-          <input type="number" class="form-control form-control-sm" id="pf-count" value="50" min="10" max="300" step="10"></div>
-        <div class="col-6 col-md-2"><label class="hint" for="pf-conc">동시성 (워커 수)</label>
+        <div class="col-4 col-md-2"><label class="hint" for="pf-meet">접견 건수</label>
+          <input type="number" class="form-control form-control-sm" id="pf-meet" value="150" min="0" max="300" step="1"></div>
+        <div class="col-4 col-md-2"><label class="hint" for="pf-phone">전화 건수</label>
+          <input type="number" class="form-control form-control-sm" id="pf-phone" value="150" min="0" max="300" step="1"></div>
+        <div class="col-4 col-md-2"><span class="hint">합계 (2~300)</span>
+          <div class="form-control form-control-sm bg-light font-monospace" id="pf-total">300건</div></div>
+        <div class="col-6 col-md-3"><label class="hint" for="pf-sttpct">기 STT 존재 비율 (%)</label>
+          <input type="number" class="form-control form-control-sm" id="pf-sttpct" value="3" min="0" max="100" step="1">
+          <div class="pf-help">전화 중 이 비율에 원천 <code>TELP_STT_FLPTH_NM</code> 을 채워 STT 를 건너뜁니다(Bypass)</div></div>
+        <div class="col-6 col-md-3"><label class="hint" for="pf-conc">동시성 (워커 수)</label>
           <select class="form-select form-select-sm" id="pf-conc">
             <option value="1">1</option><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="16">16</option>
           </select></div>
-        <div class="col-12 col-md-5"><label class="hint" id="pf-lat-lbl" for="pf-lat">STT 가상 지연 — 고정 (ms, 0~5,000)</label>
-          <div class="input-group input-group-sm">
-            <select class="form-select form-select-sm" id="pf-lmode" style="max-width:6rem">
-              <option value="FIXED" selected>고정</option><option value="RANGE">범위</option>
-            </select>
-            <input type="number" class="form-control" id="pf-lat" value="500" min="0" max="5000" step="100">
-            <span class="input-group-text pf-range d-none">~</span>
-            <input type="number" class="form-control pf-range d-none" id="pf-latmax" value="5000" min="0" max="5000" step="100">
-          </div></div>
+      </div>
+      <div class="row g-2 align-items-start mb-2">
+        <div class="col-6 col-md-2"><label class="hint" for="pf-lmode">STT 가상 지연 방식</label>
+          <select class="form-select form-select-sm" id="pf-lmode">
+            <option value="FIXED" selected>고정</option><option value="RANGE">범위 (± 변동 폭)</option>
+          </select></div>
+        <div class="col-6 col-md-3"><label class="hint" for="pf-lat-meet">접견 STT 지연 (ms)</label>
+          <input type="number" class="form-control form-control-sm" id="pf-lat-meet" value="180000" min="0" max="600000" step="10000">
+          <div class="pf-help">접견 (평균 접견 15분 → 예상 변환 180초)</div></div>
+        <div class="col-6 col-md-3"><label class="hint" for="pf-lat-phone">전화 STT 지연 (ms)</label>
+          <input type="number" class="form-control form-control-sm" id="pf-lat-phone" value="120000" min="0" max="600000" step="10000">
+          <div class="pf-help">전화 (평균 통화 5분 → 예상 변환 120초)</div></div>
+        <div class="col-6 col-md-1 pf-range d-none"><label class="hint" for="pf-jitter">± 변동 (%)</label>
+          <input type="number" class="form-control form-control-sm" id="pf-jitter" value="50" min="0" max="100" step="5"></div>
         <div class="col-6 col-md-3"><label class="hint" for="pf-timeout">STT 타임아웃 (ms)</label>
-          <input type="number" class="form-control form-control-sm" id="pf-timeout" placeholder="비우면 적용 안 함" min="100" max="600000" step="500"></div>
+          <input type="number" class="form-control form-control-sm" id="pf-timeout" placeholder="비우면 적용 안 함" min="100" max="1800000" step="10000"></div>
       </div>
       <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-        <button class="btn btn-dark fw-semibold px-3" id="pf-start">성능 테스트 시작</button>
+        <button class="btn btn-dark fw-semibold px-3" id="pf-start">기본 부하 검증 시작</button>
         <button class="btn btn-outline-danger d-none" id="pf-cancel" title="준비 중이면 측정을 건너뛰고, 측정 중이면 처리 중인 건만 끝내고 멈춥니다. SIM 데이터는 지웁니다">중지</button>
         <span class="hint" id="pf-est"></span>
       </div>
@@ -648,7 +676,7 @@
       <span class="small text-secondary font-monospace" id="pf-last">—</span>
     </div>
     <div class="card-body py-2" id="pf-report">
-      <div class="hint">아직 실행한 회차가 없습니다. ① 에서 [성능 테스트 시작] 을 누르면 총 소요 · 평균 처리 시간 · TPS · 단계별 시간 · 자원이 여기에 나옵니다.</div>
+      <div class="hint">아직 실행한 회차가 없습니다. ① 에서 [기본 부하 검증 시작] 을 누르면 총 소요 · 평균 처리 시간 · TPS · 단계별 시간 · 자원이 여기에 나옵니다.</div>
     </div>
   </div>
 
@@ -665,7 +693,7 @@
       <div class="table-responsive" style="max-height:420px">
         <table class="table table-sm table-hover mb-0 pf-table">
           <thead class="table-light sticky-top">
-            <tr><th>시각</th><th>시나리오</th><th class="text-end">건수</th><th class="text-end">동시성</th><th>지연</th>
+            <tr><th>시각</th><th>시나리오</th><th class="text-end">접견/전화</th><th class="text-end">동시성</th><th>지연</th>
                 <th class="text-end">타임아웃</th><th class="text-end">소요(초)</th><th class="text-end">평균(ms)</th><th>TPS</th>
                 <th>성공 / 실패 / 타임아웃</th><th class="text-end">Heap Peak</th><th class="text-end">Hikari</th><th>결과</th><th>EXEC_ID</th></tr>
           </thead>
@@ -702,7 +730,140 @@
   </div>
   </div>
 
+  <div class="tabp" id="tab-ramp">
+  <!-- ① 임계 성능 테스트 설정 — 워커 램프업 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+      <strong>① 임계 성능 테스트 — 워커 램프업 <span class="hint fw-normal">— 워커를 단계마다 늘려 <b>같은 건수</b>를 처리하며 포화 지점을 찾습니다. 단계마다 SIM 데이터를 새로 만듭니다</span></strong>
+      <span id="rp-engine" class="pf-engine">STT 엔진 확인 중…</span>
+    </div>
+    <div class="card-body py-2" id="rp-box">
+      <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
+        <span class="hint me-1">프리셋</span>
+        <button class="btn btn-sm btn-outline-dark rp-preset" data-s="real">현실 지연 램프업</button>
+        <button class="btn btn-sm btn-outline-dark rp-preset" data-s="fast">빠른 탐색 (STT 0ms)</button>
+      </div>
+      <div class="hint mb-2" id="rp-scen-desc">응답 시간 = 단계 총 소요(같은 건수를 처리한 시간). 워커를 늘려도 더 빨라지지 않으면 어딘가(브로커·NFS·DB)가 포화된 것입니다.</div>
+      <div class="rp-sec hint fw-semibold mb-1">워커 램프업</div>
+      <div class="row g-2 align-items-end mb-2">
+        <div class="col-6 col-md-2"><label class="hint" for="rp-w0">시작 워커</label>
+          <input type="number" class="form-control form-control-sm" id="rp-w0" value="4" min="1" max="64"></div>
+        <div class="col-6 col-md-2"><label class="hint" for="rp-smode">증가 방식</label>
+          <select class="form-select form-select-sm" id="rp-smode">
+            <option value="MULTIPLY" selected>× 배수</option><option value="ADD">+ 더하기</option>
+          </select></div>
+        <div class="col-6 col-md-2"><label class="hint" id="rp-svalue-lbl" for="rp-svalue">증가 배수 (×N)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-svalue" value="2" min="1" max="32"></div>
+        <div class="col-6 col-md-2"><label class="hint" for="rp-max">최대 워커 (≤64)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-max" value="32" min="1" max="64"></div>
+        <div class="col-12 col-md-4"><div class="hint" id="rp-plan">계획 —</div></div>
+      </div>
+      <div class="rp-sec hint fw-semibold mb-1">단계마다 처리할 데이터 · STT 가상 지연</div>
+      <div class="row g-2 align-items-start mb-2">
+        <div class="col-4 col-md-1"><label class="hint" for="rp-meet">접견</label>
+          <input type="number" class="form-control form-control-sm" id="rp-meet" value="16" min="0" max="300"></div>
+        <div class="col-4 col-md-1"><label class="hint" for="rp-phone">전화</label>
+          <input type="number" class="form-control form-control-sm" id="rp-phone" value="16" min="0" max="300"></div>
+        <div class="col-4 col-md-1"><span class="hint">합계</span>
+          <div class="form-control form-control-sm bg-light font-monospace" id="rp-total">32건</div></div>
+        <div class="col-6 col-md-1"><label class="hint" for="rp-sttpct">기 STT %</label>
+          <input type="number" class="form-control form-control-sm" id="rp-sttpct" value="3" min="0" max="100"></div>
+        <div class="col-6 col-md-2"><label class="hint" for="rp-lmode">지연 방식</label>
+          <select class="form-select form-select-sm" id="rp-lmode">
+            <option value="FIXED" selected>고정</option><option value="RANGE">범위 (± 변동 폭)</option>
+          </select></div>
+        <div class="col-6 col-md-2"><label class="hint" for="rp-lat-meet">접견 STT 지연 (ms)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-lat-meet" value="180000" min="0" max="600000" step="10000">
+          <div class="pf-help">평균 접견 15분 → 180초</div></div>
+        <div class="col-6 col-md-2"><label class="hint" for="rp-lat-phone">전화 STT 지연 (ms)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-lat-phone" value="120000" min="0" max="600000" step="10000">
+          <div class="pf-help">평균 통화 5분 → 120초</div></div>
+        <div class="col-6 col-md-1 pf-range d-none"><label class="hint" for="rp-jitter">± (%)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-jitter" value="50" min="0" max="100" step="5"></div>
+        <div class="col-6 col-md-1"><label class="hint" for="rp-timeout">타임아웃 ms</label>
+          <input type="number" class="form-control form-control-sm" id="rp-timeout" placeholder="없음" min="100" max="1800000" step="10000"></div>
+      </div>
+      <div class="rp-sec hint fw-semibold mb-1">조기 종료 (Early Exit)</div>
+      <div class="row g-2 align-items-end mb-2">
+        <div class="col-6 col-md-3"><label class="hint" for="rp-patience">최저 응답 뒤 개선 없음 허용 (회)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-patience" value="3" min="1" max="10"></div>
+        <div class="col-6 col-md-3"><label class="hint" for="rp-acq">XVARM 확보 대기 한도 (초 · 0 = 끔)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-acq" value="60" min="0" max="3600"></div>
+        <div class="col-12 col-md-4"><div class="form-check mt-3">
+          <input class="form-check-input" type="checkbox" id="rp-sttstop" checked>
+          <label class="form-check-label small" for="rp-sttstop">STT 에러·타임아웃이 나면 즉시 중단</label></div></div>
+      </div>
+      <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+        <button class="btn btn-dark fw-semibold px-3" id="rp-start">임계 성능 테스트 시작</button>
+        <button class="btn btn-outline-danger d-none" id="rp-cancel" title="처리 중인 건만 끝내고 멈춥니다. SIM 데이터는 지웁니다">중지</button>
+      </div>
+      <div class="pf-warn mb-1" id="rp-warn">대상 DB 확인 중…</div>
+      <div class="hint" id="rp-modes"></div>
+      <div id="rprog-wrap" class="prog-wrap mt-2 d-none">
+        <div class="prog-head">
+          <span class="ttl" id="rprog-phase"></span>
+          <span class="pct" id="rprog-pct">0%</span>
+          <span class="font-monospace" id="rprog-cnt">0/0건</span>
+          <span class="hint ms-auto" id="rprog-sum"></span>
+        </div>
+        <div class="prog-bar-outer"><div class="prog-bar" id="rprog-bar"></div></div>
+        <div class="prog-cur" id="rprog-cur">대기 중…</div>
+      </div>
+    </div>
   </div>
+
+  <!-- ② 실시간 결과 — 차트 2개(한 축에 한 측정값) + 단계 표 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+      <strong>② 워커 수에 따른 변화 <span class="hint fw-normal">— 단계가 끝날 때마다 갱신됩니다</span></strong>
+      <span class="small text-secondary font-monospace" id="rp-last">—</span>
+    </div>
+    <div class="card-body py-2">
+      <div id="rp-stop"></div>
+      <div class="rp-charts">
+        <div class="rp-chart"><div class="ttl">TPS <span class="hint fw-normal">— 성공 건수 ÷ 단계 총 소요</span></div><div id="rp-chart-tps"></div></div>
+        <div class="rp-chart"><div class="ttl">XVARM 확보 대기 <span class="hint fw-normal">— 브로커 요청 ~ 수신 폴더 도착(초)</span></div><div id="rp-chart-acq"></div></div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0 pf-table">
+          <thead class="table-light">
+            <tr><th class="text-end">단계</th><th class="text-end">워커</th><th class="text-end">응답(총 소요)</th><th class="text-end">TPS</th>
+                <th class="text-end">평균 처리</th><th class="text-end">확보 평균</th><th class="text-end">확보 최대</th><th class="text-end">STT 평균</th>
+                <th>성공 / 실패 / 타임아웃</th><th class="text-end">Heap Peak</th><th class="text-end">Hikari</th><th>정합성 · EXEC_ID</th><th>비고</th></tr>
+          </thead>
+          <tbody id="rp-steps"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ 이력 -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+      <span><strong>③ 임계 성능 테스트 이력</strong> <span class="hint" id="rp-hist-file"></span></span>
+      <span class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-secondary" id="rp-csv">CSV 내보내기 (단계별)</button>
+        <button class="btn btn-sm btn-outline-danger" id="rp-hist-clear">이력 비우기</button>
+      </span>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive" style="max-height:320px">
+        <table class="table table-sm table-hover mb-0 pf-table">
+          <thead class="table-light sticky-top">
+            <tr><th>시각</th><th class="text-end">단계</th><th>워커</th><th class="text-end">최적 워커</th><th class="text-end">최고 TPS</th><th>지연</th><th>종료 사유</th></tr>
+          </thead>
+          <tbody id="rp-hist"></tbody>
+        </table>
+      </div>
+      <div class="hint px-2 py-1">행을 누르면 위 ② 에 그 회차의 차트·표가 나옵니다.</div>
+    </div>
+  </div>
+  </div>
+
+  </div>
+
+  <!-- 차트 호버 풍선 -->
+  <div id="rp-tip" hidden></div>
 
   <!-- ⑤ 로그 — 탭과 무관하게 항상 하단에 붙어 있다 (접이식) -->
   <div class="card shadow-sm" id="log-card">
@@ -889,6 +1050,16 @@ function seedPopupHtml(sim) {
     <div class="sub mt-2">대상 DB — ${esc(sim.db || '')}</div>`;
 }
 
+/** 로그 컬렉터가 지운 시험(TST) 이력 — T1(batch) · T2(step) · T4(file). 미연동이면 사유 한 줄. */
+function logRowsHtml(lc) {
+  if (!lc || typeof lc !== 'object') {
+    return `<li>삭제된 로그 레코드: <span class="text-secondary">${esc(lc || '로그 컬렉터 응답 없음')}</span></li>`;
+  }
+  const n = (k) => Number(lc[k]) || 0;
+  return `<li>삭제된 로그 레코드: <span class="n">${n('batch') + n('step') + n('file')}</span>건
+      <div class="sub">T1(batch) ${n('batch')}건 / T2(step) ${n('step')}건 / T4(file) ${n('file')}건</div></li>`;
+}
+
 /** 초기화 결과 — DB 행과 파일을 나눠 센다. 파일은 XVARM 원본 더미 + 로컬 수신·작업 파일의 합이다. */
 function cleanPopupHtml(d) {
   const sim = d.sim || {}, c = sim.counts || {}, l = d.local || {}, fd = sim.filesDeleted || {};
@@ -902,6 +1073,7 @@ function cleanPopupHtml(d) {
       <li>삭제된 디렉토리 파일: <span class="n">${dummy + localFiles}</span>건
         <div class="sub">XVARM 원본 더미 ${dummy} (접견 ${fd.MEET ?? 0} · 전화 ${fd.PHONE ?? 0})
           · ESB 수신·작업 파일 ${localFiles}</div></li>
+      ${logRowsHtml(d.logCollector)}
       <li>그 외: 멱등 표식 ${l.idempotencyMarkers ?? 0}건 · STT 출력 폴더 ${l.sttOutputDirs ?? 0}개</li>
     </ul>
     <div class="sub mt-2">대상 DB — ${esc(sim.db || '')}</div>`;
@@ -935,7 +1107,7 @@ function showTab(id) {
   // 환경 탭에서는 하단 로그를 감춘다 — 여기서 하는 일(경로 대조·연결 확인)의 결과는
   // 카드 안에 그대로 남으므로 콘솔이 화면을 먹을 이유가 없다. 다른 탭으로 옮기면 다시 나온다.
   $('log-card').classList.toggle('d-none', id === 'tab-env');
-  if (id === 'tab-perf') pfOnShow();
+  if (id === 'tab-perf' || id === 'tab-ramp') pfOnShow();
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('#sim-tabs [data-tab]');
@@ -1831,7 +2003,9 @@ function vfCounts(m) {
 }
 function vfFile(label, f) {
   if (!f) return '';
-  const tip = (f.sample || []).join(' · ');
+  // 300건이면 600개 — 처음 2개 … 마지막 2개만 보인다(옛 서버는 sample 을 준다)
+  const head = f.head || f.sample || [], tail = f.tail || [];
+  const tip = head.join(' · ') + (tail.length ? (f.count > head.length + tail.length ? ' ... ' : ' · ') + tail.join(' · ') : '');
   return `<div class="vf-row"><span>${esc(label)}</span>
             <span title="${esc(tip)}">${f.exists ? `<b>${f.count}</b>개` : '<span class="text-secondary">폴더 없음</span>'}</span></div>
           <div class="vf-path">${esc(f.path)}${tip ? ` — ${esc(tip)}` : ''}</div>`;
@@ -1855,8 +2029,6 @@ function verifyBody(v, id) {
           <span class="text-secondary">in ${x.inCnt ?? 0} / out ${x.outCnt ?? 0} / err ${x.errCnt ?? 0}</span>`).join('<br>') || '—'}</div>
       <div class="vf-row"><span>T4 파일 <code>tb_file_proc_log</code></span><span>${db.t4?.total ?? 0}행</span></div>
       <div class="vf-sub">${sup ? vfCounts(db.t4?.byStatus) : '<span class="text-secondary">상태별 집계 없음 — 로그 컬렉터가 구버전</span>'}</div>
-      <div class="vf-row"><span>T5 전송 <code>tb_deident_send_log</code></span><span>${db.t5?.total ?? 0}행</span></div>
-      <div class="vf-sub">${sup ? vfCounts(db.t5?.byStatus) : '—'}</div>
       <div class="vf-row"><span>[바로 실행] 워터마크 <span class="text-secondary">(${esc(wm.jobId || '')})</span></span>
         <span>${wm.at ? `<code>${esc(String(wm.at).replace('T', ' '))}</code>` : '<span class="text-secondary">없음 → 최근 30일</span>'}</span></div>
       <div class="vf-sub">SUCCESS 배치의 <code>MAX(target_to_dtm)</code>${wm.execId ? ` · ${esc(wm.execId)}` : ''}
@@ -2260,25 +2432,37 @@ $('btn-log-tall').onclick = (e) => {
   if (logc === '1') toggleLog(true);
 })();
 
-// ── 4번 탭 — 성능 테스트 ───────────────────────────────────────────────
+// ── 4번 탭 — 기본 부하 검증 · 5번 탭 — 임계 성능 테스트 ────────────────────
 // 실제 파이프라인을 N건으로 돌려 처리량·단계별 시간·자원을 잰다. 서버가 한 회차를 비동기로 돌리고
 //   (준비 → 측정 → 검증 → 정리), 화면은 GET /api/v1/mock/perf/runs/current 를 읽어 그린다.
+//   두 탭은 같은 엔진을 쓰고 한 번에 하나만 돈다 — 폴링도 하나이고 kind(BASIC·RAMP)로 그릴 탭을 가른다.
 
-// 시나리오 프리셋 — 버튼을 누르면 입력칸을 채운다. 합격 기준은 기획안의 제안값이다.
+// 시나리오 프리셋 — 현실 지연(전화 120초 · 접견 180초) 기준. 건수는 끝나는 시간을 보고 정했다(예상 시간 참고).
 const PF_SCEN = {
-  A: { label:'A 순수 처리량', count:300, conc:4, mode:'FIXED', lat:0, max:null, timeout:null,
-       desc:'STT 지연 0ms — STT 를 뺀 나머지(확보·복호화·저장)의 한계입니다. 어느 단계가 병목인지 막대로 드러납니다. 합격: 실패 0 · T2 RUNNING 0 · T4 = 처리 건수' },
-  B: { label:'B NPU 지연', count:100, conc:4, mode:'RANGE', lat:1000, max:5000, timeout:3000,
-       desc:'지연 1,000~5,000ms 균등 · 타임아웃 3,000ms — 약 절반이 타임아웃으로 실패합니다. 타임아웃 건이 T4 에 사유와 함께 남고, 배치가 PARTIAL 로 닫히며, T2 에 RUNNING 이 남지 않는지 봅니다' },
-  C: { label:'C 동시성 비교', count:100, conc:1, mode:'FIXED', lat:1000, max:null, timeout:null,
-       desc:'지연 1,000ms 고정 — 동시성 1 → 2 → 4 → 8 로 한 번씩 돌리면 ③ 이력에 쌓여 TPS 를 나란히 비교합니다. 한 회차가 끝날 때마다 다음 동시성을 골라 둡니다' },
-  D: { label:'D 최대 부하', count:300, conc:16, mode:'FIXED', lat:500, max:null, timeout:null,
-       desc:'300건 · 워커 16 · 지연 500ms — Peak Heap 과 Hikari 최고 연결 수를 봅니다. 합격(제안): Peak Heap < 최대 힙의 70%' },
+  A: { label:'A 순수 처리량', meet:150, phone:150, stt:3, conc:4, mode:'FIXED', meetMs:0, phoneMs:0, jitter:50, timeout:null,
+       desc:'STT 지연 0ms · 일일 한도 300건 — STT 를 뺀 나머지(확보·복호화·저장)의 한계입니다. 어느 단계가 병목인지 막대로 드러납니다. 합격: 실패 0 · T2 RUNNING 0 · T4 = 처리 건수' },
+  B: { label:'B NPU 지연', meet:8, phone:8, stt:3, conc:8, mode:'RANGE', meetMs:180000, phoneMs:120000, jitter:50, timeout:150000,
+       desc:'접견 90~270초 · 전화 60~180초(±50%) · 타임아웃 150초 — 약 절반이 타임아웃으로 실패합니다. 타임아웃 건이 T4 에 사유와 함께 남고, 배치가 PARTIAL 로 닫히며, T2 에 RUNNING 이 남지 않는지 봅니다' },
+  C: { label:'C 동시성 비교', meet:4, phone:4, stt:0, conc:1, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
+       desc:'접견 180초 · 전화 120초 고정 · 8건 — 동시성 1 → 2 → 4 → 8 로 한 번씩 돌리면 ③ 이력에 쌓여 TPS 를 나란히 비교합니다. 한 회차가 끝날 때마다 다음 동시성을 골라 둡니다(동시성 1 은 약 20분)' },
+  D: { label:'D 최대 부하', meet:150, phone:150, stt:3, conc:16, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
+       desc:'일일 한도 300건 · 워커 16 · 현실 지연 — 하루치가 몇 분에 끝나는지, Peak Heap 과 Hikari 최고 연결 수를 봅니다(약 45분). 합격(제안): Peak Heap < 최대 힙의 70%' },
+};
+// 임계 시험 프리셋
+const RP_SCEN = {
+  real: { label:'현실 지연 램프업', meet:16, phone:16, stt:3, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
+          start:4, smode:'MULTIPLY', svalue:2, max:32, patience:3, acq:60, sttStop:true,
+          desc:'단계마다 32건 · 워커 4 → 8 → 16 → 32 · 접견 180초/전화 120초 — 실제 변환 시간 아래에서 워커를 늘려도 확보(브로커·NFS)가 버티는지 봅니다(약 40분)' },
+  fast: { label:'빠른 탐색 (STT 0ms)', meet:30, phone:30, stt:3, mode:'FIXED', meetMs:0, phoneMs:0, jitter:50, timeout:null,
+          start:1, smode:'MULTIPLY', svalue:2, max:32, patience:3, acq:30, sttStop:true,
+          desc:'단계마다 60건 · 워커 1 → 2 → … → 32 · STT 0ms — 확보·복호화·저장만 남겨 브로커(추출 스레드 4개)·NFS 의 포화 지점을 빨리 찾습니다' },
 };
 const PF_PHASES = [['PREPARING', '준비'], ['RUNNING', '측정'], ['VERIFYING', '검증'], ['CLEANING', '정리']];
 let PF_SCEN_KEY = null;
+let RP_SCEN_KEY = null;
 let PF_INFO = null;
 let PF_HIST = [];
+let RP_HIST = [];
 let PF_TIMER = null;
 let PF_SEEN = '';
 let PF_PROG = null;
@@ -2294,18 +2478,86 @@ async function quietGet(url) {
 
 function pfNum(id) { const v = String($(id).value).trim(); return v === '' ? null : Number(v); }
 
-function pfSyncRange() {
+/** 초 → '46분 15초' · '12.3초' · '1시간 5분'. 현실 지연이면 회차가 수십 분이라 초만 늘어놓으면 읽히지 않는다. */
+function fmtSec(sec) {
+  const s = Number(sec) || 0;
+  if (s < 60) return `${Math.round(s * 10) / 10}초`;
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = Math.round(s % 60);
+  return h ? `${h}시간 ${m}분` : `${m}분${r ? ' ' + r + '초' : ''}`;
+}
+/** ms → 10초 넘으면 초로. */
+function fmtMs(ms) {
+  const v = Number(ms) || 0;
+  return v >= 10000 ? `${Math.round(v / 100) / 10}초` : `${Math.round(v * 10) / 10}ms`;
+}
+function fmtTps(t) { const v = Number(t) || 0; return v >= 10 ? v.toFixed(1) : v >= 1 ? v.toFixed(2) : v.toFixed(3); }
+
+/** [lo, hi] 균등 지연을 타임아웃 to 에서 자를 때의 평균 — 타임아웃 건은 to 만큼만 기다린다. */
+function pfAvgCapped(lo, hi, to) {
+  if (!to || to <= 0) return (lo + hi) / 2;
+  if (to >= hi) return (lo + hi) / 2;
+  if (to <= lo) return to;
+  const pIn = (to - lo) / (hi - lo);
+  return pIn * (lo + to) / 2 + (1 - pIn) * to;
+}
+/** 트랙 한 건의 평균 STT 대기(ms). */
+function trackAvg(base, mode, jitter, to) {
+  const j = mode === 'RANGE' ? Math.max(0, Math.min(100, jitter || 0)) / 100 : 0;
+  return pfAvgCapped(base * (1 - j), base * (1 + j), to);
+}
+/** 기 STT 비율로 STT 를 건너뛸 전화 건수 — 서버와 같은 반올림. */
+function bypassCount(phone, pct) { return Math.round(phone * (pct || 0) / 100); }
+/** STT 지연만으로 걸리는 대략의 시간(초) — 건별 대기의 합 ÷ 워커. 확보·복호화·저장은 따로다. */
+function sttEstimateSec(meet, phone, pct, workers, mode, meetMs, phoneMs, jitter, to) {
+  const work = meet * trackAvg(meetMs, mode, jitter, to) + (phone - bypassCount(phone, pct)) * trackAvg(phoneMs, mode, jitter, to);
+  return work / Math.max(1, workers) / 1000;
+}
+function latText(l) {
+  if (!l) return '';
+  if (l.meetMs === undefined) return l.mode === 'RANGE' ? `${l.ms}~${l.maxMs}ms` : `${l.ms}ms`;   // 옛 이력
+  const t = `접견 ${fmtMs(l.meetMs)} · 전화 ${fmtMs(l.phoneMs)}`;
+  return l.mode === 'RANGE' && l.jitterPercent ? `${t} ±${l.jitterPercent}%` : t;
+}
+function countText(x) {
+  return x.meetCount !== undefined ? `${x.meetCount}/${x.phoneCount}` : String(x.count ?? '');
+}
+function pfCheckBadge(c) {
+  if (!c || c.available === false) return `<span class="vf-b x" title="${esc(c?.reason || '')}">정합성 확인 불가</span>`;
+  return c.ok ? '<span class="vf-b SUCCESS">정합성 ✓</span>' : '<span class="vf-b FAIL">정합성 ✗</span>';
+}
+function engineBadge(id) {
+  const i = PF_INFO, e = $(id);
+  if (!i) { e.className = 'pf-engine'; e.textContent = 'STT 엔진 — 조회 실패'; return; }
+  e.className = 'pf-engine ' + (i.sttMode || '');
+  e.textContent = i.sttMode === 'NPU' ? 'STT 엔진: NPU — 실제 부하 (가상 지연 무시)' : `STT 엔진: ${i.sttMode} — 가상 지연`;
+  e.title = `voice.stt.mode=${i.sttMode} · 1번 탭에서 바꿀 수 있습니다`;
+}
+function sharedDb() { const i = PF_INFO || {}; return i.env === 'K8S' || /postgre/i.test(i.db || ''); }
+function warnHtml(file) {
+  const i = PF_INFO || {};
+  return (sharedDb()
+      ? `⚠ <b>공용 DB</b>(${esc(i.db)})에 SIM 데이터를 만들었다가 끝나면 <b>자동으로 지웁니다</b>. 다른 작업자의 시험과 겹치지 않게 <b>미리 알리고</b> 실행하십시오.`
+      : `대상 DB — ${esc(i.db || '')}. SIM 데이터를 만들었다가 끝나면 자동으로 지웁니다.`)
+    + ` 이력 파일 <code>${esc(file || '')}</code>`;
+}
+
+// ── 4번 탭 — 입력 ────────────────────────────────────────────────────────
+
+function pfSyncInputs() {
   const range = $('pf-lmode').value === 'RANGE';
-  document.querySelectorAll('.pf-range').forEach(el => el.classList.toggle('d-none', !range));
-  $('pf-lat-lbl').textContent = range ? 'STT 가상 지연 — 범위 최소 ~ 최대 (ms, 0~5,000)' : 'STT 가상 지연 — 고정 (ms, 0~5,000)';
+  document.querySelectorAll('#pf-box .pf-range').forEach(el => el.classList.toggle('d-none', !range));
+  const total = (pfNum('pf-meet') || 0) + (pfNum('pf-phone') || 0);
+  $('pf-total').textContent = `${total}건`;
+  $('pf-total').classList.toggle('text-danger', total < 2 || total > 300);
 }
 
 /** 프리셋을 고른 뒤 값을 바꿨으면 '(수정)' 을 붙인다 — 이력에서 A 와 A 변형이 섞이지 않게. C 는 동시성을 바꾸는 것이 본래 용도다. */
 function pfScenarioLabel() {
   const s = PF_SCEN[PF_SCEN_KEY];
   if (!s) return '직접 입력';
-  const same = pfNum('pf-count') === s.count && $('pf-lmode').value === s.mode && pfNum('pf-lat') === s.lat
-    && (s.mode !== 'RANGE' || pfNum('pf-latmax') === s.max) && pfNum('pf-timeout') === s.timeout
+  const same = pfNum('pf-meet') === s.meet && pfNum('pf-phone') === s.phone && pfNum('pf-sttpct') === s.stt
+    && $('pf-lmode').value === s.mode && pfNum('pf-lat-meet') === s.meetMs && pfNum('pf-lat-phone') === s.phoneMs
+    && (s.mode !== 'RANGE' || pfNum('pf-jitter') === s.jitter) && pfNum('pf-timeout') === s.timeout
     && (PF_SCEN_KEY === 'C' || Number($('pf-conc').value) === s.conc);
   return s.label + (same ? '' : ' (수정)');
 }
@@ -2314,11 +2566,14 @@ function pfRequest() {
   const range = $('pf-lmode').value === 'RANGE';
   return {
     scenario: pfScenarioLabel(),
-    count: pfNum('pf-count'),
+    meetCount: pfNum('pf-meet'),
+    phoneCount: pfNum('pf-phone'),
+    sttPercent: pfNum('pf-sttpct'),
     concurrency: Number($('pf-conc').value),
     latencyMode: $('pf-lmode').value,
-    latencyMs: pfNum('pf-lat'),
-    latencyMaxMs: range ? pfNum('pf-latmax') : null,
+    meetLatencyMs: pfNum('pf-lat-meet'),
+    phoneLatencyMs: pfNum('pf-lat-phone'),
+    jitterPercent: range ? pfNum('pf-jitter') : 0,
     sttTimeoutMs: pfNum('pf-timeout'),
   };
 }
@@ -2326,76 +2581,68 @@ function pfRequest() {
 function pfApplyPreset(key) {
   const s = PF_SCEN[key]; if (!s) return;
   PF_SCEN_KEY = key;
-  $('pf-count').value = s.count;
+  $('pf-meet').value = s.meet;
+  $('pf-phone').value = s.phone;
+  $('pf-sttpct').value = s.stt;
   $('pf-conc').value = String(s.conc);
   $('pf-lmode').value = s.mode;
-  $('pf-lat').value = s.lat;
-  $('pf-latmax').value = s.max ?? 5000;
+  $('pf-lat-meet').value = s.meetMs;
+  $('pf-lat-phone').value = s.phoneMs;
+  $('pf-jitter').value = s.jitter;
   $('pf-timeout').value = s.timeout ?? '';
   document.querySelectorAll('.pf-preset').forEach(b => b.classList.toggle('active', b.dataset.s === key));
   $('pf-scen-desc').innerHTML = `<b>${esc(s.label)}</b> — ${esc(s.desc)}`;
-  pfSyncRange();
+  pfSyncInputs();
   pfEstimate();
 }
 
-/** [lo, hi] 균등 지연을 타임아웃 to 에서 자를 때의 평균 — 타임아웃 건은 to 만큼만 기다린다. */
-function pfAvgCapped(lo, hi, to) {
-  if (to >= hi) return (lo + hi) / 2;
-  if (to <= lo) return to;
-  const pIn = (to - lo) / (hi - lo);
-  return pIn * (lo + to) / 2 + (1 - pIn) * to;
-}
-
-/** STT 지연만으로 걸리는 시간 — 시작 전에 대략의 길이를 알린다. 확보·복호화·저장은 따로다. */
 function pfEstimate() {
-  const n = pfNum('pf-count') || 0, c = Number($('pf-conc').value) || 1;
-  const lo = pfNum('pf-lat') || 0;
-  const hi = $('pf-lmode').value === 'RANGE' ? Math.max(lo, pfNum('pf-latmax') || lo) : lo;
-  const to = pfNum('pf-timeout');
-  const avg = to && to > 0 ? pfAvgCapped(lo, hi, to) : (lo + hi) / 2;
-  const sec = Math.round(n * avg / c / 100) / 10;
-  const npu = PF_INFO?.sttMode === 'NPU';
-  $('pf-est').textContent = !n ? '' : npu
-    ? '실 NPU — 가상 지연은 쓰지 않습니다'
-    : `STT 지연만 약 ${sec}초 (${n}건 × 평균 ${Math.round(avg)}ms ÷ 워커 ${c}) · 확보·복호화·저장 시간은 별도`;
+  const q = pfRequest();
+  const n = (q.meetCount || 0) + (q.phoneCount || 0);
+  if (!n) { $('pf-est').textContent = ''; return; }
+  if (PF_INFO?.sttMode === 'NPU') { $('pf-est').textContent = '실 NPU — 가상 지연은 쓰지 않습니다'; return; }
+  const sec = sttEstimateSec(q.meetCount || 0, q.phoneCount || 0, q.sttPercent, q.concurrency, q.latencyMode,
+    q.meetLatencyMs || 0, q.phoneLatencyMs || 0, q.jitterPercent, q.sttTimeoutMs);
+  const by = bypassCount(q.phoneCount || 0, q.sttPercent);
+  $('pf-est').textContent = `예상 — STT 대기만 약 ${fmtSec(sec)} (${n}건 ÷ 워커 ${q.concurrency}${by ? ` · 기 STT ${by}건은 건너뜀` : ''}) · 확보·복호화·저장 시간은 별도`;
 }
 
 function pfRenderInfo() {
-  const i = PF_INFO, e = $('pf-engine');
-  if (!i) { e.className = 'pf-engine'; e.textContent = 'STT 엔진 — 조회 실패'; return; }
-  e.className = 'pf-engine ' + (i.sttMode || '');
-  e.textContent = i.sttMode === 'NPU' ? 'STT 엔진: NPU — 실제 부하 (가상 지연 무시)' : `STT 엔진: ${i.sttMode} — 가상 지연`;
-  e.title = `voice.stt.mode=${i.sttMode} · 1번 탭에서 바꿀 수 있습니다 · 실제 STT 읽기 타임아웃 ${i.sttTimeoutSec}초`;
+  engineBadge('pf-engine');
+  engineBadge('rp-engine');
+  const i = PF_INFO;
+  if (!i) return;
   const m = i.modes || {};
-  $('pf-modes').textContent = `지금 구성 — 조회 ${m.source} · 브로커 ${m.broker} · 전화 ${m.phone} · 복호화 ${m.decrypt}`
+  const line = `지금 구성 — 조회 ${m.source} · 브로커 ${m.broker} · 전화 ${m.phone} · 복호화 ${m.decrypt}`
     + ` · 운영 배치 동시성 ${i.batchConcurrency} · 배치 1회 상한 ${i.maxFilesPerRun}건`;
-  const shared = i.env === 'K8S' || /postgre/i.test(i.db || '');
-  $('pf-warn').innerHTML = (shared
-      ? `⚠ <b>공용 DB</b>(${esc(i.db)})에 SIM 데이터를 만들었다가 끝나면 <b>자동으로 지웁니다</b>. 다른 작업자의 시험과 겹치지 않게 <b>미리 알리고</b> 실행하십시오.`
-      : `대상 DB — ${esc(i.db)}. SIM 데이터를 만들었다가 끝나면 자동으로 지웁니다.`)
-    + ` 이력 파일 <code>${esc(i.historyFile)}</code>`;
+  $('pf-modes').textContent = line;
+  $('rp-modes').textContent = line;
+  $('pf-warn').innerHTML = warnHtml(i.historyFile);
+  $('rp-warn').innerHTML = warnHtml(i.rampHistoryFile);
   pfEstimate();
+  rpPlanPreview();
 }
 
 async function pfStart() {
   const req = pfRequest();
   const i = PF_INFO || {};
-  const lat = req.latencyMode === 'RANGE' ? `${req.latencyMs}~${req.latencyMaxMs}ms 범위` : `${req.latencyMs}ms 고정`;
-  const shared = i.env === 'K8S' || /postgre/i.test(i.db || '');
-  const ok = await confirmPopup('성능 테스트 시작', `
-    <div class="pop-lead">${esc(req.scenario)} — ${req.count}건 · 워커 ${req.concurrency}개</div>
+  const by = bypassCount(req.phoneCount || 0, req.sttPercent);
+  const ok = await confirmPopup('기본 부하 검증 시작', `
+    <div class="pop-lead">${esc(req.scenario)} — 접견 ${req.meetCount} · 전화 ${req.phoneCount}건 · 워커 ${req.concurrency}개</div>
     <ul class="pop-list">
       <li><span class="lbl">STT:</span> <b>${esc(i.sttMode || '?')}</b>${i.sttMode === 'NPU'
           ? ' — 가상 지연은 쓰지 않고 <b>실제 NPU</b> 로 요청이 갑니다'
-          : ` · 지연 ${esc(lat)} · 타임아웃 ${req.sttTimeoutMs ? req.sttTimeoutMs + 'ms' : '없음'}`}</li>
-      <li><span class="lbl">준비:</span> 로컬 산출물·지난 시험 출력 삭제 → SIM ${req.count}건 생성 (${esc(i.db || '')})</li>
+          : ` · ${esc(latText({ mode:req.latencyMode, meetMs:req.meetLatencyMs, phoneMs:req.phoneLatencyMs, jitterPercent:req.jitterPercent }))}`
+            + ` · 타임아웃 ${req.sttTimeoutMs ? fmtMs(req.sttTimeoutMs) : '없음'}`}</li>
+      <li><span class="lbl">준비:</span> 로컬 산출물·지난 시험 출력 삭제 → SIM ${req.meetCount + req.phoneCount}건 생성 (기 STT ${by}건) · ${esc(i.db || '')}</li>
+      <li><span class="lbl">예상:</span> ${esc($('pf-est').textContent.replace('예상 — ', ''))}</li>
       <li><span class="lbl">끝나면:</span> SIM 행·원본 더미 파일 자동 삭제 · 로그(TST)와 STT 출력은 남습니다</li>
     </ul>
-    ${shared ? '<div class="pop-note">⚠ 공용 DB 입니다 — 다른 작업자와 시간이 겹치지 않게 하십시오.</div>' : ''}`, '시작', '취소');
+    ${sharedDb() ? '<div class="pop-note">⚠ 공용 DB 입니다 — 다른 작업자와 시간이 겹치지 않게 하십시오.</div>' : ''}`, '시작', '취소');
   if (!ok) return;
-  const info = await callFull('POST', '/api/v1/mock/perf/runs', `성능 테스트 시작 — ${req.scenario}`, { json: req });
+  const info = await callFull('POST', '/api/v1/mock/perf/runs', `기본 부하 검증 시작 — ${req.scenario}`, { json: req });
   if (!info.ok) {
-    showPopup('성능 테스트를 시작하지 못했습니다',
+    showPopup('기본 부하 검증을 시작하지 못했습니다',
       `<div class="pop-lead">${esc(info.body?.message || info.error || ('HTTP ' + info.status))}</div>`);
     return;
   }
@@ -2403,51 +2650,63 @@ async function pfStart() {
 }
 
 async function pfCancel() {
-  const c = $('pf-cancel');
-  c.disabled = true;
-  c.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>중지하는 중…';
-  const d = await call('POST', '/api/v1/mock/perf/runs/cancel', '성능 테스트 중지 요청');
+  ['pf-cancel', 'rp-cancel'].forEach(id => {
+    const c = $(id); c.disabled = true;
+    c.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>중지하는 중…';
+  });
+  const d = await call('POST', '/api/v1/mock/perf/runs/cancel', '성능 시험 중지 요청');
   if (d) log(`  └ ${d.message}`, d.accepted ? 'wr' : 'ok');
-  if (!d || d.accepted === false) { c.disabled = false; c.textContent = '중지'; }
+  if (!d || d.accepted === false) ['pf-cancel', 'rp-cancel'].forEach(id => { $(id).disabled = false; $(id).textContent = '중지'; });
 }
 
-function pfLock(on) {
+/** 성능 시험이 도는 동안 — 두 탭의 입력·시작 버튼과 다른 탭의 배치 버튼을 막는다. */
+function pfLock(on, kind) {
   document.body.classList.toggle('pf-running', on);
-  document.querySelectorAll('#pf-box input, #pf-box select, .pf-preset').forEach(el => el.disabled = on);
-  const b = $('pf-start');
-  b.disabled = on;
-  b.innerHTML = on ? '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>실행 중…' : '성능 테스트 시작';
-  const c = $('pf-cancel');
-  c.classList.toggle('d-none', !on);
-  if (on) { c.disabled = false; c.textContent = '중지'; }
+  document.querySelectorAll('#pf-box input, #pf-box select, .pf-preset, #rp-box input, #rp-box select, .rp-preset')
+    .forEach(el => el.disabled = on);
+  [['pf-start', 'BASIC', '기본 부하 검증 시작'], ['rp-start', 'RAMP', '임계 성능 테스트 시작']].forEach(([id, k, label]) => {
+    const b = $(id);
+    b.disabled = on;
+    b.innerHTML = on && k === kind ? '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>실행 중…'
+      : on ? '다른 시험 진행 중' : label;
+  });
+  [['pf-cancel', 'BASIC'], ['rp-cancel', 'RAMP']].forEach(([id, k]) => {
+    const c = $(id);
+    c.classList.toggle('d-none', !(on && k === kind));
+    if (on) { c.disabled = false; c.textContent = '중지'; }
+  });
 }
 
 /** 한 회차가 끝날 때까지 서버 상태를 읽는다. 새로 고침해도 도는 회차를 이어서 보여 준다(pfInit). */
 function pfWatch() {
-  pfLock(true);
   healthPause();          // 시험 중에는 자동 헬스체크를 멈춘다 — DB 커넥션·포트 간섭 방지
   PF_SEEN = ''; PF_PROG = null; PF_FINISHING = false;
-  $('pprog-wrap').classList.remove('d-none', 'done', 'has-fail');
+  let locked = null;
   clearInterval(PF_TIMER);
   const tick = async () => {
     const c = await quietGet('/api/v1/mock/perf/runs/current');
     if (!c || !c.runId || PF_FINISHING) return;
-    pfRenderProgress(c);
+    if (locked !== c.kind) {
+      locked = c.kind;
+      pfLock(true, c.kind);
+      $(c.kind === 'RAMP' ? 'rprog-wrap' : 'pprog-wrap').classList.remove('d-none', 'done', 'has-fail');
+    }
+    if (c.kind === 'RAMP') rpRender(c); else pfRenderProgress(c);
     const seen = c.phase + '|' + c.message;
     if (seen !== PF_SEEN) {
       PF_SEEN = seen;
-      log(`  └ [성능 테스트 · ${c.phaseLabel}] ${c.message}`, c.phase === 'FAILED' ? 'er' : 'ok');
+      log(`  └ [${c.kind === 'RAMP' ? '임계 성능' : '기본 부하'} · ${c.phaseLabel}] ${c.message}`, c.phase === 'FAILED' ? 'er' : 'ok');
     }
     if (!c.active) {
       PF_FINISHING = true;
       clearInterval(PF_TIMER); PF_TIMER = null;
       pfLock(false);
       healthResume();
-      await pfFinish(c);
+      if (c.kind === 'RAMP') await rpFinish(c); else await pfFinish(c);
     }
   };
   tick();
-  PF_TIMER = setInterval(tick, 800);
+  PF_TIMER = setInterval(tick, 1000);
 }
 
 function pfPhaseCls(k, now) {
@@ -2455,6 +2714,37 @@ function pfPhaseCls(k, now) {
   const order = PF_PHASES.map(x => x[0]);
   const i = order.indexOf(k), j = order.indexOf(now);
   return j < 0 ? '' : i < j ? 'done' : i === j ? 'on' : '';
+}
+function phaseChips(c) {
+  return PF_PHASES.map(([k, l]) => `<span class="pf-ph ${pfPhaseCls(k, c.phase)}">${l}</span>`).join('<span class="pf-arrow">›</span>')
+    + (c.phase === 'FAILED' ? ' <span class="pf-ph" style="color:#842029;background:#f8d7da">실패</span>' : '');
+}
+
+/** 진행 막대 — 4번(pprog)·5번(rprog) 탭이 같은 모양으로 그린다. */
+function drawProgress(prefix, c, p, extra) {
+  const total = p.total || 0, done = p.done || 0;
+  const pct = c.phase === 'PREPARING' ? 0 : total > 0 ? Math.round(done * 100 / total) : (c.active ? 0 : 100);
+  const w = $(prefix + '-wrap');
+  w.classList.toggle('done', c.phase === 'DONE');
+  w.classList.toggle('has-fail', c.phase === 'FAILED' || (p.fail || 0) > 0);
+  $(prefix + '-phase').innerHTML = phaseChips(c) + (extra || '');
+  $(prefix + '-bar').style.width = pct + '%';
+  $(prefix + '-pct').textContent = pct + '%';
+  $(prefix + '-cnt').textContent = `${done}/${total}건`;
+  const parts = [];
+  if (p.success) parts.push(`성공 ${p.success}`);
+  if (p.fail) parts.push(`실패 ${p.fail}`);
+  if (p.skipped) parts.push(`건너뜀 ${p.skipped}`);
+  parts.push(`경과 ${fmtSec((c.elapsedMs || 0) / 1000)}`);
+  $(prefix + '-sum').textContent = parts.join(' · ');
+  let cur = esc(c.message || '');
+  if (c.phase === 'RUNNING' && p.running) {
+    cur = c.cancelRequested
+      ? esc('중지하는 중 — 처리 중인 건을 끝내고 멈춥니다…')
+      : `처리 중 <b>${p.active ?? 0}</b>건 · 워커 ${p.concurrency ?? '?'}개`
+        + (p.currentFile ? ` · 최근 <span class="tag ${esc(p.currentKind || '')}">${esc(p.currentKind || '')}</span> ${esc(p.currentFile)}` : '');
+  }
+  $(prefix + '-cur').innerHTML = cur;
 }
 
 function pfRenderProgress(c) {
@@ -2465,31 +2755,7 @@ function pfRenderProgress(c) {
     PF_PROG = Object.assign({}, PF_PROG, { total: r.total, done: (r.success || 0) + (r.fail || 0) + (r.skipped || 0),
       success: r.success, fail: r.fail, skipped: r.skipped });
   }
-  const p = PF_PROG || {};
-  const total = p.total || 0, done = p.done || 0;
-  const pct = c.phase === 'PREPARING' ? 0 : total > 0 ? Math.round(done * 100 / total) : (c.active ? 0 : 100);
-  const w = $('pprog-wrap');
-  w.classList.toggle('done', c.phase === 'DONE');
-  w.classList.toggle('has-fail', c.phase === 'FAILED' || (p.fail || 0) > 0);
-  $('pprog-phase').innerHTML = PF_PHASES.map(([k, l]) => `<span class="pf-ph ${pfPhaseCls(k, c.phase)}">${l}</span>`)
-    .join('<span class="pf-arrow">›</span>') + (c.phase === 'FAILED' ? ' <span class="pf-ph" style="color:#842029;background:#f8d7da">실패</span>' : '');
-  $('pprog-bar').style.width = pct + '%';
-  $('pprog-pct').textContent = pct + '%';
-  $('pprog-cnt').textContent = `${done}/${total}건`;
-  const parts = [];
-  if (p.success) parts.push(`성공 ${p.success}`);
-  if (p.fail) parts.push(`실패 ${p.fail}`);
-  if (p.skipped) parts.push(`건너뜀 ${p.skipped}`);
-  parts.push(`경과 ${Math.round((c.elapsedMs || 0) / 100) / 10}초`);
-  $('pprog-sum').textContent = parts.join(' · ');
-  let cur = esc(c.message || '');
-  if (c.phase === 'RUNNING' && p.running) {
-    cur = c.cancelRequested
-      ? esc('중지하는 중 — 처리 중인 건을 끝내고 멈춥니다…')
-      : `처리 중 <b>${p.active ?? 0}</b>건 · 워커 ${p.concurrency ?? '?'}개`
-        + (p.currentFile ? ` · 최근 <span class="tag ${esc(p.currentKind || '')}">${esc(p.currentKind || '')}</span> ${esc(p.currentFile)}` : '');
-  }
-  $('pprog-cur').innerHTML = cur;
+  drawProgress('pprog', c, PF_PROG || {});
 }
 
 async function pfFinish(c) {
@@ -2497,19 +2763,19 @@ async function pfFinish(c) {
   if (c.result) {
     const r = c.result;
     pfRenderReport(r);
-    log(`✔ 성능 테스트 완료 — ${r.scenario} · ${r.count}건 · 워커 ${r.concurrency} · ${r.totalSec}초 · 평균 ${r.avgMs}ms · ${r.tps} TPS`
+    log(`✔ 기본 부하 검증 완료 — ${r.scenario} · 접견/전화 ${countText(r)} · 워커 ${r.concurrency} · ${fmtSec(r.totalSec)} · 평균 ${fmtMs(r.avgMs)} · ${fmtTps(r.tps)} TPS`
       + ` · 성공 ${r.success} / 실패 ${r.fail} / 타임아웃 ${r.timeout} · Heap Peak ${r.heap?.peakMb}MB · Hikari ${r.hikari?.peak}`, 'ok');
-    showPopup('성능 테스트 완료', `<div class="pop-lead">${esc(r.scenario)} — ${r.count}건 · 워커 ${r.concurrency}개</div>
+    showPopup('기본 부하 검증 완료', `<div class="pop-lead">${esc(r.scenario)} — 접견/전화 ${countText(r)}건 · 워커 ${r.concurrency}개</div>
       <ul class="pop-list">
-        <li><span class="lbl">처리량:</span> <span class="n">${r.tps}</span> TPS · 총 ${r.totalSec}초 · 건당 평균 ${r.avgMs}ms</li>
+        <li><span class="lbl">처리량:</span> <span class="n">${fmtTps(r.tps)}</span> TPS · 총 ${fmtSec(r.totalSec)} · 건당 평균 ${fmtMs(r.avgMs)}</li>
         <li><span class="lbl">결과:</span> 성공 <span class="ok-t">${r.success}</span> · 실패 <span class="ng-t">${r.fail}</span> · 타임아웃 <span class="to-t">${r.timeout}</span> · ${esc(r.execStsCd)}</li>
         <li><span class="lbl">정합성:</span> ${pfCheckBadge(r.checks)}</li>
       </ul>
       <div class="sub mt-2">② 결과 리포트 · ③ 실행 이력에 남았습니다.</div>`);
     pfNextC(r);
   } else {
-    log(`✖ 성능 테스트 실패 — ${c.error || c.message}`, 'er');
-    showPopup('성능 테스트 실패', `<div class="pop-lead">${esc(c.error || c.message || '')}</div>
+    log(`✖ 기본 부하 검증 실패 — ${c.error || c.message}`, 'er');
+    showPopup('기본 부하 검증 실패', `<div class="pop-lead">${esc(c.error || c.message || '')}</div>
       <div class="hint mt-2">SIM 데이터 정리는 시도했습니다. 남아 있으면 [시뮬레이션 데이터 초기화] 로 지우십시오.</div>`);
   }
 }
@@ -2521,17 +2787,11 @@ function pfNextC(r) {
   const i = seq.indexOf(Number(r.concurrency));
   if (i >= 0 && i < seq.length - 1) {
     $('pf-conc').value = String(seq[i + 1]);
-    $('pf-scen-desc').innerHTML = `<b>C 동시성 비교</b> — 동시성 ${r.concurrency} 완료. 다음 비교를 위해 <b>동시성 ${seq[i + 1]}</b> 로 바꿔 두었습니다 — [성능 테스트 시작] 을 누르십시오.`;
+    $('pf-scen-desc').innerHTML = `<b>C 동시성 비교</b> — 동시성 ${r.concurrency} 완료. 다음 비교를 위해 <b>동시성 ${seq[i + 1]}</b> 로 바꿔 두었습니다 — [기본 부하 검증 시작] 을 누르십시오.`;
     pfEstimate();
   } else if (i === seq.length - 1) {
     $('pf-scen-desc').innerHTML = '<b>C 동시성 비교</b> — 1 · 2 · 4 · 8 을 모두 돌렸습니다. ③ 이력의 TPS 막대로 비교하십시오(16 도 보려면 동시성을 직접 고르십시오).';
   }
-}
-
-function pfLatText(l) { return !l ? '' : l.mode === 'RANGE' ? `${l.ms}~${l.maxMs}ms` : `${l.ms}ms`; }
-function pfCheckBadge(c) {
-  if (!c || c.available === false) return `<span class="vf-b x" title="${esc(c?.reason || '')}">정합성 확인 불가</span>`;
-  return c.ok ? '<span class="vf-b SUCCESS">정합성 ✓</span>' : '<span class="vf-b FAIL">정합성 ✗</span>';
 }
 
 function pfRenderReport(r) {
@@ -2540,20 +2800,22 @@ function pfRenderReport(r) {
   const h = r.heap || {}, k = r.hikari || {}, c = r.checks || {}, m = r.modes || {};
   const tile = (key, n, sub) => `<div class="pf-tile"><div class="k">${key}</div><div class="n">${n}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
   const tiles = [
-    tile('총 소요 시간', `${r.totalSec}<small>초</small>`, `준비 ${r.prepareSec}초는 제외`),
-    tile('평균 처리 시간', `${r.avgMs}<small>ms</small>`, '건당 확보 ~ 저장'),
-    tile('TPS', `${r.tps}`, '성공 건수 ÷ 총 소요'),
+    tile('총 소요 시간', esc(fmtSec(r.totalSec)), `준비 ${r.prepareSec}초는 제외`),
+    tile('평균 처리 시간', esc(fmtMs(r.avgMs)), '건당 확보 ~ 저장'),
+    tile('TPS', fmtTps(r.tps), '성공 건수 ÷ 총 소요'),
     tile('전체 / 성공 / 실패 / 타임아웃',
       `${r.total} / <span class="ok-t">${r.success}</span> / <span class="ng-t">${r.fail}</span> / <span class="to-t">${r.timeout}</span>`,
       `${esc(r.execStsCd || '')}${r.skipped ? ' · 건너뜀 ' + r.skipped : ''}`),
     tile('Heap 시작 → 종료', `${h.startMb}→${h.endMb}<small>MB</small>`, `Peak ${h.peakMb}MB / 최대 ${h.maxMb}MB`),
     tile('Hikari Peak 연결', `${k.peak ?? 0}`, esc(k.pool || '원천 DB 풀')),
   ].join('');
+  // 단계별 막대 — 평균 소요 시간만 싣는다. 건수를 붙였더니 단계마다 달라(기 STT 건은 STT·중간을 건너뛴다)
+  //   동시 처리에서 건이 빠진 것처럼 읽혔다.
   const st = r.stages || [];
   const max = Math.max(1, ...st.map(x => Number(x.avgMs) || 0));
   const bars = st.map(x => `<div class="pf-stage"><span class="lb">${esc(x.label)}</span>
       <div class="bo"><div class="b ${esc(x.key)}" style="width:${Math.max(0.5, (Number(x.avgMs) || 0) * 100 / max)}%"></div></div>
-      <span class="v">${x.avgMs}ms <span class="hint">× ${x.count}건</span></span></div>`).join('');
+      <span class="v">${esc(fmtMs(x.avgMs))}</span></div>`).join('');
   let checks;
   if (c.available === false || !Object.keys(c).length) {
     checks = `<span class="vf-b x">확인 불가</span> <span class="hint">${esc(c.reason || '')}</span>`;
@@ -2568,8 +2830,10 @@ function pfRenderReport(r) {
       b(c.t1Success === c.t4Success, `T1 성공 ${c.t1Success} = T4 SUCCESS ${c.t4Success}`),
     ].join(' ');
   }
-  const cond = [esc(r.scenario), `${r.count}건`, `워커 ${r.concurrency}`, `지연 ${esc(pfLatText(r.latency))}`,
-    `타임아웃 ${r.sttTimeoutMs ? r.sttTimeoutMs + 'ms' : '없음'}`, `STT ${esc(r.sttMode)}`,
+  const data = r.meetCount !== undefined
+    ? `접견 ${r.meetCount} · 전화 ${r.phoneCount}건 (기 STT ${r.sttPercent}% → ${r.sourceSttPhones ?? 0}건)` : `${r.count}건`;
+  const cond = [esc(r.scenario), data, `워커 ${r.concurrency}`, `지연 ${esc(latText(r.latency))}`,
+    `타임아웃 ${r.sttTimeoutMs ? fmtMs(r.sttTimeoutMs) : '없음'}`, `STT ${esc(r.sttMode)}`,
     `조회 ${esc(m.source)} · 브로커 ${esc(m.broker)} · 복호화 ${esc(m.decrypt)}`, esc(r.db || '')].join(' · ');
   const cl = r.cleanup || {};
   const clean = cl.ok === false
@@ -2585,13 +2849,19 @@ function pfRenderReport(r) {
     <div class="d-flex flex-wrap align-items-center gap-2"><span class="hint">${clean} · 실행 ${esc(String(r.at || '').replace('T', ' '))}</span>
       ${r.execId ? '<button class="btn btn-sm btn-outline-secondary ms-auto" type="button" data-pf-verify="1">🔍 상세 검증 (DB &amp; PV)</button>' : ''}</div>
     <div class="mt-2" data-pf-vf="1"></div>`;
-  const vb = $('pf-report').querySelector('[data-pf-verify]');
-  if (vb) vb.onclick = async () => {
-    const v = await fetchVerify(r.execId);
+  bindVerify($('pf-report'), r.execId, 'pf-vf');
+}
+
+/** [상세 검증] 버튼 — 기존 검증 패널(DB·PV·SQL·CLI)을 접힌 아코디언으로 붙인다. */
+function bindVerify(box, execId, id) {
+  const vb = box.querySelector('[data-pf-verify]');
+  if (!vb) return;
+  vb.onclick = async () => {
+    const v = await fetchVerify(execId);
     if (!v) return;
-    $('pf-report').querySelector('[data-pf-vf]').innerHTML =
-      verifyAcc('pf-vf-acc', '🔍 성능 테스트 상세 검증 (DB & K8s PV)', `EXEC_ID ${esc(r.execId)}`, verifyBody(v, 'pf-vf'));
-    accToggle('pf-vf-acc', true);
+    box.querySelector('[data-pf-vf]').innerHTML =
+      verifyAcc(id + '-acc', '🔍 성능 시험 상세 검증 (DB & K8s PV)', `EXEC_ID ${esc(execId)}`, verifyBody(v, id));
+    accToggle(id + '-acc', true);
   };
 }
 
@@ -2605,20 +2875,20 @@ async function pfLoadHistory() {
 function pfRenderHistory() {
   const body = $('pf-hist');
   if (!PF_HIST.length) {
-    body.innerHTML = '<tr><td colspan="14" class="hint text-center py-3">아직 이력이 없습니다 — 성능 테스트를 돌리면 회차마다 한 줄씩 쌓입니다</td></tr>';
+    body.innerHTML = '<tr><td colspan="14" class="hint text-center py-3">아직 이력이 없습니다 — 기본 부하 검증을 돌리면 회차마다 한 줄씩 쌓입니다</td></tr>';
     return;
   }
-  const maxTps = Math.max(0.01, ...PF_HIST.map(x => Number(x.tps) || 0));
+  const maxTps = Math.max(0.001, ...PF_HIST.map(x => Number(x.tps) || 0));
   body.innerHTML = PF_HIST.map((x, i) => `<tr data-i="${i}" title="눌러서 ② 리포트에 표시">
       <td class="font-monospace">${esc(String(x.at || '').replace('T', ' ').slice(5, 16))}</td>
       <td>${esc(x.scenario)}</td>
-      <td class="text-end">${x.count}</td>
+      <td class="text-end">${esc(countText(x))}</td>
       <td class="text-end">${x.concurrency}</td>
-      <td>${esc(pfLatText(x.latency))}</td>
-      <td class="text-end">${x.sttTimeoutMs ?? '—'}</td>
-      <td class="text-end">${x.totalSec}</td>
-      <td class="text-end">${x.avgMs}</td>
-      <td><div class="pf-tps"><div class="b" style="width:${(Number(x.tps) || 0) * 100 / maxTps}%"></div><span>${x.tps}</span></div></td>
+      <td>${esc(latText(x.latency))}</td>
+      <td class="text-end">${x.sttTimeoutMs ? esc(fmtMs(x.sttTimeoutMs)) : '—'}</td>
+      <td class="text-end">${esc(fmtSec(x.totalSec))}</td>
+      <td class="text-end">${esc(fmtMs(x.avgMs))}</td>
+      <td><div class="pf-tps"><div class="b" style="width:${(Number(x.tps) || 0) * 100 / maxTps}%"></div><span>${fmtTps(x.tps)}</span></div></td>
       <td><span class="ok-t">${x.success}</span> / <span class="ng-t">${x.fail}</span> / <span class="to-t">${x.timeout}</span></td>
       <td class="text-end">${x.heap?.peakMb ?? ''}</td>
       <td class="text-end">${x.hikari?.peak ?? ''}</td>
@@ -2626,46 +2896,375 @@ function pfRenderHistory() {
       <td class="font-monospace">${esc(x.execId || '')}</td></tr>`).join('');
 }
 
+function downloadCsv(name, head, rows) {
+  const cell = v => { const t = String(v ?? ''); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const text = '﻿' + [head, ...rows].map(r => r.map(cell).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type:'text/csv;charset=utf-8' }));
+  const d = new Date(), pad = n => String(n).padStart(2, '0');
+  a.download = `${name}_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  log(`  └ ${rows.length}행을 CSV 로 내보냈습니다 — ${a.download}`, 'ok');
+}
+
 /** 이력을 CSV 로 — 오래된 회차가 위. 엑셀이 한글을 깨지 않게 BOM 을 붙인다. */
 function pfCsv() {
-  if (!PF_HIST.length) { log('내보낼 성능 테스트 이력이 없습니다', 'wr'); return; }
+  if (!PF_HIST.length) { log('내보낼 기본 부하 검증 이력이 없습니다', 'wr'); return; }
   const stageKeys = ['ACQUIRE', 'DECRYPT', 'FORMAT', 'STT', 'TEMP', 'SAVE'];
-  const head = ['실행ID', '시각', '시나리오', '건수', '동시성', '지연방식', '지연ms', '지연최대ms', '타임아웃ms', 'STT',
-    '총소요초', '평균ms', 'TPS', '전체', '성공', '실패', '타임아웃', '건너뜀', '배치상태',
+  const head = ['실행ID', '시각', '시나리오', '접견', '전화', '기STT%', '기STT건', '동시성', '지연방식', '접견지연ms', '전화지연ms', '변동폭%',
+    '타임아웃ms', 'STT', '총소요초', '평균ms', 'TPS', '전체', '성공', '실패', '타임아웃', '건너뜀', '배치상태',
     '확보ms', '복호화ms', '포맷ms', 'STTms', '중간ms', '저장ms',
     '힙시작MB', '힙종료MB', '힙PeakMB', '힙최대MB', 'HikariPeak', 'T2 RUNNING', 'T4행', '정합성',
     'EXEC_ID', '조회', '브로커', '복호화', 'DB'];
   const rows = PF_HIST.slice().reverse().map(x => {
     const st = Object.fromEntries((x.stages || []).map(v => [v.key, v.avgMs]));
     const c = x.checks || {}, h = x.heap || {}, m = x.modes || {}, l = x.latency || {};
-    return [x.runId, x.at, x.scenario, x.count, x.concurrency, l.mode, l.ms, l.maxMs ?? '', x.sttTimeoutMs ?? '', x.sttMode,
+    return [x.runId, x.at, x.scenario, x.meetCount ?? '', x.phoneCount ?? x.count, x.sttPercent ?? '', x.sourceSttPhones ?? '',
+      x.concurrency, l.mode, l.meetMs ?? l.ms, l.phoneMs ?? l.ms, l.jitterPercent ?? '', x.sttTimeoutMs ?? '', x.sttMode,
       x.totalSec, x.avgMs, x.tps, x.total, x.success, x.fail, x.timeout, x.skipped, x.execStsCd,
       ...stageKeys.map(k => st[k] ?? ''),
       h.startMb, h.endMb, h.peakMb, h.maxMb, x.hikari?.peak ?? '', c.t2Running ?? '', c.t4Rows ?? '',
       c.available === false ? '확인불가' : (c.ok ? 'OK' : 'NG'), x.execId, m.source, m.broker, m.decrypt, x.db];
   });
-  const cell = v => { const t = String(v ?? ''); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
-  const text = '﻿' + [head, ...rows].map(r => r.map(cell).join(',')).join('\r\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([text], { type:'text/csv;charset=utf-8' }));
-  const d = new Date(), pad = n => String(n).padStart(2, '0');
-  a.download = `perf_history_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  log(`  └ 성능 테스트 이력 ${rows.length}회를 CSV 로 내보냈습니다 — ${a.download}`, 'ok');
+  downloadCsv('perf_basic', head, rows);
 }
 
 async function pfClearHistory() {
   const ok = await confirmPopup('실행 이력 비우기',
-    `<div class="pop-lead">성능 테스트 이력 ${PF_HIST.length}회를 지웁니다.</div>
+    `<div class="pop-lead">기본 부하 검증 이력 ${PF_HIST.length}회를 지웁니다.</div>
      <div class="hint mt-2">이력 파일(<code>${esc(PF_INFO?.historyFile || '')}</code>)만 지웁니다. 로그 컬렉터의 TST 이력은 [시뮬레이션 데이터 초기화] 가 지웁니다. 먼저 [CSV 내보내기] 로 남겨 두십시오.</div>`,
     '지우기', '취소');
   if (!ok) return;
-  const d = await call('DELETE', '/api/v1/mock/perf/runs', '성능 테스트 이력 비우기');
+  const d = await call('DELETE', '/api/v1/mock/perf/runs', '기본 부하 검증 이력 비우기');
   if (d) log(`  └ 이력 ${d.deleted}회 삭제 — ${d.file}`, 'ok');
   await pfLoadHistory();
+}
+
+// ── 5번 탭 — 임계 성능 테스트 (워커 램프업) ─────────────────────────────────
+
+function rpSyncInputs() {
+  const range = $('rp-lmode').value === 'RANGE';
+  document.querySelectorAll('#rp-box .pf-range').forEach(el => el.classList.toggle('d-none', !range));
+  const total = (pfNum('rp-meet') || 0) + (pfNum('rp-phone') || 0);
+  $('rp-total').textContent = `${total}건`;
+  $('rp-total').classList.toggle('text-danger', total < 2 || total > 300);
+  $('rp-svalue-lbl').textContent = $('rp-smode').value === 'ADD' ? '증가 값 (+N)' : '증가 배수 (×N)';
+}
+
+/** 화면에서 계획을 미리 계산한다 — 서버(RampRequest.plan)와 같은 규칙: 넘치면 최대에서 끝낸다. */
+function rpPlan() {
+  const start = pfNum('rp-w0') || 1, max = pfNum('rp-max') || start, v = pfNum('rp-svalue') || 2;
+  const add = $('rp-smode').value === 'ADD';
+  const out = [];
+  let w = start;
+  while (out.length <= 20) {
+    out.push(w);
+    if (w >= max) break;
+    w = Math.min(add ? w + v : w * Math.max(2, v), max);
+  }
+  return out;
+}
+
+function rpRequest() {
+  const range = $('rp-lmode').value === 'RANGE';
+  return {
+    meetCount: pfNum('rp-meet'), phoneCount: pfNum('rp-phone'), sttPercent: pfNum('rp-sttpct'),
+    latencyMode: $('rp-lmode').value, meetLatencyMs: pfNum('rp-lat-meet'), phoneLatencyMs: pfNum('rp-lat-phone'),
+    jitterPercent: range ? pfNum('rp-jitter') : 0, sttTimeoutMs: pfNum('rp-timeout'),
+    startWorkers: pfNum('rp-w0'), stepMode: $('rp-smode').value, stepValue: pfNum('rp-svalue'), maxWorkers: pfNum('rp-max'),
+    patience: pfNum('rp-patience'), acquireLimitSec: pfNum('rp-acq') ?? 0, stopOnSttError: $('rp-sttstop').checked,
+  };
+}
+
+function rpPlanPreview() {
+  const q = rpRequest(), plan = rpPlan();
+  const n = (q.meetCount || 0) + (q.phoneCount || 0);
+  let est = '';
+  if (PF_INFO?.sttMode !== 'NPU' && n) {
+    const sec = plan.reduce((s, w) => s + sttEstimateSec(q.meetCount || 0, q.phoneCount || 0, q.sttPercent, w, q.latencyMode,
+      q.meetLatencyMs || 0, q.phoneLatencyMs || 0, q.jitterPercent, q.sttTimeoutMs), 0);
+    est = ` · 전 단계를 다 돌면 STT 대기만 약 ${fmtSec(sec)} (조기 종료되면 더 짧다 · 확보·복호화·준비 시간 별도)`;
+  }
+  $('rp-plan').innerHTML = `계획 — 워커 <b>${plan.join(' → ')}</b> (${plan.length}단계${plan.length > 20 ? ' · 20단계 초과 — 줄이십시오' : ''})`
+    + ` · 단계마다 ${n}건${esc(est)}`;
+}
+
+function rpApplyPreset(key) {
+  const s = RP_SCEN[key]; if (!s) return;
+  RP_SCEN_KEY = key;
+  $('rp-meet').value = s.meet; $('rp-phone').value = s.phone; $('rp-sttpct').value = s.stt;
+  $('rp-lmode').value = s.mode; $('rp-lat-meet').value = s.meetMs; $('rp-lat-phone').value = s.phoneMs;
+  $('rp-jitter').value = s.jitter; $('rp-timeout').value = s.timeout ?? '';
+  $('rp-w0').value = s.start; $('rp-smode').value = s.smode; $('rp-svalue').value = s.svalue; $('rp-max').value = s.max;
+  $('rp-patience').value = s.patience; $('rp-acq').value = s.acq; $('rp-sttstop').checked = s.sttStop;
+  document.querySelectorAll('.rp-preset').forEach(b => b.classList.toggle('active', b.dataset.s === key));
+  $('rp-scen-desc').innerHTML = `<b>${esc(s.label)}</b> — ${esc(s.desc)}`;
+  rpSyncInputs();
+  rpPlanPreview();
+}
+
+async function rpStart() {
+  const req = rpRequest(), plan = rpPlan();
+  const i = PF_INFO || {};
+  const ok = await confirmPopup('임계 성능 테스트 시작', `
+    <div class="pop-lead">워커 ${esc(plan.join(' → '))} · 단계마다 접견 ${req.meetCount} · 전화 ${req.phoneCount}건</div>
+    <ul class="pop-list">
+      <li><span class="lbl">STT:</span> <b>${esc(i.sttMode || '?')}</b>${i.sttMode === 'NPU' ? ' — 실제 NPU 로 요청이 갑니다'
+          : ` · ${esc(latText({ mode:req.latencyMode, meetMs:req.meetLatencyMs, phoneMs:req.phoneLatencyMs, jitterPercent:req.jitterPercent }))}`
+            + ` · 타임아웃 ${req.sttTimeoutMs ? fmtMs(req.sttTimeoutMs) : '없음'}`}</li>
+      <li><span class="lbl">조기 종료:</span> 최저 응답 뒤 ${req.patience}회 연속 개선 없음 · XVARM 확보 대기
+        ${req.acquireLimitSec ? req.acquireLimitSec + '초 초과' : '(보지 않음)'} · STT 에러·타임아웃 ${req.stopOnSttError ? '즉시 중단' : '무시'}</li>
+      <li><span class="lbl">단계마다:</span> 로컬 산출물 정리 → SIM ${req.meetCount + req.phoneCount}건 생성 → 측정 → 검증. 끝나면 SIM 자동 삭제</li>
+    </ul>
+    ${sharedDb() ? '<div class="pop-note">⚠ 공용 DB 입니다 — 다른 작업자와 시간이 겹치지 않게 하십시오.</div>' : ''}`, '시작', '취소');
+  if (!ok) return;
+  const info = await callFull('POST', '/api/v1/mock/perf/ramp/runs', `임계 성능 테스트 시작 — 워커 ${plan.join('→')}`, { json: req });
+  if (!info.ok) {
+    showPopup('임계 성능 테스트를 시작하지 못했습니다',
+      `<div class="pop-lead">${esc(info.body?.message || info.error || ('HTTP ' + info.status))}</div>`);
+    return;
+  }
+  rpRender(info.body);
+  pfWatch();
+}
+
+/** 도는 중이든 끝났든 같은 모양 — 진행 · 멈춘 사유 · 차트 2개 · 단계 표. */
+function rpRender(c) {
+  const req = c.request || {};
+  const steps = c.steps || c.result?.steps || [];
+  if (c.active !== undefined) {
+    const p = c.progress || {};
+    const plan = c.plan || [];
+    let extra = c.stepNo ? ` <span class="pf-ph on">단계 ${c.stepNo}/${plan.length} · 워커 ${c.workers}</span>` : '';
+    if (c.phase === 'RUNNING' && c.liveAcquireMs !== undefined && req.acquireLimitSec) {
+      const near = c.liveAcquireMs / 1000 / req.acquireLimitSec;
+      extra += ` <span class="pf-ph ${near >= 0.8 ? 'warn' : ''}">확보 대기 ${fmtMs(c.liveAcquireMs)} / 한도 ${req.acquireLimitSec}초</span>`;
+    }
+    if (c.active || c.phase) drawProgress('rprog', c, p, extra);
+  }
+  rpStopBanner(c.stopReason || c.result?.stopReason, c.bestStep || c.result?.bestStep, steps, c.active);
+  rpCharts(steps, c.bestStep || c.result?.bestStep, req.acquireLimitSec);
+  rpTable(steps, c.bestStep || c.result?.bestStep);
+  $('rp-last').textContent = `${c.runId || ''}${steps.length ? ` · ${steps.length}단계` : ''}`;
+}
+
+function rpStopBanner(reason, bestStep, steps, active) {
+  const el = $('rp-stop');
+  if (!reason && !steps.length) { el.innerHTML = ''; return; }
+  const best = bestStep ? steps[bestStep - 1] : null;
+  const bestHtml = best ? `최적 워커 <b>${best.workers}</b> — 응답(단계 총 소요) ${esc(fmtSec(best.totalSec))} · ${fmtTps(best.tps)} TPS` : '';
+  if (active || !reason) {
+    el.innerHTML = best ? `<div class="rp-banner">지금까지 ${bestHtml}</div>` : '';
+    return;
+  }
+  const early = /초과|STT|포화|중지/.test(reason);
+  el.innerHTML = `<div class="rp-banner ${early ? 'stop' : 'ok'}"><b>${early ? '⏹ 조기 종료' : '✔ 완료'}</b> — ${esc(reason)}${bestHtml ? `<br>${bestHtml}` : ''}</div>`;
+}
+
+/** 단계 표 — 차트의 표 보기이기도 하다(색만으로 읽지 않게 값은 여기 다 있다). */
+function rpTable(steps, bestStep) {
+  const body = $('rp-steps');
+  if (!steps.length) {
+    body.innerHTML = '<tr><td colspan="13" class="hint text-center py-3">단계가 끝날 때마다 한 줄씩 쌓입니다</td></tr>';
+    return;
+  }
+  body.innerHTML = steps.map(s => {
+    const note = [];
+    if (s.step === bestStep) note.push('<span class="vf-b SUCCESS">최저 응답</span>');
+    else if (s.sinceBest) note.push(`<span class="hint">개선 없음 ${s.sinceBest}회</span>`);
+    if (s.canceled) note.push('<span class="vf-b PARTIAL">도중 멈춤</span>');
+    if (s.earlyStop) note.push(`<span class="text-danger">${esc(s.earlyStop)}</span>`);
+    const ck = s.checksOk === null || s.checksOk === undefined ? '<span class="vf-b x">—</span>'
+      : s.checksOk ? '<span class="vf-b SUCCESS">✓</span>' : '<span class="vf-b FAIL">✗</span>';
+    return `<tr class="${s.step === bestStep ? 'table-success' : ''}">
+      <td class="text-end">${s.step}</td><td class="text-end fw-semibold">${s.workers}</td>
+      <td class="text-end">${esc(fmtSec(s.totalSec))}</td><td class="text-end">${fmtTps(s.tps)}</td>
+      <td class="text-end">${esc(fmtMs(s.avgMs))}</td>
+      <td class="text-end">${esc(fmtMs(s.acquireAvgMs))}</td><td class="text-end">${esc(fmtMs(s.acquireMaxMs))}</td>
+      <td class="text-end">${esc(fmtMs(s.sttAvgMs))}</td>
+      <td><span class="ok-t">${s.success}</span> / <span class="ng-t">${s.fail}</span> / <span class="to-t">${s.timeout}</span></td>
+      <td class="text-end">${s.heap?.peakMb ?? ''}</td><td class="text-end">${s.hikari?.peak ?? ''}</td>
+      <td>${ck} <span class="font-monospace hint">${esc(s.execId || '')}</span></td>
+      <td>${note.join(' ')}</td></tr>`;
+  }).join('');
+}
+
+// ── 차트 — 한 축에 한 측정값(TPS · 확보 대기를 따로). 막대 두께 ≤24px · 위 끝만 4px 둥글게 · 선 2px ──
+const RP_COLOR = { tps:'#2a78d6', avg:'#2a78d6', max:'#eb6834', grid:'#e9ecef', axis:'#adb5bd', ink:'#495057', muted:'#868e96' };
+
+function niceMax(v) {
+  if (!(v > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+/** 공통 틀 — 가로 격자·y 눈금·x 라벨(워커 수). 반환: { svg 앞부분, x(i), y(v), band } */
+function chartFrame(n, yMax, fmtY, xLabels, R = 14, W = 520, H = 210) {
+  const L = 48, T = 16, B = 34;
+  const pw = W - L - R, ph = H - T - B, band = pw / Math.max(1, n);
+  const x = i => L + band * (i + 0.5);
+  const y = v => T + ph - (v / yMax) * ph;
+  let g = '';
+  for (let k = 0; k <= 4; k++) {
+    const v = yMax * k / 4, yy = y(v);
+    g += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="${RP_COLOR.grid}" stroke-width="1"/>`
+       + `<text x="${L - 6}" y="${yy + 3.5}" text-anchor="end" font-size="10" fill="${RP_COLOR.muted}">${esc(fmtY(v))}</text>`;
+  }
+  xLabels.forEach((t, i) => { g += `<text x="${x(i)}" y="${H - B + 14}" text-anchor="middle" font-size="10.5" fill="${RP_COLOR.ink}">${esc(t)}</text>`; });
+  g += `<text x="${L + pw / 2}" y="${H - 4}" text-anchor="middle" font-size="10" fill="${RP_COLOR.muted}">워커 수</text>`;
+  return { W, H, L, R, T, B, pw, ph, band, x, y, g };
+}
+/** 막대 — 바닥은 네모, 위 끝만 4px 둥글게. */
+function barPath(cx, w, y0, y1) {
+  const h = y0 - y1, r = Math.min(4, h, w / 2), x0 = cx - w / 2;
+  if (h <= 0) return '';
+  return `M${x0},${y0} V${y1 + r} Q${x0},${y1} ${x0 + r},${y1} H${x0 + w - r} Q${x0 + w},${y1} ${x0 + w},${y1 + r} V${y0} Z`;
+}
+
+function rpCharts(steps, bestStep, limitSec) {
+  const tps = $('rp-chart-tps'), acq = $('rp-chart-acq');
+  if (!steps.length) {
+    const empty = '<div class="hint text-center py-4">단계가 끝나면 그려집니다</div>';
+    tps.innerHTML = empty; acq.innerHTML = empty;
+    return;
+  }
+  const labels = steps.map(s => String(s.workers));
+  // ① TPS — 막대 한 계열. 숫자는 최저 응답 단계와 마지막 단계에만 붙인다(모든 막대에 붙이면 읽히지 않는다)
+  const tMax = niceMax(Math.max(...steps.map(s => Number(s.tps) || 0)) * 1.15);
+  const f = chartFrame(steps.length, tMax, v => fmtTps(v), labels);
+  const bw = Math.min(24, f.band * 0.55);
+  let bars = '', hits = '';
+  steps.forEach((s, i) => {
+    const v = Number(s.tps) || 0, cx = f.x(i), top = f.y(v);
+    bars += `<path d="${barPath(cx, bw, f.y(0), top)}" fill="${RP_COLOR.tps}"/>`;
+    if (s.step === bestStep || i === steps.length - 1) {
+      bars += `<text x="${cx}" y="${top - 5}" text-anchor="middle" font-size="10.5" font-weight="600" fill="${RP_COLOR.ink}">${esc(fmtTps(v))}</text>`;
+    }
+    if (s.step === bestStep) {
+      bars += `<text x="${cx}" y="${f.T + 8}" text-anchor="middle" font-size="9.5" fill="#198754">최저 응답</text>`;
+    }
+    hits += `<rect x="${cx - f.band / 2}" y="${f.T}" width="${f.band}" height="${f.ph}" fill="transparent" data-tip="${esc(
+      `단계 ${s.step} · 워커 ${s.workers}\nTPS ${fmtTps(v)} · 응답 ${fmtSec(s.totalSec)}\n성공 ${s.success} · 실패 ${s.fail} · 타임아웃 ${s.timeout}`)}"/>`;
+  });
+  tps.innerHTML = `<svg viewBox="0 0 ${f.W} ${f.H}" class="rp-svg" role="img" aria-label="워커 수별 TPS">${f.g}
+    <line x1="${f.L}" x2="${f.W - f.R}" y1="${f.y(0)}" y2="${f.y(0)}" stroke="${RP_COLOR.axis}"/>${bars}${hits}</svg>`;
+
+  // ② XVARM 확보 대기 — 평균·최대 두 계열(범례 + 끝 라벨) · 한도는 점선 기준선
+  //   축은 값에 맞춘다. 한도(예: 60초)에 맞추면 0.1초짜리 대기가 바닥에 붙어 변화가 안 보인다 —
+  //   한도가 축 가까이(1.5배 안)에 있을 때만 축을 한도까지 늘려 점선을 긋고, 멀면 글로 적는다.
+  const lim = Number(limitSec) || 0;
+  const dataMax = Math.max(0, ...steps.map(s => (Number(s.acquireMaxMs) || 0) / 1000));
+  let aMax = niceMax(dataMax * 1.3 || 1);
+  const limOnAxis = lim > 0 && lim <= aMax * 1.5;
+  if (limOnAxis) aMax = niceMax(Math.max(aMax, lim * 1.1));
+  const secTick = v => v === 0 ? '0' : v < 1 ? `${Math.round(v * 1000)}ms` : `${Math.round(v * 10) / 10}s`;
+  const g = chartFrame(steps.length, aMax, secTick, labels, 34);
+  const line = (key, color) => {
+    const pts = steps.map((s, i) => [g.x(i), g.y((Number(s[key]) || 0) / 1000)]);
+    const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join(' ');
+    return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`
+      + pts.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="${color}" stroke="#fff" stroke-width="2"/>`).join('');
+  };
+  let limHtml = '';
+  if (lim > 0 && !limOnAxis) {
+    limHtml = `<text x="${g.W - g.R}" y="${g.T + 4}" text-anchor="end" font-size="10" fill="${RP_COLOR.muted}">한도 ${lim}초 — 축 위쪽(여유 큼)</text>`;
+  } else if (lim > 0) {
+    const ly = g.y(lim);
+    limHtml = `<line x1="${g.L}" x2="${g.W - g.R}" y1="${ly}" y2="${ly}" stroke="${RP_COLOR.muted}" stroke-width="1.5" stroke-dasharray="5 4"/>`
+      + `<text x="${g.W - g.R}" y="${ly - 4}" text-anchor="end" font-size="10" fill="${RP_COLOR.ink}">한도 ${lim}초</text>`;
+  }
+  const last = steps.length - 1;
+  // 끝 라벨 — 두 선이 붙어 있으면 겹치므로 빼고 범례에 맡긴다
+  const gap = Math.abs(g.y((Number(steps[last].acquireAvgMs) || 0) / 1000) - g.y((Number(steps[last].acquireMaxMs) || 0) / 1000));
+  const endLbl = (key, dy) => `<text x="${g.x(last) + 7}" y="${g.y((Number(steps[last][key]) || 0) / 1000) + dy}" font-size="10" fill="${RP_COLOR.ink}">${
+    key === 'acquireMaxMs' ? '최대' : '평균'}</text>`;
+  let ahits = '';
+  steps.forEach((s, i) => {
+    ahits += `<rect x="${g.x(i) - g.band / 2}" y="${g.T}" width="${g.band}" height="${g.ph}" fill="transparent" data-tip="${esc(
+      `단계 ${s.step} · 워커 ${s.workers}\nXVARM 확보 대기 평균 ${fmtMs(s.acquireAvgMs)} · 최대 ${fmtMs(s.acquireMaxMs)}${lim ? `\n한도 ${lim}초` : ''}`)}"/>`;
+  });
+  acq.innerHTML = `<div class="rp-legend"><span><i style="background:${RP_COLOR.avg}"></i>평균</span><span><i style="background:${RP_COLOR.max}"></i>최대</span>${
+      limOnAxis ? '<span><i class="dash"></i>한도</span>' : ''}</div>
+    <svg viewBox="0 0 ${g.W} ${g.H}" class="rp-svg" role="img" aria-label="워커 수별 XVARM 확보 대기">${g.g}
+    <line x1="${g.L}" x2="${g.W - g.R}" y1="${g.y(0)}" y2="${g.y(0)}" stroke="${RP_COLOR.axis}"/>${limHtml}
+    ${line('acquireAvgMs', RP_COLOR.avg)}${line('acquireMaxMs', RP_COLOR.max)}
+    ${steps.length > 1 && gap >= 12 ? endLbl('acquireAvgMs', 12) + endLbl('acquireMaxMs', -6) : ''}${ahits}</svg>`;
+}
+
+// 차트 호버 — 막대·점보다 넓은 세로 띠가 받는다
+document.addEventListener('mousemove', (e) => {
+  const t = e.target.closest ? e.target.closest('.rp-svg [data-tip]') : null;
+  const tip = $('rp-tip');
+  if (!t) { tip.hidden = true; return; }
+  tip.textContent = t.getAttribute('data-tip');
+  tip.hidden = false;
+  tip.style.left = (e.clientX + 14) + 'px';
+  tip.style.top = (e.clientY + 12) + 'px';
+});
+
+async function rpFinish(c) {
+  await rpLoadHistory();
+  rpRender(c);
+  const r = c.result;
+  if (r) {
+    const best = r.best;
+    log(`✔ 임계 성능 테스트 종료 — ${r.stopReason}${best ? ` · 최적 워커 ${best.workers} (${fmtSec(best.totalSec)} · ${fmtTps(best.tps)} TPS)` : ''}`, 'ok');
+    showPopup('임계 성능 테스트 종료', `<div class="pop-lead">${esc(r.stopReason || '')}</div>
+      <ul class="pop-list">
+        <li><span class="lbl">돌린 단계:</span> ${(r.steps || []).length}단계 · 워커 ${esc((r.steps || []).map(s => s.workers).join(' → '))}</li>
+        ${best ? `<li><span class="lbl">최적 워커:</span> <span class="n">${best.workers}</span> — 응답 ${esc(fmtSec(best.totalSec))} · ${fmtTps(best.tps)} TPS</li>` : ''}
+      </ul>
+      <div class="sub mt-2">② 실시간 결과의 차트·표와 ③ 이력에 남았습니다.</div>`);
+  } else {
+    log(`✖ 임계 성능 테스트 실패 — ${c.error || c.message}`, 'er');
+    showPopup('임계 성능 테스트 실패', `<div class="pop-lead">${esc(c.error || c.message || '')}</div>`);
+  }
+}
+
+async function rpLoadHistory() {
+  const h = await quietGet('/api/v1/mock/perf/ramp/runs');
+  RP_HIST = h?.items || [];
+  $('rp-hist-file').textContent = h ? `— ${h.total}회 · ${h.file}` : '— 이력을 읽지 못했습니다';
+  const body = $('rp-hist');
+  if (!RP_HIST.length) {
+    body.innerHTML = '<tr><td colspan="7" class="hint text-center py-3">아직 이력이 없습니다</td></tr>';
+    return;
+  }
+  body.innerHTML = RP_HIST.map((x, i) => {
+    const steps = x.steps || [];
+    const peak = Math.max(0, ...steps.map(s => Number(s.tps) || 0));
+    return `<tr data-i="${i}" title="눌러서 ② 에 표시">
+      <td class="font-monospace">${esc(String(x.at || '').replace('T', ' ').slice(5, 16))}</td>
+      <td class="text-end">${steps.length}</td>
+      <td>${esc(steps.map(s => s.workers).join('→'))}</td>
+      <td class="text-end fw-semibold">${x.best?.workers ?? '—'}</td>
+      <td class="text-end">${fmtTps(peak)}</td>
+      <td>${esc(latText(x.latency))}</td>
+      <td>${esc(x.stopReason || '')}</td></tr>`;
+  }).join('');
+}
+
+function rpCsv() {
+  if (!RP_HIST.length) { log('내보낼 임계 성능 테스트 이력이 없습니다', 'wr'); return; }
+  const head = ['실행ID', '시각', '단계', '워커', '응답초', 'TPS', '평균ms', '확보평균ms', '확보최대ms', 'STT평균ms',
+    '성공', '실패', '타임아웃', '힙PeakMB', 'HikariPeak', '정합성', '최저응답', '조기종료', 'EXEC_ID', '종료사유'];
+  const rows = [];
+  RP_HIST.slice().reverse().forEach(x => (x.steps || []).forEach(s => rows.push([x.runId, x.at, s.step, s.workers, s.totalSec, s.tps,
+    s.avgMs, s.acquireAvgMs, s.acquireMaxMs, s.sttAvgMs, s.success, s.fail, s.timeout, s.heap?.peakMb ?? '', s.hikari?.peak ?? '',
+    s.checksOk === null || s.checksOk === undefined ? '확인불가' : (s.checksOk ? 'OK' : 'NG'),
+    s.step === x.bestStep ? 'Y' : '', s.earlyStop || '', s.execId, x.stopReason])));
+  downloadCsv('perf_ramp', head, rows);
+}
+
+async function rpClearHistory() {
+  const ok = await confirmPopup('임계 성능 테스트 이력 비우기',
+    `<div class="pop-lead">이력 ${RP_HIST.length}회를 지웁니다.</div><div class="hint mt-2">먼저 [CSV 내보내기] 로 남겨 두십시오.</div>`, '지우기', '취소');
+  if (!ok) return;
+  const d = await call('DELETE', '/api/v1/mock/perf/ramp/runs', '임계 성능 테스트 이력 비우기');
+  if (d) log(`  └ 이력 ${d.deleted}회 삭제 — ${d.file}`, 'ok');
+  await rpLoadHistory();
 }
 
 /** 탭을 열 때 — STT 엔진은 1번 탭에서 바뀔 수 있으니 다시 읽는다. */
@@ -2677,24 +3276,30 @@ async function pfOnShow() {
 
 async function pfInit() {
   PF_INFO = await quietGet('/api/v1/mock/perf/info');
+  pfSyncInputs();
+  rpSyncInputs();
   pfRenderInfo();
-  pfSyncRange();
-  await pfLoadHistory();
+  await Promise.all([pfLoadHistory(), rpLoadHistory()]);
   const c = await quietGet('/api/v1/mock/perf/runs/current');
   if (c && c.active) {
-    log(`성능 테스트가 이미 돌고 있습니다 — ${c.runId} (${c.phaseLabel}) · 진행을 이어서 보여 줍니다`, 'hd');
+    log(`성능 시험이 이미 돌고 있습니다 — ${c.runId} (${c.kind === 'RAMP' ? '임계 성능' : '기본 부하'} · ${c.phaseLabel}) · 진행을 이어서 보여 줍니다`, 'hd');
     pfWatch();
-  } else if (c && c.result) {
-    pfRenderReport(c.result);
-  } else if (PF_HIST.length) {
-    pfRenderReport(PF_HIST[0]);
+    return;
   }
+  if (c && c.result && c.kind === 'BASIC') pfRenderReport(c.result);
+  else if (PF_HIST.length) pfRenderReport(PF_HIST[0]);
+  if (c && c.result && c.kind === 'RAMP') rpRender(c);
+  else if (RP_HIST.length) rpRender({ result: RP_HIST[0], runId: RP_HIST[0].runId, request: RP_HIST[0].request });
 }
 
 document.querySelectorAll('.pf-preset').forEach(b => { b.onclick = () => pfApplyPreset(b.dataset.s); });
-['pf-count', 'pf-conc', 'pf-lmode', 'pf-lat', 'pf-latmax', 'pf-timeout'].forEach(id => {
-  $(id).addEventListener('input', () => { pfSyncRange(); pfEstimate(); });
-  $(id).addEventListener('change', () => { pfSyncRange(); pfEstimate(); });
+document.querySelectorAll('.rp-preset').forEach(b => { b.onclick = () => rpApplyPreset(b.dataset.s); });
+['pf-meet', 'pf-phone', 'pf-sttpct', 'pf-conc', 'pf-lmode', 'pf-lat-meet', 'pf-lat-phone', 'pf-jitter', 'pf-timeout'].forEach(id => {
+  ['input', 'change'].forEach(ev => $(id).addEventListener(ev, () => { pfSyncInputs(); pfEstimate(); }));
+});
+['rp-meet', 'rp-phone', 'rp-sttpct', 'rp-lmode', 'rp-lat-meet', 'rp-lat-phone', 'rp-jitter', 'rp-timeout',
+ 'rp-w0', 'rp-smode', 'rp-svalue', 'rp-max', 'rp-patience', 'rp-acq', 'rp-sttstop'].forEach(id => {
+  ['input', 'change'].forEach(ev => $(id).addEventListener(ev, () => { rpSyncInputs(); rpPlanPreview(); }));
 });
 $('pf-start').onclick = pfStart;
 $('pf-cancel').onclick = pfCancel;
@@ -2703,6 +3308,16 @@ $('pf-hist-clear').onclick = pfClearHistory;
 $('pf-hist').onclick = (e) => {
   const tr = e.target.closest('tr[data-i]');
   if (tr) pfRenderReport(PF_HIST[Number(tr.dataset.i)]);
+};
+$('rp-start').onclick = rpStart;
+$('rp-cancel').onclick = pfCancel;
+$('rp-csv').onclick = rpCsv;
+$('rp-hist-clear').onclick = rpClearHistory;
+$('rp-hist').onclick = (e) => {
+  const tr = e.target.closest('tr[data-i]');
+  if (!tr || PF_TIMER) return;
+  const x = RP_HIST[Number(tr.dataset.i)];
+  rpRender({ result: x, runId: x.runId, request: x.request });
 };
 
 

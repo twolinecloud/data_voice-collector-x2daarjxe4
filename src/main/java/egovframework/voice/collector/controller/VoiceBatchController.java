@@ -281,9 +281,10 @@ public class VoiceBatchController {
                     한 배치(EXEC_ID)의 결과가 **로그 테이블과 PV 에 실제로 어떻게 남았는지**를 한 장으로 돌려줍니다.
 
                     - `db` — 로그 컬렉터를 통해 T1(`kcais.tb_batch_exec_log`) · T2(`tb_batch_step_log`) ·
-                      T4(`tb_file_proc_log`, 상태별) · T5(`tb_deident_send_log`, 상태별). 이 서비스는 로그 DB 에 직접 붙지 않습니다
+                      T4(`tb_file_proc_log`, 상태별). 이 서비스는 로그 DB 에 직접 붙지 않습니다.
+                      T5(`tb_deident_send_log`)는 수집기가 쓰지 않아 싣지 않습니다
                     - `files` — 복호화 보존물(`{ROOT}/xvram/decoding/decrypted_*`) · 전사 보존물(`{ROOT}/stt_temp/{execId}`) ·
-                      STT 결과(`{ROOT}/xenon/{kind}/{execId}`)
+                      STT 결과(`{ROOT}/xenon/{kind}/{execId}`). 파일 이름은 처음 2개(`head`)·마지막 2개(`tail`)만 싣습니다
                     - `sql` · `cli` — 위를 **손으로** 확인할 때 그대로 복사해 쓰는 SQL 과 `ls`/`cat` 명령.
                       배포 환경이면 `kubectl exec` 접두가 붙습니다
                     """)

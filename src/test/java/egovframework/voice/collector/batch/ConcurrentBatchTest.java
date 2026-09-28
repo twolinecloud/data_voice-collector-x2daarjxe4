@@ -78,7 +78,7 @@ class ConcurrentBatchTest {
     @BeforeEach
     void seed() {
         idempotency.clearAll();
-        sim.seedPerf(6, 6);
+        sim.seedPerf(6, 6, 20);   // 전화 6건 중 20% → 1건(4번)이 보라미 기존 STT 를 가진다
         clearInvocations(logCollector);
     }
 
@@ -95,7 +95,7 @@ class ConcurrentBatchTest {
     @Test
     @DisplayName("워커 4개 · 12건 — 전건 성공, T2 단계 행은 단계마다 하나, 결과는 대상 순서 그대로")
     void concurrentRunMatchesSequentialShape() {
-        latency.apply(MockSttLatency.Mode.FIXED, 200, 200, 0);
+        latency.apply(MockSttLatency.Mode.FIXED, 200, 200, 0, 0);
 
         long t0 = System.currentTimeMillis();
         VoiceBatchResult r = collect.run(yesterday(), null, "TEST", true, ResumeMode.FULL, null, 4);
@@ -130,11 +130,11 @@ class ConcurrentBatchTest {
     @DisplayName("STT 가상 지연이 타임아웃을 넘으면 그 건만 실패 — 사유는 SttTimeoutException, 나머지는 성공")
     void sttTimeoutFailsOnlyThatFile() {
         // 고정 300ms · 타임아웃 100ms → 전건 타임아웃
-        latency.apply(MockSttLatency.Mode.FIXED, 300, 300, 100);
+        latency.apply(MockSttLatency.Mode.FIXED, 300, 300, 0, 100);
 
         VoiceBatchResult r = collect.run(yesterday(), null, "TEST", true, ResumeMode.FULL, null, 4);
 
-        // 전화 3번은 보라미가 이미 STT 를 가진 건이라 STT 를 부르지 않는다 → 그 한 건만 성공
+        // 기 STT 가 있는 전화 한 건은 STT 를 부르지 않는다(Bypass) → 그 한 건만 성공
         List<FileProcOutcome> failed = r.outcomes().stream().filter(o -> !o.isSuccess()).toList();
         assertThat(r.successCnt()).isEqualTo(1);
         assertThat(failed).hasSize(11);
@@ -148,7 +148,7 @@ class ConcurrentBatchTest {
     @Test
     @DisplayName("동시 처리 중 중단 — 시작하지 않은 건은 건너뜀, 합계는 대상 수와 같다")
     void cancelDuringConcurrentRun() throws Exception {
-        latency.apply(MockSttLatency.Mode.FIXED, 300, 300, 0);
+        latency.apply(MockSttLatency.Mode.FIXED, 300, 300, 0, 0);
         Thread canceller = new Thread(() -> {
             try {
                 long until = System.currentTimeMillis() + 10_000;

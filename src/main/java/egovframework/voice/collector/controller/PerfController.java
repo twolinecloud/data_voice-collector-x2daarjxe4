@@ -2,6 +2,7 @@ package egovframework.voice.collector.controller;
 
 import egovframework.voice.collector.perf.PerfRequest;
 import egovframework.voice.collector.perf.PerfRunService;
+import egovframework.voice.collector.perf.RampRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -25,8 +26,8 @@ import java.util.Map;
  * <p><b>{@code /api/v1/mock/**} 아래에 둔다</b> — 공용 DB 에 SIM 데이터를 만들고 지우는 시험 기능이라
  * 운영에서는 다른 시뮬레이터 API 와 함께 인그레스·게이트웨이에서 막는다.</p>
  */
-@Tag(name = "10. 성능 테스트 (Mock 전용)",
-        description = "실제 파이프라인을 N건(최대 300)으로 돌려 처리량·단계별 시간·자원을 잰다. STT 만 MOCK(가상 지연). 운영에서는 /api/v1/mock/** 를 차단한다")
+@Tag(name = "10. 성능 시험 (Mock 전용)",
+        description = "기본 부하 검증(4번 탭)·임계 성능 시험(5번 탭) — 실제 파이프라인을 N건(최대 300)으로 돌려 처리량·단계별 시간·자원을 잰다. STT 만 MOCK(가상 지연). 운영에서는 /api/v1/mock/** 를 차단한다")
 @RestController
 @RequestMapping(value = "/api/v1/mock/perf", produces = MediaType.APPLICATION_JSON_VALUE)
 @RequiredArgsConstructor
@@ -44,18 +45,18 @@ public class PerfController {
         return perf.info(batchConcurrency);
     }
 
-    @Operation(summary = "성능 테스트 시작 (비동기)",
+    @Operation(summary = "기본 부하 검증 시작 (비동기)",
             description = """
                     한 회차를 시작하고 바로 돌아옵니다. 진행은 `GET /runs/current` 로 봅니다.
 
-                    1. **준비** — 로컬 산출물을 비우고 원천 DB 에 SIM 데이터 N건(접견·전화 반반)을 **어제 하루**에 만듭니다.
+                    1. **준비** — 로컬 산출물을 비우고 원천 DB 에 SIM 데이터(접견 N · 전화 N, 전화 중 기 STT 비율만큼 `TELP_STT_FLPTH_NM` 채움)를 **어제 하루**에 만듭니다.
                        개발계에서는 **공용 DB** 에 만들어지므로 다른 작업자와 시간이 겹치지 않게 하십시오
                     2. **측정** — `[어제 00:00, 오늘 00:00)` 를 워커 N개로 처리합니다(`TEST_BATCH` · `MANUAL` · 실행 주체 `PERF`).
                        STT 가 MOCK 이면 가상 지연·타임아웃을 겁니다
                     3. **검증** — 로그 컬렉터에서 T1·T2·T4 를 되읽어 맞춰 봅니다
                     4. **정리** — SIM 행과 원본 더미 파일을 지웁니다. 로그(TST)와 STT 출력은 남습니다
 
-                    - 400 — 범위 밖(건수 10~300 · 지연 0~5,000ms · 동시성 1/2/4/8/16 · 타임아웃 100~600,000ms)
+                    - 400 — 범위 밖(접견+전화 2~300 · 기 STT 0~100% · 지연 0~600,000ms · 동시성 1/2/4/8/16 · 타임아웃 100~1,800,000ms)
                     - 409 — 이미 성능 테스트나 배치가 돌고 있음
                     """)
     @PostMapping("/runs")
@@ -87,6 +88,36 @@ public class PerfController {
     @DeleteMapping("/runs")
     public Map<String, Object> clearHistory() {
         return perf.clearHistory();
+    }
+
+    @Operation(summary = "임계 성능 시험 시작 — 워커 램프업 (비동기)",
+            description = """
+                    시작 워커부터 단계마다 워커를 늘려(+N 또는 ×N) **같은 건수**를 처리합니다. 단계마다 SIM 데이터를 다시 만듭니다.
+                    진행은 `GET /runs/current`(`kind=RAMP` · `steps` 가 단계마다 쌓임), 중지는 `POST /runs/cancel` 로 봅니다.
+
+                    **조기 종료**
+                    - 최저 응답 시간(단계 총 소요) 뒤 `patience` 번 연속 그보다 빨라지지 않으면 — 포화
+                    - XVARM 확보 대기가 `acquireLimitSec` 초를 넘으면 — 단계 도중에도 즉시(처리 중인 건만 끝낸다)
+                    - STT 에러·타임아웃이 나면 — 단계 도중에도 즉시(`stopOnSttError`)
+
+                    - 400 — 범위 밖 · 단계 20개 초과
+                    - 409 — 이미 성능 시험이나 배치가 돌고 있음
+                    """)
+    @PostMapping("/ramp/runs")
+    public ResponseEntity<Map<String, Object>> startRamp(@RequestBody(required = false) RampRequest req) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(perf.startRamp(req));
+    }
+
+    @Operation(summary = "임계 성능 시험 이력", description = "`{ROOT}/perf/ramp-history.jsonl` — 최근 회차가 앞. 회차마다 단계 표와 최적 워커가 실린다.")
+    @GetMapping("/ramp/runs")
+    public Map<String, Object> rampHistory() {
+        return perf.rampHistory();
+    }
+
+    @Operation(summary = "임계 성능 시험 이력 비우기")
+    @DeleteMapping("/ramp/runs")
+    public Map<String, Object> clearRampHistory() {
+        return perf.clearRampHistory();
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
