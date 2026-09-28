@@ -374,8 +374,7 @@
     <li class="nav-item"><button type="button" class="nav-link active" data-tab="tab-env">1. 환경 &amp; 디렉터리 설정</button></li>
     <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-pipeline">2. 파이프라인 제어 &amp; 검증</button></li>
     <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-fault">3. 장애 &amp; 재처리 시나리오 <span class="hint" id="adv-sum"></span></button></li>
-    <!-- 배포 화면에서는 ?perf=true 일 때만 보인다(applyPerfGate) — 검증이 끝나기 전까지 -->
-    <li class="nav-item d-none"><button type="button" class="nav-link" data-tab="tab-perf">4. 성능 테스트</button></li>
+    <li class="nav-item"><button type="button" class="nav-link" data-tab="tab-perf">4. 성능 테스트</button></li>
   </ul>
 
   <div id="tab-panes">
@@ -2264,20 +2263,6 @@ $('btn-log-tall').onclick = (e) => {
 // ── 4번 탭 — 성능 테스트 ───────────────────────────────────────────────
 // 실제 파이프라인을 N건으로 돌려 처리량·단계별 시간·자원을 잰다. 서버가 한 회차를 비동기로 돌리고
 //   (준비 → 측정 → 검증 → 정리), 화면은 GET /api/v1/mock/perf/runs/current 를 읽어 그린다.
-//
-// 배포 화면에서는 ?perf=true 일 때만 탭을 보인다 — 검증이 끝나기 전에 다른 사람이 공용 DB 에
-//   SIM 300건을 만들지 않게. 로컬(수집기가 local 프로파일 · 접속 호스트가 localhost)은 늘 보인다.
-const PERF_PARAM = new URLSearchParams(location.search).get('perf') === 'true';
-let ENV_KIND = null;          // loadConfig 가 채운다 — LOCAL | K8S
-let PERF_ALLOWED = false;
-function applyPerfGate() {
-  const deployed = ENV_KIND === 'K8S' || !isLocalHost(location.hostname);
-  PERF_ALLOWED = PERF_PARAM || !deployed;
-  const li = document.querySelector('#sim-tabs [data-tab="tab-perf"]')?.closest('.nav-item');
-  if (li) li.classList.toggle('d-none', !PERF_ALLOWED);
-  if (!PERF_ALLOWED && $('tab-perf').classList.contains('active')) showTab('tab-env');
-  return PERF_ALLOWED;
-}
 
 // 시나리오 프리셋 — 버튼을 누르면 입력칸을 채운다. 합격 기준은 기획안의 제안값이다.
 const PF_SCEN = {
@@ -2685,7 +2670,7 @@ async function pfClearHistory() {
 
 /** 탭을 열 때 — STT 엔진은 1번 탭에서 바뀔 수 있으니 다시 읽는다. */
 async function pfOnShow() {
-  if (!PERF_ALLOWED || PF_TIMER) return;
+  if (PF_TIMER) return;
   PF_INFO = await quietGet('/api/v1/mock/perf/info');
   pfRenderInfo();
 }
@@ -2727,7 +2712,6 @@ async function loadConfig() {
   const c = await call('GET', '/api/v1/voice/config', '환경 설정 조회 (자동 프리셋)', true);
   if (!c || !c.env) { if (!API_DOWN) $('env-line').textContent = '환경 정보를 받지 못했습니다'; return; }
   const e = c.env;
-  ENV_KIND = e.kind;
   $('env-line').innerHTML = `환경 <b>${esc(e.kindLabel)}</b> · ${esc(e.os)} · profile ${esc((e.profiles||[]).join(','))}`
     + ` · ROOT_DIR <code>${esc(e.rootDir)}</code> <span class="text-secondary">(${esc(e.rootDirSource)})</span>`
     + ` · 브로커 <code>${esc(e.brokerBaseUrl)}</code> <span class="text-secondary">(${esc(e.brokerBaseUrlSource)})</span>`
@@ -2742,7 +2726,7 @@ log('접견과 전화는 연동 경로가 완전히 다릅니다 — 전화는 X
 (async () => {
   await detectApiBase();
   await loadConfig();
-  if (applyPerfGate()) pfInit();
+  pfInit();
   await loadStatus(false);
   await loadOnDemandHint();
   await checkHealth(true);
