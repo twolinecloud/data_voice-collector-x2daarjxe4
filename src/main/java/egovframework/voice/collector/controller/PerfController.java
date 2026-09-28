@@ -27,7 +27,7 @@ import java.util.Map;
  * 운영에서는 다른 시뮬레이터 API 와 함께 인그레스·게이트웨이에서 막는다.</p>
  */
 @Tag(name = "10. 성능 시험 (Mock 전용)",
-        description = "기본 부하 검증(4번 탭)·임계 성능 시험(5번 탭) — 실제 파이프라인을 N건(최대 300)으로 돌려 처리량·단계별 시간·자원을 잰다. STT 만 MOCK(가상 지연). 운영에서는 /api/v1/mock/** 를 차단한다")
+        description = "기본 부하 검증(4번 탭)·임계 성능 시험(5번 탭) — 실제 파이프라인을 N건(최대 300)으로 돌려 처리량·단계별 시간·자원을 잰다. STT 만 MOCK(건당 처리 시간 · 기본 고속 모드). 운영에서는 /api/v1/mock/** 를 차단한다")
 @RestController
 @RequestMapping(value = "/api/v1/mock/perf", produces = MediaType.APPLICATION_JSON_VALUE)
 @RequiredArgsConstructor
@@ -52,7 +52,11 @@ public class PerfController {
                     1. **준비** — 로컬 산출물을 비우고 원천 DB 에 SIM 데이터(접견 N · 전화 N, 전화 중 기 STT 비율만큼 `TELP_STT_FLPTH_NM` 채움)를 **어제 하루**에 만듭니다.
                        개발계에서는 **공용 DB** 에 만들어지므로 다른 작업자와 시간이 겹치지 않게 하십시오
                     2. **측정** — `[어제 00:00, 오늘 00:00)` 를 워커 N개로 처리합니다(`TEST_BATCH` · `MANUAL` · 실행 주체 `PERF`).
-                       STT 가 MOCK 이면 가상 지연·타임아웃을 겁니다
+                       STT 가 MOCK 이면 건당 STT 처리 시간·타임아웃을 겁니다
+                    - **고속 모드**(`realSleep` 비움·false, 기본) — STT 를 기다리지 않고 즉시 통과합니다. 건별 처리 시간을
+                      워커에 나눠 **가상 STT 시간**으로 더합니다: 총 소요 = 실제 소요 + 가상 STT, TPS = 처리 건수 ÷ 총 소요.
+                      처리 시간이 타임아웃을 넘은 건은 기다리지 않고 바로 타임아웃 실패(T4)로 남습니다
+                    - **실제 대기 모드**(`realSleep=true`) — 처리 시간만큼 실제로 기다립니다
                     3. **검증** — 로그 컬렉터에서 T1·T2·T4 를 되읽어 맞춰 봅니다
                     4. **정리** — SIM 행과 원본 더미 파일을 지웁니다. 로그(TST)와 STT 출력은 남습니다
 
@@ -100,7 +104,7 @@ public class PerfController {
                     - XVARM 확보 대기가 `acquireLimitSec` 초를 넘으면 — 단계 도중에도 즉시(처리 중인 건만 끝낸다)
                     - STT 에러·타임아웃이 나면 — 단계 도중에도 즉시(`stopOnSttError`)
 
-                    - 400 — 범위 밖 · 단계 20개 초과
+                    - 400 — 범위 밖 · 단계 64개 초과
                     - 409 — 이미 성능 시험이나 배치가 돌고 있음
                     """)
     @PostMapping("/ramp/runs")

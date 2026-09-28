@@ -33,6 +33,8 @@ public class MockSttClient implements SttClient {
     private final MockSttLatency latency;
     /** 중단 요청을 본다 — 가상 지연은 수 분이라, 다 기다리면 [중지]가 먹지 않는 것처럼 보인다. */
     private final egovframework.voice.collector.batch.BatchProgress progress;
+    /** 고속 모드에서 기다리지 않은 처리 시간을 적어 두는 곳 — 성능 시험 리포트가 합산한다. */
+    private final egovframework.voice.collector.perf.PerfStageMeter meter;
 
     /** 가상 지연을 이 간격으로 잘라 자면서 중단 요청을 본다. */
     private static final long PAUSE_SLICE_MS = 200L;
@@ -94,6 +96,16 @@ public class MockSttClient implements SttClient {
     private void simulateLatency(VoiceFile file) {
         long delay = latency.draw(file.target().kind());
         long timeout = latency.timeoutMs();
+        if (latency.fastForward()) {
+            // 고속 모드 — 기다리지 않는다. 기다렸을 시간(타임아웃이면 타임아웃까지)만 적는다
+            boolean timedOut = timeout > 0 && delay > timeout;
+            meter.addVirtual(timedOut ? timeout : delay);
+            if (timedOut) {
+                throw new SttTimeoutException("STT 응답 없음 — %dms 초과 (건당 처리 시간 %dms · 고속 모드: 기다리지 않음 · %s)"
+                        .formatted(timeout, delay, file.target().shortId()));
+            }
+            return;
+        }
         if (timeout > 0 && delay > timeout) {
             pause(timeout);
             throw new SttTimeoutException("STT 응답 없음 — %dms 초과 (가상 지연 %dms · %s)"

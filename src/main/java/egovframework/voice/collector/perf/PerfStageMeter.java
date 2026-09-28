@@ -33,6 +33,8 @@ public class PerfStageMeter {
     private final Map<PerfStage, LongAdder> counts = new EnumMap<>(PerfStage.class);
     private final Map<PerfStage, AtomicLong> maxNanos = new EnumMap<>(PerfStage.class);
     private final Map<PerfStage, LongAdder> errors = new EnumMap<>(PerfStage.class);
+    /** 고속 모드에서 기다리지 않은 건별 STT 처리 시간(ms) — 리포트가 워커에 나눠 총 소요에 더한다. */
+    private final java.util.Queue<Long> virtualMs = new java.util.concurrent.ConcurrentLinkedQueue<>();
     /** 지금 그 단계에 머물러 있는 스레드와 들어간 시각 — 한 스레드는 한 번에 한 건만 처리한다. */
     private final Map<PerfStage, Map<Thread, Long>> inFlight = new EnumMap<>(PerfStage.class);
 
@@ -55,6 +57,7 @@ public class PerfStageMeter {
             errors.get(s).reset();
             inFlight.get(s).clear();
         }
+        virtualMs.clear();
         active = true;
     }
 
@@ -98,6 +101,18 @@ public class PerfStageMeter {
         if (active) {
             errors.get(stage).increment();
         }
+    }
+
+    /** 고속 모드 — 이 건이 실제였다면 STT 에 썼을 시간(ms). */
+    public void addVirtual(long ms) {
+        if (active) {
+            virtualMs.add(Math.max(0L, ms));
+        }
+    }
+
+    /** 고속 모드로 건너뛴 건별 STT 처리 시간(ms) — 적힌 순서대로. */
+    public List<Long> virtualSttMs() {
+        return List.copyOf(virtualMs);
     }
 
     public long errors(PerfStage stage) {

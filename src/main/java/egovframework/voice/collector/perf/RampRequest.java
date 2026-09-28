@@ -23,47 +23,50 @@ import java.util.Locale;
  */
 @Schema(description = "임계 성능 시험(워커 램프업) 조건")
 public record RampRequest(
-        @Schema(description = "단계마다 만들 접견 건수", example = "16") Integer meetCount,
-        @Schema(description = "단계마다 만들 전화 건수", example = "16") Integer phoneCount,
+        @Schema(description = "단계마다 만들 접견 건수", example = "150") Integer meetCount,
+        @Schema(description = "단계마다 만들 전화 건수", example = "150") Integer phoneCount,
         @Schema(description = "기 STT 존재 비율(%)", example = "3") Integer sttPercent,
-        @Schema(description = "STT 가상 지연 방식 — FIXED · RANGE", example = "FIXED") String latencyMode,
-        @Schema(description = "접견 STT 가상 지연(ms)", example = "180000") Long meetLatencyMs,
-        @Schema(description = "전화 STT 가상 지연(ms)", example = "120000") Long phoneLatencyMs,
+        @Schema(description = "건당 STT 처리 시간 방식 — FIXED · RANGE", example = "FIXED") String latencyMode,
+        @Schema(description = "접견 건당 STT 처리 시간(ms)", example = "180000") Long meetLatencyMs,
+        @Schema(description = "전화 건당 STT 처리 시간(ms)", example = "120000") Long phoneLatencyMs,
         @Schema(description = "범위일 때 ± 변동 폭(%)", example = "0") Integer jitterPercent,
         @Schema(description = "STT 타임아웃(ms) — 비우면 적용 안 함", example = "") Long sttTimeoutMs,
-        @Schema(description = "시작 워커 수 — 1~64", example = "4") Integer startWorkers,
-        @Schema(description = "증가 방식 — ADD(+N) · MULTIPLY(×N)", example = "MULTIPLY") String stepMode,
-        @Schema(description = "증가 값 — ADD 면 1~32, MULTIPLY 면 2~4", example = "2") Integer stepValue,
+        @Schema(description = "시작 워커 수 — 1~64", example = "1") Integer startWorkers,
+        @Schema(description = "증가 방식 — ADD(+N) · MULTIPLY(×N)", example = "ADD") String stepMode,
+        @Schema(description = "증가 값 — ADD 면 1~32, MULTIPLY 면 2~4", example = "1") Integer stepValue,
         @Schema(description = "최대 워커 수 — 시작 이상 64 이하", example = "32") Integer maxWorkers,
         @Schema(description = "최저 응답 뒤 연속으로 개선이 없으면 멈출 횟수 — 1~10", example = "3") Integer patience,
         @Schema(description = "XVARM 확보 대기 한도(초) — 넘으면 즉시 멈춤. 0 이면 보지 않는다", example = "60")
         Integer acquireLimitSec,
-        @Schema(description = "STT 에러·타임아웃이 나면 즉시 멈출지", example = "true") Boolean stopOnSttError
+        @Schema(description = "STT 에러·타임아웃이 나면 즉시 멈출지", example = "true") Boolean stopOnSttError,
+        @Schema(description = "실제 대기 모드 — 비우거나 false 면 고속 모드(가상 시간 합산)", example = "false") Boolean realSleep
 ) {
 
     public static final int MAX_WORKERS = 64;
-    public static final int MAX_STEPS = 20;
+    /** +1 씩 1 → 64 까지도 한 번에 돌 수 있게 — 보통은 포화 판정이 먼저 멈춘다. */
+    public static final int MAX_STEPS = 64;
 
     public enum StepMode { ADD, MULTIPLY }
 
     public RampRequest withDefaults() {
         String mode = PerfRequest.mode(latencyMode);
         return new RampRequest(
-                meetCount == null ? 16 : meetCount,
-                phoneCount == null ? 16 : phoneCount,
+                meetCount == null ? PerfRequest.DEFAULT_MEET : meetCount,
+                phoneCount == null ? PerfRequest.DEFAULT_PHONE : phoneCount,
                 sttPercent == null ? PerfRequest.DEFAULT_STT_PERCENT : sttPercent,
                 mode,
                 meetLatencyMs == null ? PerfRequest.DEFAULT_MEET_LATENCY_MS : meetLatencyMs,
                 phoneLatencyMs == null ? PerfRequest.DEFAULT_PHONE_LATENCY_MS : phoneLatencyMs,
                 "RANGE".equals(mode) ? (jitterPercent == null ? PerfRequest.DEFAULT_JITTER : jitterPercent) : 0,
                 PerfRequest.timeout(sttTimeoutMs),
-                startWorkers == null ? 4 : startWorkers,
-                stepMode == null || stepMode.isBlank() ? "MULTIPLY" : stepMode.trim().toUpperCase(Locale.ROOT),
-                stepValue == null ? 2 : stepValue,
+                startWorkers == null ? 1 : startWorkers,
+                stepMode == null || stepMode.isBlank() ? "ADD" : stepMode.trim().toUpperCase(Locale.ROOT),
+                stepValue == null ? 1 : stepValue,
                 maxWorkers == null ? 32 : maxWorkers,
                 patience == null ? 3 : patience,
                 acquireLimitSec == null ? 60 : acquireLimitSec,
-                stopOnSttError == null ? Boolean.TRUE : stopOnSttError);
+                stopOnSttError == null ? Boolean.TRUE : stopOnSttError,
+                Boolean.TRUE.equals(realSleep));
     }
 
     public void validate(int maxFilesPerRun) {

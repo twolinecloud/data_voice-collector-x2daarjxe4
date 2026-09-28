@@ -11,7 +11,7 @@ import java.util.Locale;
  * 기본 부하 검증(4번 탭) 한 회차의 조건.
  *
  * <p>비운 값은 {@link #withDefaults()} 가 화면 기본값으로 채운다 — 접견 150 · 전화 150(합 300, 일일 한도) ·
- * 기 STT 3% · 동시성 4 · STT 가상 지연 접견 180,000ms / 전화 120,000ms(고정) · 타임아웃 없음.</p>
+ * 기 STT 3% · 동시성 4 · 건당 STT 처리 시간 접견 180,000ms / 전화 120,000ms(고정) · 타임아웃 없음 · 고속 모드.</p>
  */
 @Schema(description = "기본 부하 검증 조건")
 public record PerfRequest(
@@ -21,14 +21,16 @@ public record PerfRequest(
         @Schema(description = "기 STT 존재 비율(%) — 전화 중 이 비율에 TELP_STT_FLPTH_NM 을 채워 STT 를 건너뛰게 한다", example = "3")
         Integer sttPercent,
         @Schema(description = "동시에 처리할 워커 수 — 1 · 2 · 4 · 8 · 16", example = "4") Integer concurrency,
-        @Schema(description = "STT 가상 지연 방식 — FIXED(고정) · RANGE(기준값 ±변동 폭 균등 난수)", example = "FIXED") String latencyMode,
-        @Schema(description = "접견 STT 가상 지연(ms) — 0~600,000. 평균 접견 15분 → 변환 약 180초", example = "180000")
+        @Schema(description = "건당 STT 처리 시간 방식 — FIXED(고정) · RANGE(기준값 ±변동 폭 균등 난수)", example = "FIXED") String latencyMode,
+        @Schema(description = "접견 건당 STT 처리 시간(ms) — 0~600,000. 평균 접견 15분 → 건당 처리 시간 180초", example = "180000")
         Long meetLatencyMs,
-        @Schema(description = "전화 STT 가상 지연(ms) — 0~600,000. 평균 통화 5분 → 변환 약 120초", example = "120000")
+        @Schema(description = "전화 건당 STT 처리 시간(ms) — 0~600,000. 평균 통화 5분 → 건당 처리 시간 120초", example = "120000")
         Long phoneLatencyMs,
         @Schema(description = "범위일 때 기준값 대비 ± 변동 폭(%) — 0~100", example = "50") Integer jitterPercent,
-        @Schema(description = "STT 타임아웃(ms) — 가상 지연이 이 값을 넘으면 타임아웃 실패. 비우거나 0 이면 적용하지 않는다",
-                example = "150000") Long sttTimeoutMs
+        @Schema(description = "STT 타임아웃(ms) — 건당 처리 시간이 이 값을 넘으면 타임아웃 실패. 비우거나 0 이면 적용하지 않는다",
+                example = "200000") Long sttTimeoutMs,
+        @Schema(description = "실제 대기 모드 — true 면 처리 시간만큼 실제로 기다린다. 비우거나 false 면 고속 모드"
+                + "(기다리지 않고 가상 시간을 리포트에 합산)", example = "false") Boolean realSleep
 ) {
 
     public static final int MIN_TOTAL = 2;
@@ -57,7 +59,8 @@ public record PerfRequest(
                 meetLatencyMs == null ? DEFAULT_MEET_LATENCY_MS : meetLatencyMs,
                 phoneLatencyMs == null ? DEFAULT_PHONE_LATENCY_MS : phoneLatencyMs,
                 "RANGE".equals(mode) ? (jitterPercent == null ? DEFAULT_JITTER : jitterPercent) : 0,
-                timeout(sttTimeoutMs));
+                timeout(sttTimeoutMs),
+                Boolean.TRUE.equals(realSleep));
     }
 
     /**
@@ -109,7 +112,7 @@ public record PerfRequest(
         }
     }
 
-    /** STT 가상 지연 — 방식 · 트랙별 지연 · 변동 폭 · 타임아웃. */
+    /** 건당 STT 처리 시간 — 방식 · 트랙별 시간 · 변동 폭 · 타임아웃. */
     static void validateLoad(String latencyMode, Long meetMs, Long phoneMs, Integer jitter, Long timeoutMs) {
         try {
             MockSttLatency.Mode.valueOf(latencyMode);
@@ -129,7 +132,7 @@ public record PerfRequest(
 
     private static void checkLatency(String what, Long ms) {
         if (ms == null || ms < 0 || ms > MAX_LATENCY_MS) {
-            throw new IllegalArgumentException("%s STT 가상 지연은 0~%dms 이어야 합니다: %s".formatted(what, MAX_LATENCY_MS, ms));
+            throw new IllegalArgumentException("%s 건당 STT 처리 시간은 0~%dms 이어야 합니다: %s".formatted(what, MAX_LATENCY_MS, ms));
         }
     }
 }

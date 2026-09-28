@@ -142,15 +142,18 @@ public class PerfRunService {
 
     private volatile Run current;
 
-    /** STT 가상 지연 — 두 요청이 같은 모양으로 넘긴다. */
-    private record Load(MockSttLatency.Mode mode, long meetMs, long phoneMs, int jitterPercent, Long timeoutMs) {
+    /** 건당 STT 처리 시간 — 두 요청이 같은 모양으로 넘긴다. {@code realSleep} 이 아니면 고속 모드다. */
+    private record Load(MockSttLatency.Mode mode, long meetMs, long phoneMs, int jitterPercent, Long timeoutMs,
+                        boolean realSleep) {
 
         static Load of(PerfRequest r) {
-            return new Load(r.mode(), r.meetLatencyMs(), r.phoneLatencyMs(), r.jitterPercent(), r.sttTimeoutMs());
+            return new Load(r.mode(), r.meetLatencyMs(), r.phoneLatencyMs(), r.jitterPercent(), r.sttTimeoutMs(),
+                    Boolean.TRUE.equals(r.realSleep()));
         }
 
         static Load of(RampRequest r) {
-            return new Load(r.mode(), r.meetLatencyMs(), r.phoneLatencyMs(), r.jitterPercent(), r.sttTimeoutMs());
+            return new Load(r.mode(), r.meetLatencyMs(), r.phoneLatencyMs(), r.jitterPercent(), r.sttTimeoutMs(),
+                    Boolean.TRUE.equals(r.realSleep()));
         }
 
         Map<String, Object> describe() {
@@ -159,6 +162,7 @@ public class PerfRunService {
             m.put("meetMs", meetMs);
             m.put("phoneMs", phoneMs);
             m.put("jitterPercent", jitterPercent);
+            m.put("realSleep", realSleep);
             return m;
         }
     }
@@ -169,7 +173,8 @@ public class PerfRunService {
     /** 측정 한 번의 결과 — 배치 결과와 그동안의 자원·단계 시간. */
     private record Measured(VoiceBatchResult result, long heapStart, long heapEnd, long heapPeak,
                             List<Map<String, Object>> stages, Map<String, Object> hikari,
-                            double acquireMaxMs, long sttErrors, String earlyStop) {}
+                            double acquireMaxMs, long sttErrors, String earlyStop,
+                            boolean fastForward, int workers, List<Long> virtualSttMs) {}
 
     /** 한 회차의 진행 상태 — 러너 스레드가 쓰고 API 스레드가 읽는다. */
     private static final class Run {
@@ -213,7 +218,7 @@ public class PerfRunService {
      * @throws IllegalStateException    이미 성능 시험이나 배치가 돌고 있다(409)
      */
     public synchronized Map<String, Object> start(PerfRequest raw) {
-        PerfRequest req = (raw == null ? new PerfRequest(null, null, null, null, null, null, null, null, null, null) : raw)
+        PerfRequest req = (raw == null ? new PerfRequest(null, null, null, null, null, null, null, null, null, null, null) : raw)
                 .withDefaults();
         req.validate(props.batch().maxFilesPerRun());
         ensureIdle();
@@ -226,7 +231,7 @@ public class PerfRunService {
     /** 임계 성능 시험(워커 램프업)을 시작한다 — 비동기. */
     public synchronized Map<String, Object> startRamp(RampRequest raw) {
         RampRequest req = (raw == null ? new RampRequest(null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null) : raw).withDefaults();
+                null, null, null, null, null, null, null, null) : raw).withDefaults();
         req.validate(props.batch().maxFilesPerRun());
         ensureIdle();
         Run run = new Run(LocalDateTime.now().format(RUN_ID), Kind.RAMP, req);
@@ -406,7 +411,7 @@ public class PerfRunService {
                 VoiceBatchResult r = d.result();
                 // 도중에 끊긴 단계는 건수가 달라 응답 시간을 비교하지 않는다
                 if (!r.canceled()) {
-                    double sec = r.elapsedMs() / 1000d;
+                    double sec = ((Number) step.get("totalSec")).doubleValue();   // 고속 모드면 가상 STT 포함
                     if (bestSec == null || sec < bestSec) {
                         bestSec = sec;
                         sinceBest = 0;
@@ -473,9 +478,11 @@ public class PerfRunService {
         m.put("step", no);
         m.put("workers", workers);
         m.putAll(batchMetrics(d));
-        m.put("acquireAvgMs", stageAvg(d.stages(), PerfStage.ACQUIRE));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> stages = (List<Map<String, Object>>) m.get("stages");   // 고속 모드면 STT 는 가상 시간
+        m.put("acquireAvgMs", stageAvg(stages, PerfStage.ACQUIRE));
         m.put("acquireMaxMs", round(d.acquireMaxMs(), 1));
-        m.put("sttAvgMs", stageAvg(d.stages(), PerfStage.STT));
+        m.put("sttAvgMs", stageAvg(stages, PerfStage.STT));
         m.put("sttErrors", d.sttErrors());
         m.put("checksOk", checks.get("available") == Boolean.TRUE ? checks.get("ok") : null);
         m.put("sourceSttPhones", prep.seed().get("sourceSttPhones"));
@@ -569,7 +576,7 @@ public class PerfRunService {
      */
     private Measured measure(Load load, int workers, RampRequest guard, Run run) {
         latency.apply(load.mode(), load.meetMs(), load.phoneMs(), load.jitterPercent(),
-                load.timeoutMs() == null ? 0L : load.timeoutMs());
+                load.timeoutMs() == null ? 0L : load.timeoutMs(), !load.realSleep());
         LocalDate today = LocalDate.now();
         BatchWindow window = BatchWindow.manual(today.minusDays(1).atStartOfDay(), today.atStartOfDay());
         List<MemoryPoolMXBean> heapPools = ManagementFactory.getMemoryPoolMXBeans().stream()
@@ -598,27 +605,49 @@ public class PerfRunService {
             return u == null ? 0L : u.getUsed();
         }).sum();
         return new Measured(r, heapStart, heapEnd, heapPeak, meter.snapshot(), poolPeak.snapshot(),
-                meter.maxMs(PerfStage.ACQUIRE), meter.errors(PerfStage.STT), early);
+                meter.maxMs(PerfStage.ACQUIRE), meter.errors(PerfStage.STT), early,
+                !load.realSleep(), workers, meter.virtualSttMs());
     }
 
-    /** 배치 한 번의 처리량·결과·자원 — 기본 부하 결과와 임계 시험 표가 같이 쓴다. */
+    /**
+     * 배치 한 번의 처리량·결과·자원 — 기본 부하 결과와 임계 시험 표가 같이 쓴다.
+     *
+     * <p><b>고속 모드</b>면 STT 를 기다리지 않았으므로 건별로 적어 둔 처리 시간을 되살린다.</p>
+     * <ul>
+     *   <li>가상 STT 시간 = 건별 처리 시간을 워커 {@code W} 개에 나눠 준 뒤 가장 늦게 끝나는 워커의 시각
+     *       ({@link #distribute}) — 건수가 워커보다 충분히 많으면 합 ÷ W 와 같고, 적으면(8건 · 워커 16)
+     *       가장 긴 한 건이 된다. 합 ÷ W 로만 나누면 이때 실제보다 짧게 나온다</li>
+     *   <li>총 소요 = 실제 소요(파이프라인·DB·로그 통신) + 가상 STT 시간</li>
+     *   <li>TPS = 처리 건수(성공 + 실패) ÷ 총 소요</li>
+     *   <li>평균 처리 시간 · STT 단계 평균에도 가상 시간을 넣는다 — 안 넣으면 STT 가 0ms 로 보인다</li>
+     * </ul>
+     */
     private static Map<String, Object> batchMetrics(Measured d) {
         VoiceBatchResult r = d.result();
         List<FileProcOutcome> done = r.outcomes().stream().filter(o -> o.status() != ProcStatus.SKIPPED).toList();
-        double sec = r.elapsedMs() / 1000d;
+        double realSec = r.elapsedMs() / 1000d;
+        List<Long> virtual = d.fastForward() ? d.virtualSttMs() : List.of();
+        long virtualTotalMs = virtual.stream().mapToLong(Long::longValue).sum();
+        double virtualSec = distribute(virtual, d.workers()) / 1000d;
+        double sec = realSec + virtualSec;
+        long processed = (long) r.successCnt() + r.failCnt();
+        double realAvg = done.stream().mapToLong(FileProcOutcome::elapsedMs).average().orElse(0d);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("execId", r.execId());
         m.put("execStsCd", r.execStsCd());
         m.put("canceled", r.canceled());
+        m.put("fastForward", d.fastForward());
+        m.put("realSec", round(realSec, 2));
+        m.put("virtualSttSec", round(virtualSec, 2));
         m.put("totalSec", round(sec, 2));
-        m.put("avgMs", done.isEmpty() ? 0d : round(done.stream().mapToLong(FileProcOutcome::elapsedMs).average().orElse(0d), 1));
-        m.put("tps", sec <= 0 ? 0d : round(r.successCnt() / sec, 3));
+        m.put("avgMs", done.isEmpty() ? 0d : round(realAvg + (double) virtualTotalMs / done.size(), 1));
+        m.put("tps", sec <= 0 ? 0d : round(processed / sec, 3));
         m.put("total", r.targetCnt());
         m.put("success", r.successCnt());
         m.put("fail", r.failCnt());
         m.put("timeout", done.stream().filter(PerfRunService::isTimeout).count());
         m.put("skipped", r.skippedCnt());
-        m.put("stages", d.stages());
+        m.put("stages", d.fastForward() ? withVirtualStt(d.stages(), virtual) : d.stages());
         Map<String, Object> h = new LinkedHashMap<>();
         h.put("startMb", mb(d.heapStart()));
         h.put("endMb", mb(d.heapEnd()));
@@ -627,6 +656,42 @@ public class PerfRunService {
         m.put("heap", h);
         m.put("hikari", d.hikari());
         return m;
+    }
+
+    /**
+     * 건별 처리 시간을 워커 {@code workers} 개에 차례로 나눠 줄 때 마지막 워커가 끝나는 시각(ms).
+     * 한 건은 가장 먼저 비는 워커가 받는다 — 배치 워커 풀과 같은 방식이다.
+     */
+    static long distribute(List<Long> durationsMs, int workers) {
+        if (durationsMs.isEmpty()) {
+            return 0L;
+        }
+        java.util.PriorityQueue<Long> free = new java.util.PriorityQueue<>();
+        for (int i = 0; i < Math.max(1, workers); i++) {
+            free.add(0L);
+        }
+        for (long d : durationsMs) {
+            free.add(free.poll() + d);
+        }
+        return free.stream().mapToLong(Long::longValue).max().orElse(0L);
+    }
+
+    /** 고속 모드 — STT 단계의 평균·최대를 기다리지 않은 처리 시간으로 바꿔 싣는다. */
+    private static List<Map<String, Object>> withVirtualStt(List<Map<String, Object>> stages, List<Long> virtual) {
+        List<Map<String, Object>> out = new ArrayList<>(stages.size());
+        for (Map<String, Object> s : stages) {
+            if (!PerfStage.STT.name().equals(s.get("key"))) {
+                out.add(s);
+                continue;
+            }
+            Map<String, Object> v = new LinkedHashMap<>(s);
+            v.put("count", virtual.size());
+            v.put("avgMs", virtual.isEmpty() ? 0d : round(virtual.stream().mapToLong(Long::longValue).average().orElse(0d), 1));
+            v.put("maxMs", (double) virtual.stream().mapToLong(Long::longValue).max().orElse(0L));
+            v.put("virtual", true);
+            out.add(v);
+        }
+        return out;
     }
 
     /** 두 결과가 같이 싣는 환경 — STT 엔진 · 모드 · DB. */

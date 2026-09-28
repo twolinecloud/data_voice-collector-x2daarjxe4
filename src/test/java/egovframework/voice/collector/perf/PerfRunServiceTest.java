@@ -57,7 +57,7 @@ class PerfRunServiceTest {
     void basicRunEndToEnd() throws Exception {
         perf.clearHistory();
 
-        Map<String, Object> started = perf.start(new PerfRequest("A", 5, 5, 20, 2, "FIXED", 60L, 40L, null, null));
+        Map<String, Object> started = perf.start(new PerfRequest("A", 5, 5, 20, 2, "FIXED", 60L, 40L, null, null, true));   // 실제 대기 모드
         assertThat(started.get("active")).isEqualTo(true);
         assertThat(started.get("kind")).isEqualTo("BASIC");
         // 도는 동안에는 두 번째(임계 시험도)를 받지 않는다
@@ -97,7 +97,7 @@ class PerfRunServiceTest {
         perf.clearRampHistory();
 
         Map<String, Object> started = perf.startRamp(new RampRequest(3, 3, 0, "FIXED", 150L, 150L, null, null,
-                1, "MULTIPLY", 2, 4, 3, 0, true));
+                1, "MULTIPLY", 2, 4, 3, 0, true, null));
         assertThat(started.get("kind")).isEqualTo("RAMP");
         assertThat((List<Integer>) started.get("plan")).containsExactly(1, 2, 4);
 
@@ -108,6 +108,8 @@ class PerfRunServiceTest {
         assertThat(steps).extracting(s -> s.get("workers")).containsExactly(1, 2, 4);
         assertThat(steps).allSatisfy(s -> assertThat(s.get("success")).isEqualTo(6));
         assertThat(steps).allSatisfy(s -> assertThat(s).containsKeys("acquireAvgMs", "acquireMaxMs", "tps", "totalSec"));
+        // 고속 모드(기본) — 표의 STT 평균은 기다리지 않은 건당 처리 시간이다(실제 0ms 가 아니라)
+        assertThat(steps).allSatisfy(s -> assertThat(((Number) s.get("sttAvgMs")).doubleValue()).isEqualTo(150.0));
         assertThat((String) r.get("stopReason")).contains("모든 단계");
         // STT 150ms × 6건 — 워커 1 은 0.9초 넘게, 워커 4 는 그보다 빨라야 한다
         assertThat((Double) steps.get(2).get("totalSec")).isLessThan((Double) steps.get(0).get("totalSec"));
@@ -123,7 +125,7 @@ class PerfRunServiceTest {
     @SuppressWarnings("unchecked")
     void rampStopsOnSttError() throws Exception {
         perf.startRamp(new RampRequest(3, 3, 0, "FIXED", 400L, 400L, null, 100L,
-                1, "MULTIPLY", 2, 8, 3, 0, true));
+                1, "MULTIPLY", 2, 8, 3, 0, true, null));
 
         Map<String, Object> cur = waitDone();
         Map<String, Object> r = (Map<String, Object>) cur.get("result");
@@ -134,9 +136,51 @@ class PerfRunServiceTest {
     }
 
     @Test
+    @DisplayName("고속 모드 — 건당 100초 × 8건 · 워커 2 는 기다리지 않고 끝나고, 리포트에 가상 STT 400초가 더해진다")
+    @SuppressWarnings("unchecked")
+    void fastForwardAddsVirtualSttTime() throws Exception {
+        long t0 = System.currentTimeMillis();
+        perf.start(new PerfRequest("A", 4, 4, 0, 2, "FIXED", 100_000L, 100_000L, null, null, null));
+        Map<String, Object> cur = waitDone();
+        assertThat(System.currentTimeMillis() - t0).as("실제로 800초를 기다리지 않는다").isLessThan(60_000L);
+
+        Map<String, Object> r = (Map<String, Object>) cur.get("result");
+        assertThat(r.get("fastForward")).isEqualTo(true);
+        assertThat(r.get("success")).isEqualTo(8);
+        assertThat((Double) r.get("virtualSttSec")).isEqualTo(400.0);
+        double total = (Double) r.get("totalSec");
+        assertThat(total).isEqualTo((Double) r.get("realSec") + 400.0, org.assertj.core.data.Offset.offset(0.02));
+        assertThat((Double) r.get("tps")).isEqualTo(8 / total, org.assertj.core.data.Offset.offset(0.001));
+        Map<String, Object> stt = ((List<Map<String, Object>>) r.get("stages")).get(3);
+        assertThat(stt.get("virtual")).isEqualTo(true);
+        assertThat((Double) stt.get("avgMs")).isEqualTo(100_000.0);
+    }
+
+    @Test
+    @DisplayName("고속 모드 타임아웃 — 처리 시간 300초 > 타임아웃 200초면 기다리지 않고 전건 타임아웃 실패, 가상 시간은 타임아웃까지만")
+    @SuppressWarnings("unchecked")
+    void fastForwardTimeoutFailsImmediately() throws Exception {
+        perf.start(new PerfRequest("B", 2, 2, 0, 2, "FIXED", 300_000L, 300_000L, null, 200_000L, null));
+        Map<String, Object> r = (Map<String, Object>) waitDone().get("result");
+        assertThat(r.get("fail")).isEqualTo(4);
+        assertThat(r.get("timeout")).isEqualTo(4L);
+        assertThat(r.get("execStsCd")).isEqualTo("FAIL");
+        assertThat((Double) r.get("virtualSttSec")).isEqualTo(400.0);   // 4건 × 200초 ÷ 워커 2
+    }
+
+    @Test
+    @DisplayName("가상 STT 분배 — 건수가 많으면 합 ÷ 워커, 워커보다 적으면 가장 긴 한 건")
+    void distributeOverWorkers() {
+        assertThat(PerfRunService.distribute(List.of(5L, 5L, 5L, 5L), 2)).isEqualTo(10L);
+        assertThat(PerfRunService.distribute(List.of(10L), 16)).isEqualTo(10L);
+        assertThat(PerfRunService.distribute(List.of(3L, 3L, 3L), 1)).isEqualTo(9L);
+        assertThat(PerfRunService.distribute(List.of(), 4)).isZero();
+    }
+
+    @Test
     @DisplayName("범위 밖이면 시작하지 않는다 — 합계 301건")
     void rejectsOutOfRange() {
-        assertThatThrownBy(() -> perf.start(new PerfRequest("A", 151, 150, 3, 4, "FIXED", 0L, 0L, null, null)))
+        assertThatThrownBy(() -> perf.start(new PerfRequest("A", 151, 150, 3, 4, "FIXED", 0L, 0L, null, null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
