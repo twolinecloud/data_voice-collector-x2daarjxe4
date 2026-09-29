@@ -38,6 +38,28 @@ public class PerfStageMeter {
     /** 지금 그 단계에 머물러 있는 스레드와 들어간 시각 — 한 스레드는 한 번에 한 건만 처리한다. */
     private final Map<PerfStage, Map<Thread, Long>> inFlight = new EnumMap<>(PerfStage.class);
 
+    // ── 생산자-소비자(확보 워커 → STT 워커) 모의용 ──────────────────────────────
+    /** STT 워커가 처리한 건마다 한 줄 — 확보가 끝난 시각 · STT 워커가 쓴 실제 시간 · 기다리지 않은 가상 시간. */
+    private final java.util.Queue<PipelineItem> pipelineItems = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    /** 확보 워커가 마지막 건을 끝낸 시각(루프 시작 기준 ms) — 확보에서 끝난(실패·건너뜀) 건까지. */
+    private final AtomicLong acquireSpanMs = new AtomicLong();
+    /** 생산자-소비자 루프의 실제 경과(ms). 순차로 돌았으면 -1. */
+    private volatile long pipelineLoopMs = -1L;
+    /** 지금 이 STT 워커가 처리 중인 건에 적힌 가상 시간 — {@link #beginItem()} ~ {@link #endItem()}. */
+    private final ThreadLocal<long[]> itemVirtual = new ThreadLocal<>();
+
+    /**
+     * STT 워커가 처리한 한 건.
+     *
+     * @param readyMs   확보가 끝나 대기열에 들어간 시각(루프 시작 기준)
+     * @param serviceMs STT 워커가 실제로 쓴 시간(복호화 ~ 저장)
+     * @param virtualMs 고속 모드로 기다리지 않은 시간(STT · 비식별)
+     */
+    public record PipelineItem(long readyMs, long serviceMs, long virtualMs) {}
+
+    /** 생산자-소비자 한 번의 기록 — 고속 모드 리포트가 이것으로 총 소요를 다시 짠다. */
+    public record Pipeline(List<PipelineItem> items, long acquireSpanMs, long loopMs) {}
+
     public PerfStageMeter() {
         for (PerfStage s : PerfStage.values()) {
             nanos.put(s, new LongAdder());
@@ -59,6 +81,9 @@ public class PerfStageMeter {
             inFlight.get(s).clear();
         }
         virtualMs.values().forEach(java.util.Queue::clear);
+        pipelineItems.clear();
+        acquireSpanMs.set(0L);
+        pipelineLoopMs = -1L;
         active = true;
     }
 
@@ -112,8 +137,59 @@ public class PerfStageMeter {
     /** 고속 모드 — 이 건이 실제였다면 그 단계에 썼을 시간(ms). */
     public void addVirtual(PerfStage stage, long ms) {
         if (active) {
-            virtualMs.get(stage).add(Math.max(0L, ms));
+            long v = Math.max(0L, ms);
+            virtualMs.get(stage).add(v);
+            long[] item = itemVirtual.get();
+            if (item != null) {
+                item[0] += v;   // 이 STT 워커가 처리 중인 건의 몫 — 파이프라인 모의에 쓴다
+            }
         }
+    }
+
+    // ── 생산자-소비자 ──────────────────────────────────────────────────────
+
+    /** STT 워커가 한 건을 집었다 — 이제부터 이 스레드에 적히는 가상 시간은 이 건의 몫이다. */
+    public void beginItem() {
+        if (active) {
+            itemVirtual.set(new long[1]);
+        }
+    }
+
+    /** 그 건이 끝났다 — 그동안 적힌 가상 시간(ms)을 돌려준다. */
+    public long endItem() {
+        long[] item = itemVirtual.get();
+        itemVirtual.remove();
+        return item == null ? 0L : item[0];
+    }
+
+    /** STT 워커가 처리한 한 건을 적는다. */
+    public void pipelineItem(long readyMs, long serviceMs, long virtualMs) {
+        if (active) {
+            pipelineItems.add(new PipelineItem(readyMs, serviceMs, virtualMs));
+        }
+    }
+
+    /** 확보 워커가 한 건을 끝냈다(대기열로 넘겼든 확보에서 실패했든) — 그 시각(루프 시작 기준 ms). */
+    public void acquireDone(long atMs) {
+        if (active) {
+            acquireSpanMs.accumulateAndGet(atMs, Math::max);
+        }
+    }
+
+    /** 생산자-소비자 루프가 끝났다 — 실제 경과(ms). */
+    public void pipelineLoop(long wallMs) {
+        if (active) {
+            pipelineLoopMs = wallMs;
+        }
+    }
+
+    /** 이번 측정의 생산자-소비자 기록. 순차로 돌았으면 null. */
+    public Pipeline pipeline() {
+        long loop = pipelineLoopMs;
+        if (loop < 0) {
+            return null;
+        }
+        return new Pipeline(List.copyOf(pipelineItems), acquireSpanMs.get(), loop);
     }
 
     /** 고속 모드로 건너뛴 건별 STT 처리 시간(ms) — 적힌 순서대로. */

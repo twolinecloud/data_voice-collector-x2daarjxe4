@@ -38,7 +38,7 @@ voice:
       url: ${BORAMI_DB_URL:${DB_URL:jdbc:postgresql://borami-db-gijoxearrw:5432/borami}}
       username: ${BORAMI_DB_USER:${DB_USER:${POSTGRES_USERNAME:borami}}}
       password: ${BORAMI_DB_PASSWORD:${DB_PASSWORD:${POSTGRES_PASSWORD:}}}
-      max-pool-size: ${DB_POOL_MAX:5}
+      max-pool-size: ${DB_POOL_MAX:40}   # 고동시성 여유 — 최소 유휴 0 이라 쓰지 않으면 열지 않는다(application.yml 참고)
     esb-base-url: ${VOICE_ESB_BASE_URL:}
     interface-id: ${VOICE_ESB_IF_ID:}
     # 실제 보라미 스키마 배치(2026-09-12 확인). I/F 뷰로 바뀌면 이 값만 고친다(Q15).

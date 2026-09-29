@@ -35,8 +35,9 @@ public class BoramiDataSourceConfig {
         ds.setJdbcUrl(h2.url());
         ds.setUsername(h2.username());
         ds.setPassword(h2.password());
-        ds.setMaximumPoolSize(10);
+        ds.setMaximumPoolSize(Math.max(1, h2.maxPoolSize()));
         ds.setMinimumIdle(1);
+        applyLeakDetection(ds, h2.leakDetectionThresholdMs());
         // Mock 스키마(DROP/CREATE) + 필터 검증용 행. 유효 대상 10건은 SimulationSeedRunner 가 넣는다.
         ResourceDatabasePopulator populator = new ResourceDatabasePopulator(
                 new ClassPathResource("schema-borami-mock.sql"), new ClassPathResource("data-borami-mock.sql"));
@@ -59,10 +60,18 @@ public class BoramiDataSourceConfig {
         ds.setPassword(d.password());
         ds.setMaximumPoolSize(Math.max(1, d.maxPoolSize()));
         ds.setMinimumIdle(0);
+        ds.setIdleTimeout(Math.max(10_000L, d.idleTimeoutMs()));   // Hikari 최소 10초
         ds.setConnectionTimeout(Math.max(250, d.connectTimeoutMs()));
+        applyLeakDetection(ds, d.leakDetectionThresholdMs());
         ds.setInitializationFailTimeout(-1);   // 기동 시 붙어 보지 않는다 — 포트포워딩 없는 로컬에서도 떠야 한다
-        log.info("[DB] 개발계 DB(DIRECT_JDBC) 대상 — {} (user={})", d.url(), d.username());
+        log.info("[DB] 개발계 DB(DIRECT_JDBC) 대상 — {} (user={}) · 풀 최대 {} · 누수 감지 {}", d.url(), d.username(),
+                ds.getMaximumPoolSize(), ds.getLeakDetectionThreshold() == 0 ? "끔" : ds.getLeakDetectionThreshold() + "ms");
         return ds;
+    }
+
+    /** 연결 누수 감지 — 0 이면 끈다. Hikari 는 2초 미만을 받지 않으므로(경고 후 무시) 2초로 올린다. */
+    private static void applyLeakDetection(HikariDataSource ds, long ms) {
+        ds.setLeakDetectionThreshold(ms <= 0 ? 0L : Math.max(2_000L, ms));
     }
 
     @Bean

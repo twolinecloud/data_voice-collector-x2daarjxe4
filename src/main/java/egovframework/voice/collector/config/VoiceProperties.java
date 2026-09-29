@@ -60,7 +60,11 @@ public record VoiceProperties(
     public record LocalH2(
             @DefaultValue("jdbc:h2:mem:borami;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE") String url,
             @DefaultValue("sa") String username,
-            @DefaultValue("") String password
+            @DefaultValue("") String password,
+            /** Hikari 최대 연결 수 — 개발계 DB 와 같게 둔다. {@link DirectDb#maxPoolSize()} 참고. */
+            @DefaultValue("40") int maxPoolSize,
+            /** 연결 누수 감지(ms) — {@link DirectDb#leakDetectionThresholdMs()} 참고. 0 이면 끈다. */
+            @DefaultValue("30000") long leakDetectionThresholdMs
     ) {}
 
     /**
@@ -75,7 +79,21 @@ public record VoiceProperties(
             @DefaultValue("borami") String username,
             @DefaultValue("") String password,
             @DefaultValue("3000") long connectTimeoutMs,
-            @DefaultValue("5") int maxPoolSize
+            /**
+             * Hikari 최대 연결 수 — 고동시성(STT 워커 30개 이상) 여유분. 최소 유휴는 0 이라 쓰지 않으면 열지 않는다.
+             *
+             * <p>배치 워커(확보·STT)는 원천 DB 를 쓰지 않는다 — 대상 조회가 루프 전에 끝나고, 로그 적재는 로그 컬렉터
+             * API 다. 그래서 정상이면 최고 연결 수는 1~2 다. 이 값은 조회·시딩·진단이 겹칠 때의 여유다.</p>
+             */
+            @DefaultValue("40") int maxPoolSize,
+            /**
+             * 연결 누수 감지(ms) — 빌려 간 연결이 이 시간 넘게 돌아오지 않으면 Hikari 가 빌린 자리의 스택과 함께 WARN 을
+             * 남긴다("Connection leak detection triggered"). 가장 긴 정상 사용(시딩 트랜잭션 수 초)보다 넉넉히 둔다.
+             * 0 이면 끈다. Hikari 규칙상 2,000 미만은 쓸 수 없다.
+             */
+            @DefaultValue("30000") long leakDetectionThresholdMs,
+            /** 유휴 연결을 닫기까지(ms) — 시험이 끝나 최고치까지 늘었던 연결이 이만큼 쉬면 닫혀 0 으로 돌아간다. */
+            @DefaultValue("60000") long idleTimeoutMs
     ) {}
 
     /**

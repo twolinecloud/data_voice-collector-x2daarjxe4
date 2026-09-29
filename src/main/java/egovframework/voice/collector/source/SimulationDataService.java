@@ -11,7 +11,8 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -99,6 +100,8 @@ public class SimulationDataService {
     private final VoiceProperties props;
     private final MockDatasetState dataset;
     private final VoiceModeState modeState;
+    /** DB 구간에만 트랜잭션을 건다 — 파일 쓰기·암호화 동안 커넥션을 잡지 않게(@Transactional 은 메서드 전체를 잡는다). */
+    private final PlatformTransactionManager txManager;
 
     // ── 조회 ──────────────────────────────────────────────────────────────
 
@@ -131,7 +134,6 @@ public class SimulationDataService {
      *
      * @return 결과 요약(테이블별 행 수 · 파일 목록 · 폴더)
      */
-    @Transactional
     public Map<String, Object> seed() {
         return seed(DAILY_PER_KIND, DAILY_PER_KIND);
     }
@@ -142,7 +144,6 @@ public class SimulationDataService {
      * <p><b>대용량(기본 10건 초과)은 로컬 H2 에서만</b> 허용한다 — 개발계 DB 에 수천 행을 넣으면 남의 시험을 방해한다.
      * {@link #FILE_LIMIT} 을 넘으면 더미 파일은 쓰지 않는다.</p>
      */
-    @Transactional
     public Map<String, Object> seed(int dailyMeet, int dailyPhone) {
         boolean bulk = dailyMeet > DAILY_PER_KIND || dailyPhone > DAILY_PER_KIND;
         if (bulk && !db.isH2()) {
@@ -161,7 +162,6 @@ public class SimulationDataService {
      *
      * <p>합계 {@link #PERF_MAX_TOTAL} 건까지는 개발계 공용 DB 에도 만든다(일반 대용량 시딩은 H2 전용).</p>
      */
-    @Transactional
     public Map<String, Object> seedPerf(int meet, int phone) {
         return seedPerf(meet, phone, 0);
     }
@@ -175,7 +175,6 @@ public class SimulationDataService {
      *
      * <p>고르는 방법: 반올림한 건수를 전화 번호 전체에 고르게 편다(예: 150건 3% → 5건, 16·46·76·106·136번).</p>
      */
-    @Transactional
     public Map<String, Object> seedPerf(int meet, int phone, int sttPercent) {
         if (meet + phone > PERF_MAX_TOTAL) {
             throw new IllegalArgumentException("성능 테스트 데이터는 최대 " + PERF_MAX_TOTAL + "건이다: " + (meet + phone));
@@ -214,84 +213,20 @@ public class SimulationDataService {
         out.put("db", db.label());
         out.put("target", db.target().name());
         out.put("dirsEnsured", dirs.ensureDirs());
-        out.put("ensured", ensureXvarmMockTables(trace));
-        Map<String, Object> cleaned = cleanRows(trace);
-        out.put("cleaned", cleaned);
-
-        LocalDateTime now = LocalDateTime.now().withNano(0);
-        Timestamp ts = Timestamp.valueOf(now);
-        // 특이수용자 — 접견·전화가 같은 사람(001~)을 쓴다. 코드는 1/2/3/0/5 를 돌려 가며 준다
+        // ── DB — 한 트랜잭션. 커넥션은 여기서만 잡는다 ─────────────────────────────
+        //   더미 오디오 생성·암호화·디스크 쓰기는 트랜잭션 안에서 하지 않는다 — 300건이면 수 초 동안 커넥션을
+        //   붙잡는다. 쓸 파일은 목록으로 모았다가 커밋(커넥션 반납) 뒤에 쓴다. 파일 쓰기는 실패해도 예외 없이
+        //   사유만 남기므로(writeDummy) 행과 파일의 원자성은 예전과 같다.
         int inmates = Math.max(meetCount, phoneCount);
-        List<Object[]> inmateRows = new ArrayList<>();
-        for (int i = 1; i <= inmates; i++) {
-            // 001 만 마약(1) — 나머지는 2/3/0/5 를 돌린다(코드 필터 테스트가 001 하나만 기대한다)
-            String code = i == 1 ? SPECL_CODES[0] : SPECL_CODES[1 + ((i - 2) % (SPECL_CODES.length - 1))];
-            inmateRows.add(new Object[] {corrNo(i), 1, code, "A01", "20260101", null, ts, USR, ts, USR});
-        }
-        batch(trace, "INSERT INTO " + tables.imscPtprDt()
-                + " (CORR_NO, PTCR_PRSR_DTL_SN, SPECL_MNG_SE_CD, PTCR_PRSR_SE_CD, PTCR_PRSR_APNT_YMD, PTCR_PRSR_RMV_YMD,"
-                + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID) VALUES (?,?,?,?,?,?,?,?,?,?)", inmateRows);
-
-        List<Map<String, Object>> files = new ArrayList<>();
         Path meetDir = dirs.xvarmOriginalDir(VoiceKind.MEET);
         Path phoneDir = dirs.xvarmOriginalDir(VoiceKind.PHONE);
+        List<java.util.function.Supplier<Map<String, Object>>> fileJobs = new ArrayList<>();
+        inTransaction(() -> seedRows(trace, out, fileJobs, dailyMeet, dailyPhone, meetCount, phoneCount, inmates,
+                writeFiles, withSourceStt, meetDir, phoneDir));
 
-        // 접견 — re → im → sm → xvarm
-        for (int i = 1; i <= meetCount; i++) {
-            LocalDateTime at = occurredAt(now, i, dailyMeet, VoiceKind.MEET);
-            Timestamp crt = Timestamp.valueOf(at);
-            String fileNm = meetFileName(i);
-            Path file = meetDir.resolve(fileNm);
-            String cmfi = "SIMCMFI" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i));
-            String doc = "SIMDOC" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i));
-            exec(trace, "INSERT INTO " + tables.smsmCmfiBs()
-                    + " (CMMN_FILE_ID, DOC_ID, FILE_NM, CORR_WRK_SE_CD, FILE_TY_CD, REG_DT, RPRS_YN, CMMN_FILE_ENC_YN, DEL_YN,"
-                    + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    cmfi, doc, fileNm, "01", "A", crt, "Y", i == MEET_UNENCRYPTED ? "N" : "Y", "N", crt, USR, crt, USR);
-            exec(trace, "INSERT INTO " + tables.asysContentElement() + " (ELEMENTID, FILEKEY) VALUES (?,?)",
-                    doc, slash(file));
-            exec(trace, "INSERT INTO " + tables.rerdTfinDs()
-                    + " (TARE_FILE_NO, CORR_INSTT_CD, ADNC_SE_CD, RCPT_YMD, RCPT_SN, CORR_NO, ADNC_YMD,"
-                    + "  TBLT_RECRD_FILE_ID, TBLT_VTR_FILE_ID, TARE_FILE_NM, TARE_BGNG_HMS, TARE_END_HMS, TARE_FILE_MG_VL, TARE_FLPTH_NM,"
-                    + "  DEL_YN, RECRD_FILE_DEL_YN, RECRD_BKUP_FILE_DEL_YN, CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID)"
-                    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    meetKey(i), "CI00001", "01", ymd(at), i, corrNo(i), ymd(at),
-                    "SIMTRCD" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i)), cmfi, fileNm, hms(at), hms(at.plusMinutes(10)), "1024", slash(meetDir),
-                    "N", "N", "N", crt, USR, crt, USR);
-            if (writeFiles) {
-                files.add(writeDummy(file, "m4a", meetKey(i), i != MEET_UNENCRYPTED));
-            }
-        }
-
-        // 전화 — im 통화내역 → im 특이수용자
-        for (int i = 1; i <= phoneCount; i++) {
-            LocalDateTime at = occurredAt(now, i, dailyPhone, VoiceKind.PHONE);
-            Timestamp crt = Timestamp.valueOf(at);
-            String fileNm = phoneFileName(i);
-            Path file = phoneDir.resolve(fileNm);
-            String sttPath = null;
-            if (withSourceStt.test(i)) {
-                Path stt = phoneDir.resolve("mock_phone_" + seq(i) + ".stt.txt");
-                files.add(writeText(stt, "(보라미 기존 STT / 시뮬레이션) 여보세요 저 김수용입니다. 어머니 잘 계시죠.\n"
-                        + "연락처 010-9876-5432 로 전화 주세요. 주민번호는 900101-1234567 입니다.\n"));
-                sttPath = slash(stt);
-            }
-            exec(trace, "INSERT INTO " + tables.imphUcdrDs()
-                    + " (VRFC_ESTL_ID, PCALL_KND_CD, TELP_USR_SCPT_SE_CD, CORR_NO, TELP_LST_SE_CD, RCVER_NM, ACQT_RLTNS_NM, INTRL_TELNO,"
-                    + "  TELP_PCALL_BGNG_DT, TELP_PCALL_RSPNS_DT, TELP_PCALL_END_DT, TELP_PCALL_TIME, TELP_RSPNS_TIME, TELP_PCALL_RSPNS_YN,"
-                    + "  TELP_PCALL_OCRN_AMT, TELP_PCALL_RECRD_YN, TELP_PTCR_PRSR_YN, TELP_PTCR_PRSR_TCNT, CORR_INSTT_CD, TELP_USE_PLACE_NM,"
-                    + "  TELP_RECRD_FLPTH_NM, TELP_RECRD_FILE_NM, TELP_RECRD_FILE_ID, TELP_STT_FLPTH_NM, DEL_DT,"
-                    + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID)"
-                    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    phoneKey(i), "P001", "01", corrNo(i), "L001", "(시뮬레이션)수신자" + i, "(시뮬레이션)관계", "000-0000-000" + i,
-                    dt14(at), dt14(at.plusSeconds(5)), dt14(at.plusMinutes(3)), 180, 5, "Y",
-                    0, "Y", props.source().flag().ptcrYes(), 1, "CI00001", "(시뮬레이션)전화실",
-                    slash(phoneDir), fileNm, "SIMPHONEKEY" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i)), sttPath, null,
-                    crt, USR, crt, USR);
-            if (writeFiles) {
-                files.add(writeDummy(file, "wav", phoneKey(i), true));
-            }
-        }
+        // ── 파일 — 커밋 뒤 ─────────────────────────────────────────────────────
+        List<Map<String, Object>> files = new ArrayList<>(fileJobs.size());
+        fileJobs.forEach(job -> files.add(job.get()));
 
         Map<String, Object> rows = new LinkedHashMap<>();
         rows.put("inmates", inmates);
@@ -323,17 +258,106 @@ public class SimulationDataService {
         return out;
     }
 
+    /** 시딩의 DB 구간 — 스키마 확인 · SIM 행 정리 · 삽입. 쓸 더미 파일은 {@code fileJobs} 에 모으기만 한다. */
+    private void seedRows(SqlTrace trace, Map<String, Object> out,
+                          List<java.util.function.Supplier<Map<String, Object>>> fileJobs,
+                          int dailyMeet, int dailyPhone, int meetCount, int phoneCount, int inmates, boolean writeFiles,
+                          java.util.function.IntPredicate withSourceStt, Path meetDir, Path phoneDir) {
+        out.put("ensured", ensureXvarmMockTables(trace));
+        Map<String, Object> cleaned = cleanRows(trace);
+        out.put("cleaned", cleaned);
+
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        Timestamp ts = Timestamp.valueOf(now);
+        // 특이수용자 — 접견·전화가 같은 사람(001~)을 쓴다. 코드는 1/2/3/0/5 를 돌려 가며 준다
+        List<Object[]> inmateRows = new ArrayList<>();
+        for (int i = 1; i <= inmates; i++) {
+            // 001 만 마약(1) — 나머지는 2/3/0/5 를 돌린다(코드 필터 테스트가 001 하나만 기대한다)
+            String code = i == 1 ? SPECL_CODES[0] : SPECL_CODES[1 + ((i - 2) % (SPECL_CODES.length - 1))];
+            inmateRows.add(new Object[] {corrNo(i), 1, code, "A01", "20260101", null, ts, USR, ts, USR});
+        }
+        batch(trace, "INSERT INTO " + tables.imscPtprDt()
+                + " (CORR_NO, PTCR_PRSR_DTL_SN, SPECL_MNG_SE_CD, PTCR_PRSR_SE_CD, PTCR_PRSR_APNT_YMD, PTCR_PRSR_RMV_YMD,"
+                + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID) VALUES (?,?,?,?,?,?,?,?,?,?)", inmateRows);
+
+        // 접견 — re → im → sm → xvarm
+        for (int i = 1; i <= meetCount; i++) {
+            LocalDateTime at = occurredAt(now, i, dailyMeet, VoiceKind.MEET);
+            Timestamp crt = Timestamp.valueOf(at);
+            String fileNm = meetFileName(i);
+            Path file = meetDir.resolve(fileNm);
+            String cmfi = "SIMCMFI" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i));
+            String doc = "SIMDOC" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i));
+            exec(trace, "INSERT INTO " + tables.smsmCmfiBs()
+                    + " (CMMN_FILE_ID, DOC_ID, FILE_NM, CORR_WRK_SE_CD, FILE_TY_CD, REG_DT, RPRS_YN, CMMN_FILE_ENC_YN, DEL_YN,"
+                    + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    cmfi, doc, fileNm, "01", "A", crt, "Y", i == MEET_UNENCRYPTED ? "N" : "Y", "N", crt, USR, crt, USR);
+            exec(trace, "INSERT INTO " + tables.asysContentElement() + " (ELEMENTID, FILEKEY) VALUES (?,?)",
+                    doc, slash(file));
+            exec(trace, "INSERT INTO " + tables.rerdTfinDs()
+                    + " (TARE_FILE_NO, CORR_INSTT_CD, ADNC_SE_CD, RCPT_YMD, RCPT_SN, CORR_NO, ADNC_YMD,"
+                    + "  TBLT_RECRD_FILE_ID, TBLT_VTR_FILE_ID, TARE_FILE_NM, TARE_BGNG_HMS, TARE_END_HMS, TARE_FILE_MG_VL, TARE_FLPTH_NM,"
+                    + "  DEL_YN, RECRD_FILE_DEL_YN, RECRD_BKUP_FILE_DEL_YN, CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID)"
+                    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    meetKey(i), "CI00001", "01", ymd(at), i, corrNo(i), ymd(at),
+                    "SIMTRCD" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i)), cmfi, fileNm, hms(at), hms(at.plusMinutes(10)), "1024", slash(meetDir),
+                    "N", "N", "N", crt, USR, crt, USR);
+            if (writeFiles) {
+                String key = meetKey(i);
+                boolean encrypted = i != MEET_UNENCRYPTED;
+                fileJobs.add(() -> writeDummy(file, "m4a", key, encrypted));
+            }
+        }
+
+        // 전화 — im 통화내역 → im 특이수용자
+        for (int i = 1; i <= phoneCount; i++) {
+            LocalDateTime at = occurredAt(now, i, dailyPhone, VoiceKind.PHONE);
+            Timestamp crt = Timestamp.valueOf(at);
+            String fileNm = phoneFileName(i);
+            Path file = phoneDir.resolve(fileNm);
+            String sttPath = null;
+            if (withSourceStt.test(i)) {
+                Path stt = phoneDir.resolve("mock_phone_" + seq(i) + ".stt.txt");
+                fileJobs.add(() -> writeText(stt, "(보라미 기존 STT / 시뮬레이션) 여보세요 저 김수용입니다. 어머니 잘 계시죠.\n"
+                        + "연락처 010-9876-5432 로 전화 주세요. 주민번호는 900101-1234567 입니다.\n"));
+                sttPath = slash(stt);
+            }
+            exec(trace, "INSERT INTO " + tables.imphUcdrDs()
+                    + " (VRFC_ESTL_ID, PCALL_KND_CD, TELP_USR_SCPT_SE_CD, CORR_NO, TELP_LST_SE_CD, RCVER_NM, ACQT_RLTNS_NM, INTRL_TELNO,"
+                    + "  TELP_PCALL_BGNG_DT, TELP_PCALL_RSPNS_DT, TELP_PCALL_END_DT, TELP_PCALL_TIME, TELP_RSPNS_TIME, TELP_PCALL_RSPNS_YN,"
+                    + "  TELP_PCALL_OCRN_AMT, TELP_PCALL_RECRD_YN, TELP_PTCR_PRSR_YN, TELP_PTCR_PRSR_TCNT, CORR_INSTT_CD, TELP_USE_PLACE_NM,"
+                    + "  TELP_RECRD_FLPTH_NM, TELP_RECRD_FILE_NM, TELP_RECRD_FILE_ID, TELP_STT_FLPTH_NM, DEL_DT,"
+                    + "  CRT_DT, CRT_USR_ID, MDFCN_DT, MDFCN_USR_ID)"
+                    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    phoneKey(i), "P001", "01", corrNo(i), "L001", "(시뮬레이션)수신자" + i, "(시뮬레이션)관계", "000-0000-000" + i,
+                    dt14(at), dt14(at.plusSeconds(5)), dt14(at.plusMinutes(3)), 180, 5, "Y",
+                    0, "Y", props.source().flag().ptcrYes(), 1, "CI00001", "(시뮬레이션)전화실",
+                    slash(phoneDir), fileNm, "SIMPHONEKEY" + (i < 10000 ? "%04d".formatted(i) : String.valueOf(i)), sttPath, null,
+                    crt, USR, crt, USR);
+            if (writeFiles) {
+                String key = phoneKey(i);
+                fileJobs.add(() -> writeDummy(file, "wav", key, true));
+            }
+        }
+
+    }
+
+    /** DB 작업을 한 트랜잭션으로 — 끝나면 커밋하고 커넥션을 바로 반납한다. 예외면 롤백. */
+    private void inTransaction(Runnable work) {
+        new TransactionTemplate(txManager).executeWithoutResult(status -> work.run());
+    }
+
     // ── 초기화 ────────────────────────────────────────────────────────────
 
     /** Complete Clean — SIM 행 일괄 삭제 + 원본 스토리지의 더미 파일 삭제. */
-    @Transactional
     public Map<String, Object> clean() {
         SqlTrace trace = new SqlTrace();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("db", db.label());
         out.put("dirsEnsured", dirs.ensureDirs());
-        Map<String, Object> cleaned = cleanRows(trace);
-        Map<String, Integer> filesDeleted = deleteDummyFiles();
+        Map<String, Object> cleaned = new LinkedHashMap<>();
+        inTransaction(() -> cleaned.putAll(cleanRows(trace)));
+        Map<String, Integer> filesDeleted = deleteDummyFiles();   // 커밋 뒤 — 파일 삭제 동안 커넥션을 잡지 않는다
         out.put("cleaned", cleaned);
         out.put("filesDeleted", filesDeleted);
         // 화면 팝업이 쓰는 합계. 테이블이 없어 건너뛴 항목("skip: …")은 숫자가 아니므로 빼고 센다.

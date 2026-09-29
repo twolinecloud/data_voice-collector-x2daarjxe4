@@ -315,6 +315,16 @@
   .pf-ph.on { color:#fff; background:#0d6efd; } .pf-ph.done { color:#0f5132; background:#d1e7dd; }
   .pf-arrow { color:#adb5bd; margin:0 .15rem; }
   .pf-tiles { display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); gap:.5rem; margin-bottom:.6rem; }
+  /* 전체 리포트 캡처 — 캡처용 복제본에만 붙는다(화면은 그대로). 스크롤에 가려진 표·잘린 도움말까지 펼친다 */
+  .capturing { background:#f5f6f8; padding:.6rem; }
+  .capturing .table-responsive { overflow:visible !important; max-height:none !important; }
+  .capturing .sticky-top { position:static !important; }
+  .capturing .pf-help-line { white-space:normal !important; overflow:visible !important; margin-top:0 !important; }
+  .capturing .pf-tile .k, .capturing .pf-tile .s { white-space:normal !important; overflow:visible !important; }
+  .capturing [data-cap-hide] { display:none !important; }
+  .cap-title { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; margin:0 0 .6rem;
+               padding:.45rem .7rem; border-radius:.45rem; background:#212529; color:#fff; font-size:.85rem; }
+  .cap-title small { color:#ced4da; font-size:.75rem; }
   @media (max-width: 992px) { .pf-tiles { grid-template-columns:repeat(3, minmax(0,1fr)); } }
   @media (max-width: 576px) { .pf-tiles { grid-template-columns:repeat(2, minmax(0,1fr)); } }
   .pf-tile { border:1px solid #dee2e6; border-radius:.45rem; padding:.45rem .6rem; background:#fcfcfd; min-width:0; }
@@ -346,6 +356,7 @@
   .pf-help { font-size:.68rem; color:#6c757d; margin-top:.15rem; }
   /* 한 줄 설명 — 칸 안에 두면 두 줄로 깨지고 옆 칸 높이까지 흔들어 행 아래에 한 줄로 둔다 */
   .pf-help-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:-.2rem; }
+  .pf-help-line + .pf-help-line { margin-top:0; }
   /* 5번 탭 — 임계 성능 테스트 */
   .rp-banner { font-size:.8rem; border-radius:.4rem; padding:.45rem .65rem; margin-bottom:.6rem; background:#f1f3f5; color:#343a40; }
   .rp-banner.stop { background:#fff3cd; color:#664d03; } .rp-banner.ok { background:#d1e7dd; color:#0f5132; }
@@ -614,12 +625,14 @@
   </div>
 
   <div class="tabp" id="tab-perf">
+  <!-- ①·② 를 한 장으로 캡처하는 영역 — [📸 전체 리포트 저장] -->
+  <div id="pf-capture">
   <!-- ① 성능 테스트 설정 -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
-      <strong>① 기본 부하 검증 설정 <span class="hint fw-normal">— 일일 한도 300건 안에서 실제 파이프라인(조회 → 확보 → 복호화 → 포맷 → STT → 저장 → T1·T2·T4)을 태웁니다. STT 만 MOCK</span></strong>
+      <strong>① 기본 부하 검증 설정 <span class="hint fw-normal">— 일일 한도 300건 안에서 실제 파이프라인(조회 → 확보 → 복호화 → 포맷 → STT → 비식별 → 저장 → T1·T2·T4·T5)을 태웁니다. STT 만 MOCK</span></strong>
       <span class="d-flex align-items-center gap-3 flex-wrap ms-auto">
-        <span class="form-check form-switch m-0" title="끄면(기본) 고속 모드 — STT 를 기다리지 않고 즉시 통과시키고, 리포트에 건당 처리 시간을 워커에 나눈 가상 시간을 더합니다">
+        <span class="form-check form-switch m-0" title="끄면(기본) 고속 모드 — STT 를 기다리지 않고 즉시 통과시키고, 실제로 돈 확보 시각에 건당 처리 시간을 얹어 STT 워커에 다시 배정한 시간(파이프라인 모의)으로 리포트를 냅니다">
           <input class="form-check-input" type="checkbox" role="switch" id="pf-real">
           <label class="form-check-label small" for="pf-real">실제 대기 모드 (Real Sleep)</label>
         </span>
@@ -629,8 +642,8 @@
     <div class="card-body py-2" id="pf-box">
       <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
         <span class="hint me-1">시나리오</span>
-        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="A" title="접견 150 · 전화 150 · 워커 4 · 건당 처리 시간 접견 180초 / 전화 120초 · 타임아웃 없음">A 기본 검증</button>
-        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="B" title="접견 150 · 전화 150 · 워커 4 · 접견 180초 / 전화 120초 ±50% · 타임아웃 200초">B STT 장애/타임아웃 검증</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="A" title="접견 150 · 전화 150 · XVARM 확보 워커 1 · STT 처리 워커 31 · 건당 처리 시간 접견 180초 / 전화 120초 · 타임아웃 없음">A 기본 검증</button>
+        <button class="btn btn-sm btn-outline-dark pf-preset" data-s="B" title="접견 150 · 전화 150 · XVARM 확보 워커 1 · STT 처리 워커 31 · 접견 180초 / 전화 120초 ±50% · 타임아웃 200초">B STT 장애/타임아웃 검증</button>
       </div>
       <div class="hint mb-2" id="pf-scen-desc">시나리오를 고르면 아래 칸이 채워집니다 — 값을 직접 바꿔도 됩니다. 워커 수를 바꿔 가며 비교하는 시험은 5번 탭(임계 성능 테스트)에서 합니다.</div>
       <div class="row g-2 align-items-end mb-2">
@@ -640,14 +653,17 @@
           <input type="number" class="form-control form-control-sm" id="pf-phone" value="150" min="0" max="300" step="1"></div>
         <div class="col-4 col-md-2"><span class="hint">합계 (2~300)</span>
           <div class="form-control form-control-sm bg-light font-monospace" id="pf-total">300건</div></div>
-        <div class="col-6 col-md-3"><label class="hint" for="pf-sttpct">기 STT 존재 비율 (%)</label>
+        <div class="col-6 col-md-2"><label class="hint" for="pf-sttpct">기 STT 존재 비율 (%)</label>
           <input type="number" class="form-control form-control-sm" id="pf-sttpct" value="3" min="0" max="100" step="1"></div>
-        <div class="col-6 col-md-3"><label class="hint" for="pf-conc">동시성 (워커 수)</label>
-          <select class="form-select form-select-sm" id="pf-conc">
-            <option value="1">1</option><option value="2">2</option><option value="4" selected>4</option><option value="8">8</option><option value="16">16</option>
-          </select></div>
+        <div class="col-6 col-md-2"><label class="hint" for="pf-acq-w" title="파일 확보(접견: 브로커 추출 → 수신 폴더 도착 / 전화: 파일 연계 수신)를 맡는 워커 — 원천 부하를 줄이려면 1">XVARM 확보 워커</label>
+          <input type="number" class="form-control form-control-sm" id="pf-acq-w" value="1" min="1" max="64" step="1"></div>
+        <div class="col-6 col-md-2"><label class="hint" for="pf-stt-w" title="확보된 파일을 곧바로 받아 복호화 · STT · 비식별 · 저장을 하는 워커">STT 처리 워커</label>
+          <input type="number" class="form-control form-control-sm" id="pf-stt-w" value="31" min="1" max="64" step="1"></div>
       </div>
-      <div class="row mb-2"><div class="col-12 col-md-6 offset-md-6 pf-help pf-help-line" title="전화 건 중 이 비율만큼 원천 DB(TELP_STT_FLPTH_NM)에 더미를 채워 STT 단계를 스킵(Bypass)합니다.">전화 건 중 이 비율만큼 원천 DB(TELP_STT_FLPTH_NM)에 더미를 채워 STT 단계를 스킵(Bypass)합니다.</div></div>
+      <div class="row mb-2"><div class="col-12 col-md-6 offset-md-6">
+        <div class="pf-help pf-help-line" title="전화 건 중 이 비율만큼 원천 DB(TELP_STT_FLPTH_NM)에 더미를 채워 STT 단계를 스킵(Bypass)합니다.">기 STT — 전화 건 중 이 비율만큼 원천 DB(TELP_STT_FLPTH_NM)에 더미를 채워 STT 단계를 스킵(Bypass)합니다.</div>
+        <div class="pf-help pf-help-line" title="XVARM 확보 워커가 파일을 차례로 받아 대기열에 넣으면 STT 처리 워커가 곧바로 집어 병렬로 처리합니다(생산자-소비자). 대기열은 STT 워커 수만큼만 받아, STT 가 밀리면 확보도 쉬어 갑니다.">워커 — XVARM 확보 워커가 차례로 받아 둔 파일을 STT 처리 워커가 곧바로 병렬 처리합니다(생산자-소비자).</div>
+      </div></div>
       <div class="row g-2 align-items-start mb-2">
         <div class="col-6 col-md-2"><label class="hint" for="pf-lmode">건당 STT 처리 시간 방식</label>
           <select class="form-select form-select-sm" id="pf-lmode">
@@ -700,6 +716,7 @@
       <div class="hint">아직 실행한 회차가 없습니다. ① 에서 [기본 부하 검증 시작] 을 누르면 총 소요 · 평균 처리 시간 · TPS · 단계별 시간 · 자원이 여기에 나옵니다.</div>
     </div>
   </div>
+  </div><!-- /#pf-capture -->
 
   <!-- ③ 실행 이력 -->
   <div class="card shadow-sm mb-3">
@@ -714,14 +731,14 @@
       <div class="table-responsive" style="max-height:420px">
         <table class="table table-sm table-hover mb-0 pf-table">
           <thead class="table-light sticky-top">
-            <tr><th>시각</th><th>시나리오</th><th class="text-end">접견/전화</th><th class="text-end">동시성</th><th>지연</th>
+            <tr><th>시각</th><th>시나리오</th><th class="text-end">접견/전화</th><th class="text-end" title="XVARM 확보 워커 / STT 처리 워커 — 옛 이력은 동시성 하나">워커 확보/STT</th><th>지연</th>
                 <th class="text-end">타임아웃</th><th class="text-end">소요(초)</th><th class="text-end">평균(ms)</th><th>TPS</th>
                 <th>성공 / 실패 / 타임아웃</th><th class="text-end">Heap Peak</th><th class="text-end">Hikari</th><th>결과</th><th>EXEC_ID</th></tr>
           </thead>
           <tbody id="pf-hist"></tbody>
         </table>
       </div>
-      <div class="hint px-2 py-1">행을 누르면 위 ② 리포트에 그 회차가 나옵니다. 동시성을 바꿔 가며 돌리면 TPS 막대로 나란히 비교됩니다.</div>
+      <div class="hint px-2 py-1">행을 누르면 위 ② 리포트에 그 회차가 나옵니다. 워커 구성을 바꿔 가며 돌리면 TPS 막대로 나란히 비교됩니다.</div>
     </div>
   </div>
 
@@ -752,12 +769,14 @@
   </div>
 
   <div class="tabp" id="tab-ramp">
+  <!-- ①·② 를 한 장으로 캡처하는 영역 — [📸 전체 리포트 저장] -->
+  <div id="rp-capture">
   <!-- ① 임계 성능 테스트 설정 — 워커 램프업 -->
   <div class="card shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
-      <strong>① 임계 성능 테스트 — 워커 램프업 <span class="hint fw-normal">— 워커를 단계마다 늘려 <b>같은 건수</b>를 처리하며 포화 지점을 찾습니다. 단계마다 SIM 데이터를 새로 만듭니다</span></strong>
+      <strong>① 임계 성능 테스트 — 워커 램프업 <span class="hint fw-normal">— 한쪽 워커(STT 처리 · XVARM 확보)를 단계마다 늘려 <b>같은 건수</b>를 처리하며 포화 지점을 찾습니다. 단계마다 SIM 데이터를 새로 만듭니다</span></strong>
       <span class="d-flex align-items-center gap-3 flex-wrap ms-auto">
-        <span class="form-check form-switch m-0" title="끄면(기본) 고속 모드 — STT 를 기다리지 않고 즉시 통과시키고, 리포트에 건당 처리 시간을 워커에 나눈 가상 시간을 더합니다">
+        <span class="form-check form-switch m-0" title="끄면(기본) 고속 모드 — STT 를 기다리지 않고 즉시 통과시키고, 실제로 돈 확보 시각에 건당 처리 시간을 얹어 STT 워커에 다시 배정한 시간(파이프라인 모의)으로 리포트를 냅니다">
           <input class="form-check-input" type="checkbox" role="switch" id="rp-real">
           <label class="form-check-label small" for="rp-real">실제 대기 모드 (Real Sleep)</label>
         </span>
@@ -772,6 +791,15 @@
       </div>
       <div class="hint mb-2" id="rp-scen-desc">응답 시간 = 단계 총 소요(같은 건수를 처리한 시간). 워커를 늘려도 더 빨라지지 않으면 어딘가(브로커·NFS·DB)가 포화된 것입니다.</div>
       <div class="rp-sec hint fw-semibold mb-1">워커 램프업</div>
+      <div class="row g-2 align-items-end mb-2">
+        <div class="col-6 col-md-3"><label class="hint" for="rp-target">늘릴 워커</label>
+          <select class="form-select form-select-sm" id="rp-target">
+            <option value="STT" selected>STT 처리 워커</option><option value="ACQUIRE">XVARM 확보 워커</option>
+          </select></div>
+        <div class="col-6 col-md-2"><label class="hint" id="rp-fixed-lbl" for="rp-fixed">XVARM 확보 워커 (고정)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-fixed" value="1" min="1" max="64"></div>
+        <div class="col-12 col-md-7"><div class="pf-help" id="rp-target-note"></div></div>
+      </div>
       <div class="row g-2 align-items-end mb-2">
         <div class="col-6 col-md-2"><label class="hint" for="rp-w0">시작 워커</label>
           <input type="number" class="form-control form-control-sm" id="rp-w0" value="1" min="1" max="64"></div>
@@ -863,15 +891,20 @@
       <div class="table-responsive">
         <table class="table table-sm table-hover mb-0 pf-table">
           <thead class="table-light">
-            <tr><th class="text-end">단계</th><th class="text-end">워커</th><th class="text-end">응답(총 소요)</th><th class="text-end">TPS</th>
+            <tr><th class="text-end">단계</th><th class="text-end" id="rp-w-th">워커</th><th class="text-end">응답(총 소요)</th><th class="text-end">TPS</th>
                 <th class="text-end">평균 처리</th><th class="text-end">확보 평균</th><th class="text-end">확보 최대</th><th class="text-end">STT 평균</th>
                 <th>성공 / 실패 / 타임아웃</th><th class="text-end">Heap Peak</th><th class="text-end">Hikari</th><th>정합성 · EXEC_ID</th><th>비고</th></tr>
           </thead>
           <tbody id="rp-steps"></tbody>
         </table>
       </div>
+      <div class="d-flex justify-content-end mt-2" data-cap-hide>
+        <button class="btn btn-sm btn-outline-primary" type="button" id="rp-capture-btn" disabled
+                title="① 설정부터 ② 차트·표까지 한 장의 PNG 로 저장합니다">📸 전체 리포트 저장</button>
+      </div>
     </div>
   </div>
+  </div><!-- /#rp-capture -->
 
   <!-- ③ 이력 -->
   <div class="card shadow-sm mb-3">
@@ -886,7 +919,7 @@
       <div class="table-responsive" style="max-height:320px">
         <table class="table table-sm table-hover mb-0 pf-table">
           <thead class="table-light sticky-top">
-            <tr><th>시각</th><th class="text-end">단계</th><th>워커</th><th class="text-end">최적 워커</th><th class="text-end">최고 TPS</th><th>지연</th><th>종료 사유</th></tr>
+            <tr><th>시각</th><th class="text-end">단계</th><th>늘린 워커</th><th class="text-end">최적</th><th class="text-end">최고 TPS</th><th>지연</th><th>종료 사유</th></tr>
           </thead>
           <tbody id="rp-hist"></tbody>
         </table>
@@ -2500,19 +2533,19 @@ $('btn-log-tall').onclick = (e) => {
 
 // 시나리오 프리셋 — 건당 STT 처리 시간(접견 180초 · 전화 120초) 기준. 워커 수별 비교는 5번 탭이 맡는다.
 const PF_SCEN = {
-  A: { label:'A 기본 검증', meet:150, phone:150, stt:3, conc:4, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
-       desc:'일일 한도 300건 · 워커 4 · 건당 처리 시간 접견 180초 / 전화 120초 · 타임아웃 없음 — 하루치가 끝까지 도는지, 단계별 시간·자원·정합성을 봅니다. 합격: 실패 0 · T2 RUNNING 0 · T4 = 처리 건수' },
-  B: { label:'B STT 장애/타임아웃 검증', meet:150, phone:150, stt:3, conc:4, mode:'RANGE', meetMs:180000, phoneMs:120000, jitter:50, timeout:200000,
+  A: { label:'A 기본 검증', meet:150, phone:150, stt:3, acqW:1, sttW:31, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
+       desc:'일일 한도 300건 · XVARM 확보 워커 1 · STT 처리 워커 31 · 건당 처리 시간 접견 180초 / 전화 120초 · 타임아웃 없음 — 하루치가 끝까지 도는지, 단계별 시간·자원·정합성을 봅니다. 합격: 실패 0 · T2 RUNNING 0 · T4 = 처리 건수 · Hikari 반납' },
+  B: { label:'B STT 장애/타임아웃 검증', meet:150, phone:150, stt:3, acqW:1, sttW:31, mode:'RANGE', meetMs:180000, phoneMs:120000, jitter:50, timeout:200000,
        desc:'접견 90~270초 · 전화 60~180초(±50%) · 타임아웃 200초 — 접견 약 40%가 타임아웃 실패로 T4 에 남고 배치가 PARTIAL 로 닫히는지, T2 에 RUNNING 이 남지 않는지 봅니다. 타임아웃은 정상 접견(180초)보다 길게 두어 정상 건까지 실패하는 모순을 피했습니다' },
 };
 // 임계 시험 프리셋
 const RP_SCEN = {
   real: { label:'기본 램프업 (+1)', meet:150, phone:150, stt:3, mode:'FIXED', meetMs:180000, phoneMs:120000, jitter:50, timeout:null,
-          start:1, smode:'ADD', svalue:1, max:32, patience:3, acq:60, sttStop:true,
-          desc:'단계마다 300건 · 워커 1 → 2 → 3 → … → 32 · 건당 처리 시간 접견 180초 / 전화 120초 — 워커를 하나씩 늘려 확보(브로커·NFS)가 버티는 지점을 찾습니다. 최저 응답 뒤 3회 개선이 없으면 멈춥니다' },
+          target:'STT', fixed:1, start:1, smode:'ADD', svalue:1, max:32, patience:3, acq:60, sttStop:true,
+          desc:'단계마다 300건 · STT 처리 워커 1 → 2 → 3 → … → 32 (XVARM 확보 워커 1 고정) · 건당 처리 시간 접견 180초 / 전화 120초 — STT 워커를 하나씩 늘려 더 빨라지지 않는 지점(확보 또는 STT 포화)을 찾습니다. 최저 응답 뒤 3회 개선이 없으면 멈춥니다' },
   fast: { label:'빠른 탐색 (STT 0ms)', meet:150, phone:150, stt:3, mode:'FIXED', meetMs:0, phoneMs:0, jitter:50, timeout:null,
-          start:1, smode:'MULTIPLY', svalue:2, max:32, patience:3, acq:30, sttStop:true,
-          desc:'단계마다 300건 · 워커 1 → 2 → 4 → … → 32 · STT 0ms — 확보·복호화·저장만 남겨 브로커(추출 스레드 4개)·NFS 의 포화 지점을 빨리 찾습니다' },
+          target:'ACQUIRE', fixed:31, start:1, smode:'MULTIPLY', svalue:2, max:32, patience:3, acq:30, sttStop:true,
+          desc:'단계마다 300건 · XVARM 확보 워커 1 → 2 → 4 → … → 32 (STT 처리 워커 31 고정) · STT 0ms — 확보·복호화·저장만 남겨 브로커(추출 스레드 4개)·NFS 가 버티는 확보 동시성을 빨리 찾습니다' },
 };
 const PF_PHASES = [['PREPARING', '준비'], ['RUNNING', '측정'], ['VERIFYING', '검증'], ['CLEANING', '정리']];
 let PF_SCEN_KEY = null;
@@ -2564,6 +2597,22 @@ function trackAvg(base, mode, jitter, to) {
 }
 /** 기 STT 비율로 STT 를 건너뛸 전화 건수 — 서버와 같은 반올림. */
 function bypassCount(phone, pct) { return Math.round(phone * (pct || 0) / 100); }
+/** 워커 구성 한 줄 — 새 이력은 확보·STT, 옛 이력은 동시성 하나. */
+function wText(x) { return x && x.sttWorkers !== undefined ? `확보 ${x.acquireWorkers} · STT ${x.sttWorkers}` : `${x?.concurrency ?? '?'}`; }
+function wShort(x) { return x && x.sttWorkers !== undefined ? `${x.acquireWorkers}/${x.sttWorkers}` : `${x?.concurrency ?? ''}`; }
+/** 임계 시험에서 늘린 워커. 옛 이력(한 워커가 확보·STT 를 다 하던 때)은 그냥 '워커'. */
+function rpTarget(x) { return x?.rampTarget || x?.request?.rampTarget || null; }
+function rpAxis(x) { const t = rpTarget(x); return t === 'ACQUIRE' ? 'XVARM 확보 워커' : t === 'STT' ? 'STT 처리 워커' : '워커'; }
+function rpAxisShort(x) { const t = rpTarget(x); return t === 'ACQUIRE' ? '확보 워커' : t === 'STT' ? 'STT 워커' : '워커'; }
+/** 원천 풀(Hikari) 현황 — 시험이 끝난 직후 빌려 간 연결이 모두 돌아왔는가. */
+function hikariAfter(k) {
+  const a = k?.after;
+  if (!a) return null;
+  const pools = a.pools || [];
+  const sum = f => pools.reduce((n, x) => n + (Number(x[f]) || 0), 0);
+  return { returned: a.returned !== false, active: sum('active'), idle: sum('idle'), waiting: sum('waiting'),
+           max: pools.length ? pools[0].max : null };
+}
 /** 건당 비식별 처리시간 — 비식별을 켰을 때만. 건수 × 시간 ÷ 워커. */
 function deidEstimateSec(n, workers, on, ms) { return on ? n * (Number(ms) || 0) / Math.max(1, workers) / 1000 : 0; }
 /** 상단 [비식별화 수행] — 시뮬레이터 요청의 deidentEnabled. */
@@ -2618,14 +2667,14 @@ function pfSyncInputs() {
   $('pf-total').classList.toggle('text-danger', total < 2 || total > 300);
 }
 
-/** 프리셋을 고른 뒤 값을 바꿨으면 '(수정)' 을 붙인다 — 이력에서 A 와 A 변형이 섞이지 않게. C 는 동시성을 바꾸는 것이 본래 용도다. */
+/** 프리셋을 고른 뒤 값을 바꿨으면 '(수정)' 을 붙인다 — 이력에서 A 와 A 변형이 섞이지 않게. */
 function pfScenarioLabel() {
   const s = PF_SCEN[PF_SCEN_KEY];
   if (!s) return '직접 입력';
   const same = pfNum('pf-meet') === s.meet && pfNum('pf-phone') === s.phone && pfNum('pf-sttpct') === s.stt
     && $('pf-lmode').value === s.mode && pfNum('pf-lat-meet') === s.meetMs && pfNum('pf-lat-phone') === s.phoneMs
     && (s.mode !== 'RANGE' || pfNum('pf-jitter') === s.jitter) && pfNum('pf-timeout') === s.timeout
-    && Number($('pf-conc').value) === s.conc;
+    && pfNum('pf-acq-w') === s.acqW && pfNum('pf-stt-w') === s.sttW;
   return s.label + (same ? '' : ' (수정)');
 }
 
@@ -2636,7 +2685,8 @@ function pfRequest() {
     meetCount: pfNum('pf-meet'),
     phoneCount: pfNum('pf-phone'),
     sttPercent: pfNum('pf-sttpct'),
-    concurrency: Number($('pf-conc').value),
+    acquireWorkers: pfNum('pf-acq-w'),
+    sttWorkers: pfNum('pf-stt-w'),
     latencyMode: $('pf-lmode').value,
     meetLatencyMs: pfNum('pf-lat-meet'),
     phoneLatencyMs: pfNum('pf-lat-phone'),
@@ -2654,7 +2704,8 @@ function pfApplyPreset(key) {
   $('pf-meet').value = s.meet;
   $('pf-phone').value = s.phone;
   $('pf-sttpct').value = s.stt;
-  $('pf-conc').value = String(s.conc);
+  $('pf-acq-w').value = s.acqW;
+  $('pf-stt-w').value = s.sttW;
   $('pf-lmode').value = s.mode;
   $('pf-lat-meet').value = s.meetMs;
   $('pf-lat-phone').value = s.phoneMs;
@@ -2671,15 +2722,15 @@ function pfEstimate() {
   const n = (q.meetCount || 0) + (q.phoneCount || 0);
   if (!n) { $('pf-est').textContent = ''; return; }
   if (PF_INFO?.sttMode === 'NPU') { $('pf-est').textContent = '실 NPU — 건당 처리 시간·고속 모드는 쓰지 않습니다'; return; }
-  const sec = sttEstimateSec(q.meetCount || 0, q.phoneCount || 0, q.sttPercent, q.concurrency, q.latencyMode,
+  const sec = sttEstimateSec(q.meetCount || 0, q.phoneCount || 0, q.sttPercent, q.sttWorkers, q.latencyMode,
     q.meetLatencyMs || 0, q.phoneLatencyMs || 0, q.jitterPercent, q.sttTimeoutMs);
   const by = bypassCount(q.phoneCount || 0, q.sttPercent);
-  const basis = `${n}건 ÷ 워커 ${q.concurrency}${by ? ` · 기 STT ${by}건은 건너뜀` : ''}`;
-  const dsec = deidEstimateSec(n, q.concurrency, q.deidentEnabled, q.deidentLatencyMs);
+  const basis = `${n}건 ÷ STT 워커 ${q.sttWorkers ?? '?'} · 확보 워커 ${q.acquireWorkers ?? '?'}개가 차례로 확보(STT 와 겹침)${by ? ` · 기 STT ${by}건은 건너뜀` : ''}`;
+  const dsec = deidEstimateSec(n, q.sttWorkers, q.deidentEnabled, q.deidentLatencyMs);
   const deid = q.deidentEnabled ? ` · 비식별 약 ${fmtSec(dsec)}` : ' · 비식별 끔(단순 전달 0ms)';
   $('pf-est').textContent = q.realSleep
     ? `실제 대기 모드 — STT 를 실제로 약 ${fmtSec(sec)}${deid} 기다립니다 (${basis}) · 확보·복호화·저장 시간은 별도`
-    : `고속 모드 — STT 를 기다리지 않고 즉시 통과합니다. 리포트에 가상 STT 시간(약 ${fmtSec(sec)})${q.deidentEnabled ? `과 가상 비식별 시간(약 ${fmtSec(dsec)})` : ''}을 더합니다 (${basis})`;
+    : `고속 모드 — STT 를 기다리지 않고 즉시 통과합니다. 리포트는 가상 STT 시간(약 ${fmtSec(sec)})${q.deidentEnabled ? `과 가상 비식별 시간(약 ${fmtSec(dsec)})` : ''}을 STT 워커에 배정해 확보와 겹쳐 계산합니다 (${basis})`;
 }
 
 function pfRenderInfo() {
@@ -2688,8 +2739,10 @@ function pfRenderInfo() {
   const i = PF_INFO;
   if (!i) return;
   const m = i.modes || {};
+  const pool = i.pool || {};
   const line = `지금 구성 — 조회 ${m.source} · 브로커 ${m.broker} · 전화 ${m.phone} · 복호화 ${m.decrypt}`
-    + ` · 운영 배치 동시성 ${i.batchConcurrency} · 배치 1회 상한 ${i.maxFilesPerRun}건`;
+    + ` · 운영 배치 워커 확보 ${i.batchAcquireWorkers ?? 1} · STT ${i.batchConcurrency} · 배치 1회 상한 ${i.maxFilesPerRun}건`
+    + (pool.maxPoolSize ? ` · 원천 Hikari 최대 ${pool.maxPoolSize} · 누수 감지 ${pool.leakDetectionMs ? pool.leakDetectionMs / 1000 + '초' : '끔'}` : '');
   $('pf-modes').textContent = line;
   $('rp-modes').textContent = line;
   $('pf-warn').innerHTML = warnHtml(i.historyFile);
@@ -2703,7 +2756,7 @@ async function pfStart() {
   const i = PF_INFO || {};
   const by = bypassCount(req.phoneCount || 0, req.sttPercent);
   const ok = await confirmPopup('기본 부하 검증 시작', `
-    <div class="pop-lead">${esc(req.scenario)} — 접견 ${req.meetCount} · 전화 ${req.phoneCount}건 · 워커 ${req.concurrency}개</div>
+    <div class="pop-lead">${esc(req.scenario)} — 접견 ${req.meetCount} · 전화 ${req.phoneCount}건 · 워커 ${esc(wText(req))}</div>
     <ul class="pop-list">
       <li><span class="lbl">STT:</span> <b>${esc(i.sttMode || '?')}</b>${i.sttMode === 'NPU'
           ? ' — 건당 처리 시간은 쓰지 않고 <b>실제 NPU</b> 로 요청이 갑니다'
@@ -2818,7 +2871,10 @@ function drawProgress(prefix, c, p, extra) {
   if (c.phase === 'RUNNING' && p.running) {
     cur = c.cancelRequested
       ? esc('중지하는 중 — 처리 중인 건을 끝내고 멈춥니다…')
-      : `처리 중 <b>${p.active ?? 0}</b>건 · 워커 ${p.concurrency ?? '?'}개`
+      : p.pipeline
+        ? `확보 중 <b>${p.acquiring ?? 0}</b> · STT 대기 <b>${p.queued ?? 0}</b> · STT 처리 중 <b>${p.processing ?? 0}</b>건`
+          + ` · 워커 확보 ${p.acquireWorkers ?? '?'} / STT ${p.sttWorkers ?? '?'}`
+        : `처리 중 <b>${p.active ?? 0}</b>건 · 워커 ${p.concurrency ?? '?'}개`
         + (p.currentFile ? ` · 최근 <span class="tag ${esc(p.currentKind || '')}">${esc(p.currentKind || '')}</span> ${esc(p.currentFile)}` : '');
   }
   $(prefix + '-cur').innerHTML = cur;
@@ -2840,15 +2896,16 @@ async function pfFinish(c) {
   if (c.result) {
     const r = c.result;
     pfRenderReport(r);
-    log(`✔ 기본 부하 검증 완료 — ${r.scenario} · 접견/전화 ${countText(r)} · 워커 ${r.concurrency} · ${fmtSec(r.totalSec)} · 평균 ${fmtMs(r.avgMs)} · ${fmtTps(r.tps)} TPS`
+    log(`✔ 기본 부하 검증 완료 — ${r.scenario} · 접견/전화 ${countText(r)} · 워커 ${wText(r)} · ${fmtSec(r.totalSec)} · 평균 ${fmtMs(r.avgMs)} · ${fmtTps(r.tps)} TPS`
       + ` · 성공 ${r.success} / 실패 ${r.fail} / 타임아웃 ${r.timeout} · Heap Peak ${r.heap?.peakMb}MB · Hikari ${r.hikari?.peak}`, 'ok');
-    showPopup('기본 부하 검증 완료', `<div class="pop-lead">${esc(r.scenario)} — 접견/전화 ${countText(r)}건 · 워커 ${r.concurrency}개</div>
+    showPopup('기본 부하 검증 완료', `<div class="pop-lead">${esc(r.scenario)} — 접견/전화 ${countText(r)}건 · 워커 ${esc(wText(r))}</div>
       <ul class="pop-list">
         <li><span class="lbl">처리량:</span> <span class="n">${fmtTps(r.tps)}</span> TPS · 총 ${fmtSec(r.totalSec)} · 건당 평균 ${fmtMs(r.avgMs)}</li>
         <li><span class="lbl">결과:</span> 성공 <span class="ok-t">${r.success}</span> · 실패 <span class="ng-t">${r.fail}</span> · 타임아웃 <span class="to-t">${r.timeout}</span> · ${esc(r.execStsCd)}</li>
-        <li><span class="lbl">정합성:</span> ${pfCheckBadge(r.checks)}</li>
+        <li><span class="lbl">정합성:</span> ${pfCheckBadge(r.checks)}${(() => { const h = hikariAfter(r.hikari); return h
+          ? ` · <span class="vf-b ${h.returned ? 'SUCCESS' : 'FAIL'}">Hikari ${h.returned ? '반납 ✓' : `사용 중 ${h.active} ✗`}</span>` : ''; })()}</li>
       </ul>
-      <div class="sub mt-2">② 결과 리포트 · ③ 실행 이력에 남았습니다.</div>`);
+      <div class="sub mt-2">② 결과 리포트 · ③ 실행 이력에 남았습니다. [📸 전체 리포트 저장] 으로 ①·② 를 한 장의 이미지로 남길 수 있습니다.</div>`);
   } else {
     log(`✖ 기본 부하 검증 실패 — ${c.error || c.message}`, 'er');
     showPopup('기본 부하 검증 실패', `<div class="pop-lead">${esc(c.error || c.message || '')}</div>
@@ -2858,20 +2915,31 @@ async function pfFinish(c) {
 
 function pfRenderReport(r) {
   if (!r) return;
+  PF_SHOWN = r;
   $('pf-last').textContent = `${r.runId} · EXEC_ID ${r.execId || '—'}`;
   const h = r.heap || {}, k = r.hikari || {}, c = r.checks || {}, m = r.modes || {};
-  const tile = (key, n, sub) => `<div class="pf-tile"><div class="k">${key}</div><div class="n">${n}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+  // 보조 문구는 한 줄로 자르되 전체는 풍선으로 — 캡처에서는 펼친다(.capturing)
+  const tile = (key, n, sub) => `<div class="pf-tile"><div class="k">${key}</div><div class="n">${n}</div>${sub
+    ? `<div class="s" title="${esc(String(sub).replace(/<[^>]+>/g, ''))}">${sub}</div>` : ''}</div>`;
   const tiles = [
-    tile('총 소요 시간', esc(fmtSec(r.totalSec)), r.fastForward
-      ? `실제 ${esc(fmtSec(r.realSec))} + 가상 STT ${esc(fmtSec(r.virtualSttSec))}${r.virtualDeidentSec ? ` + 가상 비식별 ${esc(fmtSec(r.virtualDeidentSec))}` : ''}`
-      : `실제 대기 · 준비 ${r.prepareSec}초 제외`),
-    tile('평균 처리 시간', esc(fmtMs(r.avgMs)), r.fastForward ? '건당 확보 ~ 저장 (STT 가상)' : '건당 확보 ~ 저장'),
+    tile('총 소요 시간', esc(fmtSec(r.totalSec)), !r.fastForward
+      ? `실제 대기 · 준비 ${r.prepareSec}초 제외${r.pipeline ? ` · 확보 구간 ${esc(fmtSec(r.acquireSpanSec))}` : ''}`
+      : r.virtualSec !== undefined
+        ? `실제 ${esc(fmtSec(r.realSec))} + 가상 ${esc(fmtSec(r.virtualSec))}${r.pipeline ? ` · 확보 구간 ${esc(fmtSec(r.acquireSpanSec))}와 겹쳐 계산` : ''}`
+        : `실제 ${esc(fmtSec(r.realSec))} + 가상 STT ${esc(fmtSec(r.virtualSttSec))}${r.virtualDeidentSec ? ` + 가상 비식별 ${esc(fmtSec(r.virtualDeidentSec))}` : ''}`),
+    tile('평균 처리 시간', esc(fmtMs(r.avgMs)), r.fastForward ? '건당 확보 ~ 저장 (STT 가상 · 대기열 대기 제외)' : '건당 확보 ~ 저장 (대기열 대기 제외)'),
     tile('TPS', fmtTps(r.tps), r.fastForward === undefined ? '성공 건수 ÷ 총 소요' : '처리 건수 ÷ 총 소요'),
     tile('전체 / 성공 / 실패 / 타임아웃',
       `${r.total} / <span class="ok-t">${r.success}</span> / <span class="ng-t">${r.fail}</span> / <span class="to-t">${r.timeout}</span>`,
       `${esc(r.execStsCd || '')}${r.skipped ? ' · 건너뜀 ' + r.skipped : ''}`),
     tile('Heap 시작 → 종료', `${h.startMb}→${h.endMb}<small>MB</small>`, `Peak ${h.peakMb}MB / 최대 ${h.maxMb}MB`),
-    tile('Hikari Peak 연결', `${k.peak ?? 0}`, esc(k.pool || '원천 DB 풀')),
+    tile('Hikari Peak 연결', `${k.peak ?? 0}`, (() => {
+      const h = hikariAfter(k);
+      if (!h) return esc(k.pool || '원천 DB 풀');
+      return h.returned
+        ? `종료 후 사용 0 · 유휴 ${h.idle}${h.max ? ` / 최대 ${h.max}` : ''} <span class="ok-t">✓ 반납</span>`
+        : `<span class="ng-t">⚠ 종료 후 사용 ${h.active} · 대기 ${h.waiting} — 반납 안 됨</span>`;
+    })()),
   ].join('');
   // 단계별 막대 — 평균 소요 시간만 싣는다. 건수를 붙였더니 단계마다 달라(기 STT 건은 STT·중간을 건너뛴다)
   //   동시 처리에서 건이 빠진 것처럼 읽혔다.
@@ -2881,10 +2949,12 @@ function pfRenderReport(r) {
       <div class="bo"><div class="b ${esc(x.key)}" style="width:${Math.max(0.5, (Number(x.avgMs) || 0) * 100 / max)}%"></div></div>
       <span class="v">${esc(fmtMs(x.avgMs))}</span></div>`).join('');
   let checks;
+  const b = (ok, txt) => `<span class="vf-b ${ok ? 'SUCCESS' : 'FAIL'}">${ok ? '✓' : '✗'} ${txt}</span>`;
+  const hk = hikariAfter(k);
+  const hikariBadge = hk ? ' ' + b(hk.returned, hk.returned ? 'Hikari 반납 (사용 0)' : `Hikari 사용 중 ${hk.active}`) : '';
   if (c.available === false || !Object.keys(c).length) {
-    checks = `<span class="vf-b x">확인 불가</span> <span class="hint">${esc(c.reason || '')}</span>`;
+    checks = `<span class="vf-b x">확인 불가</span> <span class="hint">${esc(c.reason || '')}</span>` + hikariBadge;
   } else {
-    const b = (ok, txt) => `<span class="vf-b ${ok ? 'SUCCESS' : 'FAIL'}">${ok ? '✓' : '✗'} ${txt}</span>`;
     const dup = c.t2Duplicated || [];
     checks = [
       `<span class="vf-b ${esc(c.t1Status || 'x')}">T1 ${esc(c.t1Status || '—')}</span>`,
@@ -2894,14 +2964,14 @@ function pfRenderReport(r) {
       b(c.t1Success === c.t4Success, `T1 성공 ${c.t1Success} = T4 SUCCESS ${c.t4Success}`),
       c.t5Expected === undefined ? '' : b(c.t5Rows === c.t5Expected, `T5 ${c.t5Rows}행 = 비식별 통과 ${c.t5Expected}건`
         + (c.t5BySolution && Object.keys(c.t5BySolution).length ? ` (${Object.entries(c.t5BySolution).map(([k, v]) => `${k === 'AIR' ? 'DEIDENT_SUCCESS' : k === 'BYPASS' ? 'SEND' : k} ${v}`).join(' · ')})` : '')),
-    ].join(' ');
+    ].join(' ') + hikariBadge;
   }
   const data = r.meetCount !== undefined
     ? `접견 ${r.meetCount} · 전화 ${r.phoneCount}건 (기 STT ${r.sttPercent}% → ${r.sourceSttPhones ?? 0}건)` : `${r.count}건`;
   const mode = r.fastForward === undefined ? '' : (r.fastForward ? '고속 모드' : '실제 대기 모드');
   const deidTxt = r.deidentEnabled === undefined ? '' : (r.deidentEnabled
     ? `비식별 수행(건당 ${esc(fmtMs(r.latency?.deidentMs ?? 0))})` : '비식별 끔(단순 전달)');
-  const cond = [esc(r.scenario), data, `워커 ${r.concurrency}`, `건당 STT ${esc(latText(r.latency))}`, mode, deidTxt,
+  const cond = [esc(r.scenario), data, `워커 ${esc(wText(r))}`, `건당 STT ${esc(latText(r.latency))}`, mode, deidTxt,
     `타임아웃 ${r.sttTimeoutMs ? fmtMs(r.sttTimeoutMs) : '없음'}`, `STT ${esc(r.sttMode)}`,
     `조회 ${esc(m.source)} · 브로커 ${esc(m.broker)} · 복호화 ${esc(m.decrypt)}`, esc(r.db || '')].join(' · ');
   const cl = r.cleanup || {};
@@ -2916,9 +2986,14 @@ function pfRenderReport(r) {
     <div class="pf-stages">${bars}</div>
     <div class="d-flex flex-wrap align-items-center gap-1 mb-2"><b class="small me-1">정합성</b>${checks}</div>
     <div class="d-flex flex-wrap align-items-center gap-2"><span class="hint">${clean} · 실행 ${esc(String(r.at || '').replace('T', ' '))}</span>
-      ${r.execId ? '<button class="btn btn-sm btn-outline-secondary ms-auto" type="button" data-pf-verify="1">🔍 상세 검증 (DB &amp; PV)</button>' : ''}</div>
+      <span class="ms-auto d-flex flex-wrap gap-2" data-cap-hide>
+        ${r.execId ? '<button class="btn btn-sm btn-outline-secondary" type="button" data-pf-verify="1">🔍 상세 검증 (DB &amp; PV)</button>' : ''}
+        <button class="btn btn-sm btn-outline-primary" type="button" data-pf-capture="1" title="① 설정부터 ② 결과 리포트까지 한 장의 PNG 로 저장합니다">📸 전체 리포트 저장</button>
+      </span></div>
     <div class="mt-2" data-pf-vf="1"></div>`;
   bindVerify($('pf-report'), r.execId, 'pf-vf');
+  const cb = $('pf-report').querySelector('[data-pf-capture]');
+  if (cb) cb.onclick = () => pfCapture(cb);
 }
 
 /** [상세 검증] 버튼 — 기존 검증 패널(DB·PV·SQL·CLI)을 접힌 아코디언으로 붙인다. */
@@ -2952,7 +3027,7 @@ function pfRenderHistory() {
       <td class="font-monospace">${esc(String(x.at || '').replace('T', ' ').slice(5, 16))}</td>
       <td>${esc(x.scenario)}</td>
       <td class="text-end">${esc(countText(x))}</td>
-      <td class="text-end">${x.concurrency}</td>
+      <td class="text-end">${esc(wShort(x))}</td>
       <td>${esc(latText(x.latency))}</td>
       <td class="text-end">${x.sttTimeoutMs ? esc(fmtMs(x.sttTimeoutMs)) : '—'}</td>
       <td class="text-end">${esc(fmtSec(x.totalSec))}</td>
@@ -2962,7 +3037,7 @@ function pfRenderHistory() {
       <td class="text-end">${x.heap?.peakMb ?? ''}</td>
       <td class="text-end">${x.hikari?.peak ?? ''}</td>
       <td><span class="vf-b ${esc(x.execStsCd || 'x')}">${esc(x.execStsCd || '—')}</span> ${pfCheckBadge(x.checks)}
-        <span class="vf-b x" title="${x.fastForward ? `실제 ${fmtSec(x.realSec)} + 가상 STT ${fmtSec(x.virtualSttSec)}` : '실제로 기다림'}">${x.fastForward ? '고속' : '실제'}</span>
+        <span class="vf-b x" title="${x.fastForward ? `실제 ${fmtSec(x.realSec)} + 가상 ${fmtSec(x.virtualSec ?? x.virtualSttSec)}` : '실제로 기다림'}">${x.fastForward ? '고속' : '실제'}</span>
         ${x.deidentEnabled === undefined ? '' : `<span class="vf-b ${x.deidentEnabled ? 'SUCCESS' : 'x'}">${x.deidentEnabled ? '비식별' : '전달'}</span>`}</td>
       <td class="font-monospace">${esc(x.execId || '')}</td></tr>`).join('');
 }
@@ -2984,20 +3059,21 @@ function downloadCsv(name, head, rows) {
 /** 이력을 CSV 로 — 오래된 회차가 위. 엑셀이 한글을 깨지 않게 BOM 을 붙인다. */
 function pfCsv() {
   if (!PF_HIST.length) { log('내보낼 기본 부하 검증 이력이 없습니다', 'wr'); return; }
-  const stageKeys = ['ACQUIRE', 'DECRYPT', 'FORMAT', 'STT', 'TEMP', 'SAVE'];
-  const head = ['실행ID', '시각', '시나리오', '접견', '전화', '기STT%', '기STT건', '동시성', '지연방식', '접견지연ms', '전화지연ms', '변동폭%',
-    '타임아웃ms', 'STT', '모드', '실제초', '가상STT초', '총소요초', '평균ms', 'TPS', '전체', '성공', '실패', '타임아웃', '건너뜀', '배치상태',
-    '확보ms', '복호화ms', '포맷ms', 'STTms', '중간ms', '저장ms',
-    '힙시작MB', '힙종료MB', '힙PeakMB', '힙최대MB', 'HikariPeak', 'T2 RUNNING', 'T4행', '정합성',
+  const stageKeys = ['ACQUIRE', 'DECRYPT', 'FORMAT', 'STT', 'TEMP', 'DEIDENT', 'SAVE'];
+  const head = ['실행ID', '시각', '시나리오', '접견', '전화', '기STT%', '기STT건', '확보워커', 'STT워커', '지연방식', '접견지연ms', '전화지연ms', '변동폭%',
+    '타임아웃ms', 'STT', '모드', '실제초', '가상합산초', '가상STT초', '확보구간초', '총소요초', '평균ms', 'TPS', '전체', '성공', '실패', '타임아웃', '건너뜀', '배치상태',
+    '확보ms', '복호화ms', '포맷ms', 'STTms', '중간ms', '비식별ms', '저장ms',
+    '힙시작MB', '힙종료MB', '힙PeakMB', '힙최대MB', 'HikariPeak', 'Hikari반납', 'T2 RUNNING', 'T4행', '정합성',
     'EXEC_ID', '조회', '브로커', '복호화', 'DB'];
   const rows = PF_HIST.slice().reverse().map(x => {
     const st = Object.fromEntries((x.stages || []).map(v => [v.key, v.avgMs]));
     const c = x.checks || {}, h = x.heap || {}, m = x.modes || {}, l = x.latency || {};
     return [x.runId, x.at, x.scenario, x.meetCount ?? '', x.phoneCount ?? x.count, x.sttPercent ?? '', x.sourceSttPhones ?? '',
-      x.concurrency, l.mode, l.meetMs ?? l.ms, l.phoneMs ?? l.ms, l.jitterPercent ?? '', x.sttTimeoutMs ?? '', x.sttMode,
-      x.fastForward ? '고속' : '실제', x.realSec ?? x.totalSec, x.virtualSttSec ?? 0, x.totalSec, x.avgMs, x.tps, x.total, x.success, x.fail, x.timeout, x.skipped, x.execStsCd,
+      x.acquireWorkers ?? '', x.sttWorkers ?? x.concurrency, l.mode, l.meetMs ?? l.ms, l.phoneMs ?? l.ms, l.jitterPercent ?? '', x.sttTimeoutMs ?? '', x.sttMode,
+      x.fastForward ? '고속' : '실제', x.realSec ?? x.totalSec, x.virtualSec ?? '', x.virtualSttSec ?? 0, x.acquireSpanSec ?? '', x.totalSec, x.avgMs, x.tps, x.total, x.success, x.fail, x.timeout, x.skipped, x.execStsCd,
       ...stageKeys.map(k => st[k] ?? ''),
-      h.startMb, h.endMb, h.peakMb, h.maxMb, x.hikari?.peak ?? '', c.t2Running ?? '', c.t4Rows ?? '',
+      h.startMb, h.endMb, h.peakMb, h.maxMb, x.hikari?.peak ?? '', (() => { const a = hikariAfter(x.hikari); return a ? (a.returned ? 'Y' : 'N') : ''; })(),
+      c.t2Running ?? '', c.t4Rows ?? '',
       c.available === false ? '확인불가' : (c.ok ? 'OK' : 'NG'), x.execId, m.source, m.broker, m.decrypt, x.db];
   });
   downloadCsv('perf_basic', head, rows);
@@ -3023,6 +3099,11 @@ function rpSyncInputs() {
   $('rp-total').textContent = `${total}건`;
   $('rp-total').classList.toggle('text-danger', total < 2 || total > 300);
   $('rp-svalue-lbl').textContent = $('rp-smode').value === 'ADD' ? '증가 값 (+N)' : '증가 배수 (×N)';
+  const stt = $('rp-target').value === 'STT';
+  $('rp-fixed-lbl').textContent = stt ? 'XVARM 확보 워커 (고정)' : 'STT 처리 워커 (고정)';
+  $('rp-target-note').textContent = stt
+    ? 'STT 처리 워커를 단계마다 늘립니다. XVARM 확보 워커는 고정 — 원천(브로커·NFS) 부하는 그대로 두고 STT 동시성의 효과와 포화 지점을 봅니다.'
+    : 'XVARM 확보 워커를 단계마다 늘립니다. STT 처리 워커는 고정 — 브로커(추출 스레드 4개)·NFS 가 버티는 확보 동시성을 찾습니다.';
 }
 
 /** 화면에서 계획을 미리 계산한다 — 서버(RampRequest.plan)와 같은 규칙: 넘치면 최대에서 끝낸다. */
@@ -3046,6 +3127,9 @@ function rpRequest() {
     latencyMode: $('rp-lmode').value, meetLatencyMs: pfNum('rp-lat-meet'), phoneLatencyMs: pfNum('rp-lat-phone'),
     jitterPercent: range ? pfNum('rp-jitter') : 0, sttTimeoutMs: pfNum('rp-timeout'),
     startWorkers: pfNum('rp-w0'), stepMode: $('rp-smode').value, stepValue: pfNum('rp-svalue'), maxWorkers: pfNum('rp-max'),
+    rampTarget: $('rp-target').value,
+    acquireWorkers: $('rp-target').value === 'STT' ? pfNum('rp-fixed') : null,
+    sttWorkers: $('rp-target').value === 'ACQUIRE' ? pfNum('rp-fixed') : null,
     patience: pfNum('rp-patience'), acquireLimitSec: pfNum('rp-acq') ?? 0, stopOnSttError: $('rp-sttstop').checked,
     realSleep: $('rp-real').checked,
     deidentEnabled: deidOn(),
@@ -3058,15 +3142,17 @@ function rpPlanPreview() {
   const n = (q.meetCount || 0) + (q.phoneCount || 0);
   let est = '';
   if (PF_INFO?.sttMode !== 'NPU' && n) {
-    const sec = plan.reduce((s, w) => s + sttEstimateSec(q.meetCount || 0, q.phoneCount || 0, q.sttPercent, w, q.latencyMode,
+    const sttW = w => q.rampTarget === 'STT' ? w : (q.sttWorkers || 1);
+    const sec = plan.reduce((s, w) => s + sttEstimateSec(q.meetCount || 0, q.phoneCount || 0, q.sttPercent, sttW(w), q.latencyMode,
       q.meetLatencyMs || 0, q.phoneLatencyMs || 0, q.jitterPercent, q.sttTimeoutMs), 0);
-    const dsum = plan.reduce((s2, w) => s2 + deidEstimateSec(n, w, q.deidentEnabled, q.deidentLatencyMs), 0);
+    const dsum = plan.reduce((s2, w) => s2 + deidEstimateSec(n, sttW(w), q.deidentEnabled, q.deidentLatencyMs), 0);
     est = q.realSleep
       ? ` · 실제 대기 모드 — 전 단계를 다 돌면 STT 대기만 약 ${fmtSec(sec)}${q.deidentEnabled ? ` · 비식별 약 ${fmtSec(dsum)}` : ''} (조기 종료되면 더 짧다 · 확보·복호화·준비 시간 별도)`
-      : ` · 고속 모드 — STT 를 기다리지 않습니다(실제 소요는 파이프라인 시간뿐). 단계마다 가상 STT 시간을 리포트에 더합니다`;
+      : ` · 고속 모드 — STT 를 기다리지 않습니다(실제 소요는 파이프라인 시간뿐). 단계마다 건당 처리 시간을 STT 워커에 배정해 확보와 겹쳐 응답을 계산합니다`;
   }
-  $('rp-plan').innerHTML = `계획 — 워커 <b>${plan.join(' → ')}</b> (${plan.length}단계${plan.length > 20 ? ' · 20단계 초과 — 줄이십시오' : ''})`
-    + ` · 단계마다 ${n}건${esc(est)}`;
+  const fixedTxt = q.rampTarget === 'STT' ? `XVARM 확보 워커 ${q.acquireWorkers ?? '?'} 고정` : `STT 처리 워커 ${q.sttWorkers ?? '?'} 고정`;
+  $('rp-plan').innerHTML = `계획 — ${esc(rpAxis(q))} <b>${plan.join(' → ')}</b> (${plan.length}단계${plan.length > 20 ? ' · 20단계 초과 — 줄이십시오' : ''})`
+    + ` · ${esc(fixedTxt)} · 단계마다 ${n}건${esc(est)}`;
 }
 
 function rpApplyPreset(key) {
@@ -3075,6 +3161,7 @@ function rpApplyPreset(key) {
   $('rp-meet').value = s.meet; $('rp-phone').value = s.phone; $('rp-sttpct').value = s.stt;
   $('rp-lmode').value = s.mode; $('rp-lat-meet').value = s.meetMs; $('rp-lat-phone').value = s.phoneMs;
   $('rp-jitter').value = s.jitter; $('rp-timeout').value = s.timeout ?? '';
+  $('rp-target').value = s.target; $('rp-fixed').value = s.fixed;
   $('rp-w0').value = s.start; $('rp-smode').value = s.smode; $('rp-svalue').value = s.svalue; $('rp-max').value = s.max;
   $('rp-patience').value = s.patience; $('rp-acq').value = s.acq; $('rp-sttstop').checked = s.sttStop;
   document.querySelectorAll('.rp-preset').forEach(b => b.classList.toggle('active', b.dataset.s === key));
@@ -3087,7 +3174,7 @@ async function rpStart() {
   const req = rpRequest(), plan = rpPlan();
   const i = PF_INFO || {};
   const ok = await confirmPopup('임계 성능 테스트 시작', `
-    <div class="pop-lead">워커 ${esc(plan.join(' → '))} · 단계마다 접견 ${req.meetCount} · 전화 ${req.phoneCount}건</div>
+    <div class="pop-lead">${esc(rpAxis(req))} ${esc(plan.join(' → '))} (${esc(req.rampTarget === 'STT' ? `XVARM 확보 워커 ${req.acquireWorkers} 고정` : `STT 처리 워커 ${req.sttWorkers} 고정`)}) · 단계마다 접견 ${req.meetCount} · 전화 ${req.phoneCount}건</div>
     <ul class="pop-list">
       <li><span class="lbl">STT:</span> <b>${esc(i.sttMode || '?')}</b>${i.sttMode === 'NPU' ? ' — 실제 NPU 로 요청이 갑니다'
           : ` · ${esc(latText({ mode:req.latencyMode, meetMs:req.meetLatencyMs, phoneMs:req.phoneLatencyMs, jitterPercent:req.jitterPercent }))}`
@@ -3099,7 +3186,7 @@ async function rpStart() {
     </ul>
     ${sharedDb() ? '<div class="pop-note">⚠ 공용 DB 입니다 — 다른 작업자와 시간이 겹치지 않게 하십시오.</div>' : ''}`, '시작', '취소');
   if (!ok) return;
-  const info = await callFull('POST', '/api/v1/mock/perf/ramp/runs', `임계 성능 테스트 시작 — 워커 ${plan.join('→')}`, { json: req });
+  const info = await callFull('POST', '/api/v1/mock/perf/ramp/runs', `임계 성능 테스트 시작 — ${rpAxis(req)} ${plan.join('→')}`, { json: req });
   if (!info.ok) {
     showPopup('임계 성능 테스트를 시작하지 못했습니다',
       `<div class="pop-lead">${esc(info.body?.message || info.error || ('HTTP ' + info.status))}</div>`);
@@ -3111,35 +3198,44 @@ async function rpStart() {
 
 /** 도는 중이든 끝났든 같은 모양 — 진행 · 멈춘 사유 · 차트 2개 · 단계 표. */
 function rpRender(c) {
-  const req = c.request || {};
+  const req = c.request || c.result?.request || {};
   const steps = c.steps || c.result?.steps || [];
+  const axisOf = { rampTarget: c.rampTarget || c.result?.rampTarget || req.rampTarget };
+  RP_SHOWN = { request: req, at: c.result?.at || null, runId: c.runId || c.result?.runId || '', axis: rpAxis(axisOf), steps: steps.length };
+  $('rp-w-th').textContent = rpAxisShort(axisOf);
+  $('rp-capture-btn').disabled = !steps.length;
   if (c.active !== undefined) {
-    const p = c.progress || {};
+    // 끝난 회차는 진행률이 없다 — 마지막 단계의 건수로 채운다(0/0건 으로 보이지 않게)
+    const last = steps.length ? steps[steps.length - 1] : null;
+    const p = c.progress || (last ? { total: last.total, done: (last.success || 0) + (last.fail || 0) + (last.skipped || 0),
+      success: last.success, fail: last.fail, skipped: last.skipped } : {});
     const plan = c.plan || [];
-    let extra = c.stepNo ? ` <span class="pf-ph on">단계 ${c.stepNo}/${plan.length} · 워커 ${c.workers}</span>` : '';
+    let extra = c.stepNo ? ` <span class="pf-ph on">단계 ${c.stepNo}/${plan.length} · ${esc(rpAxisShort(axisOf))} ${c.workers}</span>` : '';
     if (c.phase === 'RUNNING' && c.liveAcquireMs !== undefined && req.acquireLimitSec) {
       const near = c.liveAcquireMs / 1000 / req.acquireLimitSec;
       extra += ` <span class="pf-ph ${near >= 0.8 ? 'warn' : ''}">확보 대기 ${fmtMs(c.liveAcquireMs)} / 한도 ${req.acquireLimitSec}초</span>`;
     }
     if (c.active || c.phase) drawProgress('rprog', c, p, extra);
   }
-  rpStopBanner(c.stopReason || c.result?.stopReason, c.bestStep || c.result?.bestStep, steps, c.active);
-  rpCharts(steps, c.bestStep || c.result?.bestStep, req.acquireLimitSec);
+  rpStopBanner(c.stopReason || c.result?.stopReason, c.bestStep || c.result?.bestStep, steps, c.active, rpAxis(axisOf));
+  rpCharts(steps, c.bestStep || c.result?.bestStep, req.acquireLimitSec, rpAxis(axisOf));
   rpTable(steps, c.bestStep || c.result?.bestStep);
   $('rp-last').textContent = `${c.runId || ''}${steps.length ? ` · ${steps.length}단계` : ''}`;
 }
 
-function rpStopBanner(reason, bestStep, steps, active) {
+function rpStopBanner(reason, bestStep, steps, active, axis = '워커') {
   const el = $('rp-stop');
   if (!reason && !steps.length) { el.innerHTML = ''; return; }
   const best = bestStep ? steps[bestStep - 1] : null;
-  const bestHtml = best ? `최적 워커 <b>${best.workers}</b> — 응답(단계 총 소요) ${esc(fmtSec(best.totalSec))} · ${fmtTps(best.tps)} TPS` : '';
+  const bestHtml = best ? `최적 ${esc(axis)} <b>${best.workers}</b>${best.sttWorkers !== undefined ? ` <span class="hint">(${esc(wText(best))})</span>` : ''}`
+    + ` — 응답(단계 총 소요) ${esc(fmtSec(best.totalSec))} · ${fmtTps(best.tps)} TPS` : '';
   if (active || !reason) {
     el.innerHTML = best ? `<div class="rp-banner">지금까지 ${bestHtml}</div>` : '';
     return;
   }
-  const early = /초과|STT|포화|중지/.test(reason);
-  const ff = steps.length && steps[0].fastForward ? ' · <span class="hint">고속 모드 — 응답 시간에 가상 STT 포함(* 표시)</span>' : '';
+  // 끝까지 돈 경우는 사유에 워커 이름(STT 처리 워커)이 들어가도 조기 종료가 아니다
+  const early = !/모든 단계를 마쳤습니다/.test(reason) && /초과|STT|포화|중지/.test(reason);
+  const ff = steps.length && steps[0].fastForward ? ' · <span class="hint">고속 모드 — 응답 시간에 가상 처리 시간 포함(* 표시)</span>' : '';
   el.innerHTML = `<div class="rp-banner ${early ? 'stop' : 'ok'}"><b>${early ? '⏹ 조기 종료' : '✔ 완료'}</b> — ${esc(reason)}${bestHtml ? `<br>${bestHtml}${ff}` : ff}</div>`;
 }
 
@@ -3158,9 +3254,10 @@ function rpTable(steps, bestStep) {
     if (s.earlyStop) note.push(`<span class="text-danger">${esc(s.earlyStop)}</span>`);
     const ck = s.checksOk === null || s.checksOk === undefined ? '<span class="vf-b x">—</span>'
       : s.checksOk ? '<span class="vf-b SUCCESS">✓</span>' : '<span class="vf-b FAIL">✗</span>';
+    const fixed = s.sttWorkers === undefined ? '' : (rpTarget(s) === 'ACQUIRE' ? `STT ${s.sttWorkers}` : `확보 ${s.acquireWorkers}`);
     return `<tr class="${s.step === bestStep ? 'table-success' : ''}">
-      <td class="text-end">${s.step}</td><td class="text-end fw-semibold">${s.workers}</td>
-      <td class="text-end" title="${s.fastForward ? esc(`실제 ${fmtSec(s.realSec)} + 가상 STT ${fmtSec(s.virtualSttSec)}`) : '실제로 기다림'}">${esc(fmtSec(s.totalSec))}${s.fastForward ? '<span class="hint"> *</span>' : ''}</td><td class="text-end">${fmtTps(s.tps)}</td>
+      <td class="text-end">${s.step}</td><td class="text-end fw-semibold">${s.workers}${fixed ? `<span class="hint fw-normal"> · ${esc(fixed)}</span>` : ''}</td>
+      <td class="text-end" title="${s.fastForward ? esc(`실제 ${fmtSec(s.realSec)} + 가상 ${fmtSec(s.virtualSec ?? s.virtualSttSec)}${s.pipeline ? ` · 확보 구간 ${fmtSec(s.acquireSpanSec)}` : ''}`) : '실제로 기다림'}">${esc(fmtSec(s.totalSec))}${s.fastForward ? '<span class="hint"> *</span>' : ''}</td><td class="text-end">${fmtTps(s.tps)}</td>
       <td class="text-end">${esc(fmtMs(s.avgMs))}</td>
       <td class="text-end">${esc(fmtMs(s.acquireAvgMs))}</td><td class="text-end">${esc(fmtMs(s.acquireMaxMs))}</td>
       <td class="text-end">${esc(fmtMs(s.sttAvgMs))}</td>
@@ -3180,7 +3277,7 @@ function niceMax(v) {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
 }
 /** 공통 틀 — 가로 격자·y 눈금·x 라벨(워커 수). 반환: { svg 앞부분, x(i), y(v), band } */
-function chartFrame(n, yMax, fmtY, xLabels, R = 14, W = 520, H = 210) {
+function chartFrame(n, yMax, fmtY, xLabels, R = 14, W = 520, H = 210, xTitle = '워커 수') {
   const L = 48, T = 16, B = 34;
   const pw = W - L - R, ph = H - T - B, band = pw / Math.max(1, n);
   const x = i => L + band * (i + 0.5);
@@ -3192,7 +3289,7 @@ function chartFrame(n, yMax, fmtY, xLabels, R = 14, W = 520, H = 210) {
        + `<text x="${L - 6}" y="${yy + 3.5}" text-anchor="end" font-size="10" fill="${RP_COLOR.muted}">${esc(fmtY(v))}</text>`;
   }
   xLabels.forEach((t, i) => { g += `<text x="${x(i)}" y="${H - B + 14}" text-anchor="middle" font-size="10.5" fill="${RP_COLOR.ink}">${esc(t)}</text>`; });
-  g += `<text x="${L + pw / 2}" y="${H - 4}" text-anchor="middle" font-size="10" fill="${RP_COLOR.muted}">워커 수</text>`;
+  g += `<text x="${L + pw / 2}" y="${H - 4}" text-anchor="middle" font-size="10" fill="${RP_COLOR.muted}">${esc(xTitle)}</text>`;
   return { W, H, L, R, T, B, pw, ph, band, x, y, g };
 }
 /** 막대 — 바닥은 네모, 위 끝만 4px 둥글게. */
@@ -3202,7 +3299,7 @@ function barPath(cx, w, y0, y1) {
   return `M${x0},${y0} V${y1 + r} Q${x0},${y1} ${x0 + r},${y1} H${x0 + w - r} Q${x0 + w},${y1} ${x0 + w},${y1 + r} V${y0} Z`;
 }
 
-function rpCharts(steps, bestStep, limitSec) {
+function rpCharts(steps, bestStep, limitSec, axis = '워커') {
   const tps = $('rp-chart-tps'), acq = $('rp-chart-acq');
   if (!steps.length) {
     const empty = '<div class="hint text-center py-4">단계가 끝나면 그려집니다</div>';
@@ -3212,7 +3309,7 @@ function rpCharts(steps, bestStep, limitSec) {
   const labels = steps.map(s => String(s.workers));
   // ① TPS — 막대 한 계열. 숫자는 최저 응답 단계와 마지막 단계에만 붙인다(모든 막대에 붙이면 읽히지 않는다)
   const tMax = niceMax(Math.max(...steps.map(s => Number(s.tps) || 0)) * 1.15);
-  const f = chartFrame(steps.length, tMax, v => fmtTps(v), labels);
+  const f = chartFrame(steps.length, tMax, v => fmtTps(v), labels, 14, 520, 210, `${axis} 수`);
   const bw = Math.min(24, f.band * 0.55);
   let bars = '', hits = '';
   steps.forEach((s, i) => {
@@ -3225,9 +3322,9 @@ function rpCharts(steps, bestStep, limitSec) {
       bars += `<text x="${cx}" y="${f.T + 8}" text-anchor="middle" font-size="9.5" fill="#198754">최저 응답</text>`;
     }
     hits += `<rect x="${cx - f.band / 2}" y="${f.T}" width="${f.band}" height="${f.ph}" fill="transparent" data-tip="${esc(
-      `단계 ${s.step} · 워커 ${s.workers}\nTPS ${fmtTps(v)} · 응답 ${fmtSec(s.totalSec)}\n성공 ${s.success} · 실패 ${s.fail} · 타임아웃 ${s.timeout}`)}"/>`;
+      `단계 ${s.step} · ${axis} ${s.workers}${s.sttWorkers !== undefined ? ` (${wText(s)})` : ''}\nTPS ${fmtTps(v)} · 응답 ${fmtSec(s.totalSec)}\n성공 ${s.success} · 실패 ${s.fail} · 타임아웃 ${s.timeout}`)}"/>`;
   });
-  tps.innerHTML = `<svg viewBox="0 0 ${f.W} ${f.H}" class="rp-svg" role="img" aria-label="워커 수별 TPS">${f.g}
+  tps.innerHTML = `<svg viewBox="0 0 ${f.W} ${f.H}" class="rp-svg" role="img" aria-label="${esc(axis)} 수별 TPS">${f.g}
     <line x1="${f.L}" x2="${f.W - f.R}" y1="${f.y(0)}" y2="${f.y(0)}" stroke="${RP_COLOR.axis}"/>${bars}${hits}</svg>`;
 
   // ② XVARM 확보 대기 — 평균·최대 두 계열(범례 + 끝 라벨) · 한도는 점선 기준선
@@ -3239,7 +3336,7 @@ function rpCharts(steps, bestStep, limitSec) {
   const limOnAxis = lim > 0 && lim <= aMax * 1.5;
   if (limOnAxis) aMax = niceMax(Math.max(aMax, lim * 1.1));
   const secTick = v => v === 0 ? '0' : v < 1 ? `${Math.round(v * 1000)}ms` : `${Math.round(v * 10) / 10}s`;
-  const g = chartFrame(steps.length, aMax, secTick, labels, 34);
+  const g = chartFrame(steps.length, aMax, secTick, labels, 34, 520, 210, `${axis} 수`);
   const line = (key, color) => {
     const pts = steps.map((s, i) => [g.x(i), g.y((Number(s[key]) || 0) / 1000)]);
     const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join(' ');
@@ -3262,11 +3359,11 @@ function rpCharts(steps, bestStep, limitSec) {
   let ahits = '';
   steps.forEach((s, i) => {
     ahits += `<rect x="${g.x(i) - g.band / 2}" y="${g.T}" width="${g.band}" height="${g.ph}" fill="transparent" data-tip="${esc(
-      `단계 ${s.step} · 워커 ${s.workers}\nXVARM 확보 대기 평균 ${fmtMs(s.acquireAvgMs)} · 최대 ${fmtMs(s.acquireMaxMs)}${lim ? `\n한도 ${lim}초` : ''}`)}"/>`;
+      `단계 ${s.step} · ${axis} ${s.workers}\nXVARM 확보 대기 평균 ${fmtMs(s.acquireAvgMs)} · 최대 ${fmtMs(s.acquireMaxMs)}${lim ? `\n한도 ${lim}초` : ''}`)}"/>`;
   });
   acq.innerHTML = `<div class="rp-legend"><span><i style="background:${RP_COLOR.avg}"></i>평균</span><span><i style="background:${RP_COLOR.max}"></i>최대</span>${
       limOnAxis ? '<span><i class="dash"></i>한도</span>' : ''}</div>
-    <svg viewBox="0 0 ${g.W} ${g.H}" class="rp-svg" role="img" aria-label="워커 수별 XVARM 확보 대기">${g.g}
+    <svg viewBox="0 0 ${g.W} ${g.H}" class="rp-svg" role="img" aria-label="${esc(axis)} 수별 XVARM 확보 대기">${g.g}
     <line x1="${g.L}" x2="${g.W - g.R}" y1="${g.y(0)}" y2="${g.y(0)}" stroke="${RP_COLOR.axis}"/>${limHtml}
     ${line('acquireAvgMs', RP_COLOR.avg)}${line('acquireMaxMs', RP_COLOR.max)}
     ${steps.length > 1 && gap >= 12 ? endLbl('acquireAvgMs', 12) + endLbl('acquireMaxMs', -6) : ''}${ahits}</svg>`;
@@ -3289,13 +3386,14 @@ async function rpFinish(c) {
   const r = c.result;
   if (r) {
     const best = r.best;
-    log(`✔ 임계 성능 테스트 종료 — ${r.stopReason}${best ? ` · 최적 워커 ${best.workers} (${fmtSec(best.totalSec)} · ${fmtTps(best.tps)} TPS)` : ''}`, 'ok');
+    const axis = rpAxis(r);
+    log(`✔ 임계 성능 테스트 종료 — ${r.stopReason}${best ? ` · 최적 ${axis} ${best.workers} (${fmtSec(best.totalSec)} · ${fmtTps(best.tps)} TPS)` : ''}`, 'ok');
     showPopup('임계 성능 테스트 종료', `<div class="pop-lead">${esc(r.stopReason || '')}</div>
       <ul class="pop-list">
-        <li><span class="lbl">돌린 단계:</span> ${(r.steps || []).length}단계 · 워커 ${esc((r.steps || []).map(s => s.workers).join(' → '))}</li>
-        ${best ? `<li><span class="lbl">최적 워커:</span> <span class="n">${best.workers}</span> — 응답 ${esc(fmtSec(best.totalSec))} · ${fmtTps(best.tps)} TPS</li>` : ''}
+        <li><span class="lbl">돌린 단계:</span> ${(r.steps || []).length}단계 · ${esc(axis)} ${esc((r.steps || []).map(s => s.workers).join(' → '))}</li>
+        ${best ? `<li><span class="lbl">최적 ${esc(axis)}:</span> <span class="n">${best.workers}</span> — 응답 ${esc(fmtSec(best.totalSec))} · ${fmtTps(best.tps)} TPS</li>` : ''}
       </ul>
-      <div class="sub mt-2">② 실시간 결과의 차트·표와 ③ 이력에 남았습니다.</div>`);
+      <div class="sub mt-2">② 차트·표와 ③ 이력에 남았습니다. [📸 전체 리포트 저장] 으로 ①·② 를 한 장의 이미지로 남길 수 있습니다.</div>`);
   } else {
     log(`✖ 임계 성능 테스트 실패 — ${c.error || c.message}`, 'er');
     showPopup('임계 성능 테스트 실패', `<div class="pop-lead">${esc(c.error || c.message || '')}</div>`);
@@ -3317,7 +3415,7 @@ async function rpLoadHistory() {
     return `<tr data-i="${i}" title="눌러서 ② 에 표시">
       <td class="font-monospace">${esc(String(x.at || '').replace('T', ' ').slice(5, 16))}</td>
       <td class="text-end">${steps.length}</td>
-      <td>${esc(steps.map(s => s.workers).join('→'))}</td>
+      <td>${esc(rpAxisShort(x))} ${esc(steps.map(s => s.workers).join('→'))}</td>
       <td class="text-end fw-semibold">${x.best?.workers ?? '—'}</td>
       <td class="text-end">${fmtTps(peak)}</td>
       <td>${esc(latText(x.latency))}</td>
@@ -3327,12 +3425,15 @@ async function rpLoadHistory() {
 
 function rpCsv() {
   if (!RP_HIST.length) { log('내보낼 임계 성능 테스트 이력이 없습니다', 'wr'); return; }
-  const head = ['실행ID', '시각', '단계', '워커', '모드', '실제초', '가상STT초', '응답초', 'TPS', '평균ms', '확보평균ms', '확보최대ms', 'STT평균ms',
-    '성공', '실패', '타임아웃', '힙PeakMB', 'HikariPeak', '정합성', '최저응답', '조기종료', 'EXEC_ID', '종료사유'];
+  const head = ['실행ID', '시각', '단계', '늘린워커', '워커', '확보워커', 'STT워커', '모드', '실제초', '가상합산초', '가상STT초', '확보구간초', '응답초', 'TPS',
+    '평균ms', '확보평균ms', '확보최대ms', 'STT평균ms', '성공', '실패', '타임아웃', '힙PeakMB', 'HikariPeak', 'Hikari반납', '정합성', '최저응답', '조기종료',
+    'EXEC_ID', '종료사유'];
   const rows = [];
-  RP_HIST.slice().reverse().forEach(x => (x.steps || []).forEach(s => rows.push([x.runId, x.at, s.step, s.workers,
-    s.fastForward ? '고속' : '실제', s.realSec ?? s.totalSec, s.virtualSttSec ?? 0, s.totalSec, s.tps,
+  RP_HIST.slice().reverse().forEach(x => (x.steps || []).forEach(s => rows.push([x.runId, x.at, s.step, rpAxis(x), s.workers,
+    s.acquireWorkers ?? '', s.sttWorkers ?? '',
+    s.fastForward ? '고속' : '실제', s.realSec ?? s.totalSec, s.virtualSec ?? '', s.virtualSttSec ?? 0, s.acquireSpanSec ?? '', s.totalSec, s.tps,
     s.avgMs, s.acquireAvgMs, s.acquireMaxMs, s.sttAvgMs, s.success, s.fail, s.timeout, s.heap?.peakMb ?? '', s.hikari?.peak ?? '',
+    (() => { const a = hikariAfter(s.hikari); return a ? (a.returned ? 'Y' : 'N') : ''; })(),
     s.checksOk === null || s.checksOk === undefined ? '확인불가' : (s.checksOk ? 'OK' : 'NG'),
     s.step === x.bestStep ? 'Y' : '', s.earlyStop || '', s.execId, x.stopReason])));
   downloadCsv('perf_ramp', head, rows);
@@ -3345,6 +3446,125 @@ async function rpClearHistory() {
   const d = await call('DELETE', '/api/v1/mock/perf/ramp/runs', '임계 성능 테스트 이력 비우기');
   if (d) log(`  └ 이력 ${d.deleted}회 삭제 — ${d.file}`, 'ok');
   await rpLoadHistory();
+}
+
+// ── 전체 리포트 이미지(PNG) — ① 설정과 ② 결과를 한 장으로 ─────────────────────────────────
+//   html2canvas 는 처음 누를 때만 받는다(cdnjs). 캡처는 화면이 아니라 복제본을 그린다 — 복제본에만
+//   .capturing 을 붙여 스크롤 속 표·잘린 도움말을 펼치고, 저장 버튼 같은 조작부는 뺀다.
+const H2C_URL = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+let H2C_LOADING = null;
+let PF_SHOWN = null;
+let RP_SHOWN = null;
+
+function loadHtml2Canvas() {
+  if (window.html2canvas) return Promise.resolve(window.html2canvas);
+  if (!H2C_LOADING) {
+    H2C_LOADING = new Promise((resolve, reject) => {
+      const sc = document.createElement('script');
+      sc.src = H2C_URL;
+      sc.async = true;
+      sc.onload = () => (window.html2canvas ? resolve(window.html2canvas) : reject(new Error('html2canvas 를 불러오지 못했습니다')));
+      sc.onerror = () => { H2C_LOADING = null; reject(new Error('html2canvas 라이브러리를 받지 못했습니다 — cdnjs.cloudflare.com 에 닿는지 확인하십시오')); };
+      document.head.appendChild(sc);
+    });
+  }
+  return H2C_LOADING;
+}
+
+/** 'YYYYMMDD_HHmm' — 회차의 실행 시각(없으면 지금). */
+function capStamp(at) {
+  const d = at ? new Date(String(at)) : new Date();
+  const x = isNaN(d.getTime()) ? new Date() : d;
+  const p = n => String(n).padStart(2, '0');
+  return `${x.getFullYear()}${p(x.getMonth() + 1)}${p(x.getDate())}_${p(x.getHours())}${p(x.getMinutes())}`;
+}
+
+/** 파일명 조각 — 'A 기본 검증' → '기본검증', 'B STT 장애/타임아웃 검증 (수정)' → 'STT장애타임아웃검증_수정'. */
+function capToken(t, fallback) {
+  const v = String(t || '').trim()
+    .replace(/^[A-Z]\s+/, '')           // 프리셋 머리 글자
+    .replace(/\s*\(\s*/g, '_').replace(/\s*\)\s*/g, '')
+    .replace(/[\\/:*?"<>|\s]+/g, '')     // 파일명에 못 쓰는 글자 · 공백
+    .replace(/^_+|_+$/g, '');
+  return v || fallback;
+}
+
+/** 5번 탭 증가 방식 — ADD 1 → '더하기1', MULTIPLY 2 → '배수2'. */
+function rpStepToken(req) {
+  const mode = req?.stepMode || $('rp-smode').value;
+  const v = req?.stepValue ?? pfNum('rp-svalue') ?? '';
+  return (mode === 'MULTIPLY' ? '배수' : '더하기') + v;
+}
+
+function pfCapture(btn) {
+  const r = PF_SHOWN;
+  if (!r) { log('저장할 기본 부하 검증 리포트가 없습니다', 'wr'); return; }
+  const name = `음성수집기_기본부하_${capToken(r.scenario, '직접입력')}_${capStamp(r.at)}.png`;
+  const title = `음성 수집기 · 기본 부하 검증 — ${r.scenario || ''}`;
+  const sub = `실행 ${String(r.at || '').replace('T', ' ').slice(0, 16)} · 워커 ${wText(r)} · EXEC_ID ${r.execId || '—'}`;
+  captureArea('pf-capture', name, title, sub, btn);
+}
+
+function rpCapture() {
+  const x = RP_SHOWN;
+  if (!x || !x.steps) { log('저장할 임계 성능 테스트 결과가 없습니다', 'wr'); return; }
+  const name = `음성수집기_임계성능_${rpStepToken(x.request)}_${capStamp(x.at)}.png`;
+  const title = `음성 수집기 · 임계 성능 테스트 — ${x.axis} 램프업`;
+  const sub = `${x.at ? '실행 ' + String(x.at).replace('T', ' ').slice(0, 16) + ' · ' : ''}${x.steps}단계 · ${x.runId || ''}`;
+  captureArea('rp-capture', name, title, sub, $('rp-capture-btn'));
+}
+
+/**
+ * 영역을 PNG 로 저장한다. 스크롤·잘림 없이 전체 크기로 — 가로로 넘치는 표가 있으면 그만큼 넓혀 그린다.
+ * 배경·뱃지·SVG 차트·표 글자는 복제본에서 그대로 그린다(화면 조작 없음).
+ */
+async function captureArea(areaId, fileName, title, sub, btn) {
+  const area = $(areaId);
+  const label = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>저장 중…';
+  }
+  try {
+    const h2c = await loadHtml2Canvas();
+    // 가로 스크롤에 숨은 폭 — 표가 카드보다 넓으면 복제본을 그만큼 넓힌다
+    const extra = Math.max(0, ...[...area.querySelectorAll('.table-responsive')].map(t => t.scrollWidth - t.clientWidth));
+    const width = Math.ceil(area.getBoundingClientRect().width + extra);
+    const canvas = await h2c(area, {
+      backgroundColor: '#f5f6f8',
+      scale: Math.max(2, window.devicePixelRatio || 1),
+      useCORS: true,
+      logging: false,
+      scrollX: -window.scrollX,
+      scrollY: -window.scrollY,
+      windowWidth: Math.max(document.documentElement.clientWidth, width + 64),
+      onclone: (doc) => {
+        const a = doc.getElementById(areaId);
+        a.classList.add('capturing');
+        a.style.width = width + 'px';
+        const cap = doc.createElement('div');
+        cap.className = 'cap-title';
+        cap.innerHTML = `<b>${esc(title)}</b><small>${esc(sub)} · 저장 ${esc(capStamp().replace('_', ' '))}</small>`;
+        a.insertBefore(cap, a.firstChild);
+      },
+    });
+    const blob = await new Promise((resolve, reject) =>
+      canvas.toBlob(b => (b ? resolve(b) : reject(new Error('이미지를 만들지 못했습니다(캔버스가 너무 큽니다)'))), 'image/png'));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    log(`  └ 전체 리포트 이미지를 저장했습니다 — ${fileName} (${canvas.width}×${canvas.height}px)`, 'ok');
+  } catch (e) {
+    log(`✖ 전체 리포트 저장 실패 — ${e.message || e}`, 'er');
+    showPopup('전체 리포트를 저장하지 못했습니다', `<div class="pop-lead">${esc(e.message || String(e))}</div>
+      <div class="hint mt-2">화면 캡처 라이브러리(html2canvas)는 처음 누를 때 cdnjs 에서 받습니다. 인터넷이 막힌 망이면 브라우저의 스크린샷 기능을 쓰십시오.</div>`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = label; }
+  }
 }
 
 /** 탭을 열 때 — STT 엔진은 1번 탭에서 바뀔 수 있으니 다시 읽는다. */
@@ -3374,11 +3594,11 @@ async function pfInit() {
 
 document.querySelectorAll('.pf-preset').forEach(b => { b.onclick = () => pfApplyPreset(b.dataset.s); });
 document.querySelectorAll('.rp-preset').forEach(b => { b.onclick = () => rpApplyPreset(b.dataset.s); });
-['pf-meet', 'pf-phone', 'pf-sttpct', 'pf-conc', 'pf-lmode', 'pf-lat-meet', 'pf-lat-phone', 'pf-jitter', 'pf-timeout'].forEach(id => {
+['pf-meet', 'pf-phone', 'pf-sttpct', 'pf-acq-w', 'pf-stt-w', 'pf-lmode', 'pf-lat-meet', 'pf-lat-phone', 'pf-jitter', 'pf-timeout'].forEach(id => {
   ['input', 'change'].forEach(ev => $(id).addEventListener(ev, () => { pfSyncInputs(); pfEstimate(); }));
 });
 ['rp-meet', 'rp-phone', 'rp-sttpct', 'rp-lmode', 'rp-lat-meet', 'rp-lat-phone', 'rp-jitter', 'rp-timeout',
- 'rp-w0', 'rp-smode', 'rp-svalue', 'rp-max', 'rp-patience', 'rp-acq', 'rp-sttstop'].forEach(id => {
+ 'rp-fixed', 'rp-w0', 'rp-smode', 'rp-svalue', 'rp-max', 'rp-patience', 'rp-acq', 'rp-sttstop'].forEach(id => {
   ['input', 'change'].forEach(ev => $(id).addEventListener(ev, () => { rpSyncInputs(); rpPlanPreview(); }));
 });
 $('pf-real').addEventListener('change', pfEstimate);
@@ -3398,6 +3618,12 @@ $('pf-hist').onclick = (e) => {
   if (tr) pfRenderReport(PF_HIST[Number(tr.dataset.i)]);
 };
 $('rp-start').onclick = rpStart;
+$('rp-capture-btn').onclick = rpCapture;
+// 늘릴 워커를 바꾸면 고정값을 그쪽 기본으로 — STT 를 늘리면 확보 1, 확보를 늘리면 STT 31
+$('rp-target').addEventListener('change', () => {
+  $('rp-fixed').value = $('rp-target').value === 'STT' ? (PF_INFO?.defaultAcquireWorkers ?? 1) : (PF_INFO?.defaultSttWorkers ?? 31);
+  rpSyncInputs(); rpPlanPreview();
+});
 $('rp-cancel').onclick = pfCancel;
 $('rp-csv').onclick = rpCsv;
 $('rp-hist-clear').onclick = rpClearHistory;
