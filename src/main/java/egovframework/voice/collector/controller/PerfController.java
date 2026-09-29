@@ -1,12 +1,12 @@
 package egovframework.voice.collector.controller;
 
+import egovframework.voice.collector.batch.VoiceCollectService;
 import egovframework.voice.collector.perf.PerfRequest;
 import egovframework.voice.collector.perf.PerfRunService;
 import egovframework.voice.collector.perf.RampRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -34,15 +34,13 @@ import java.util.Map;
 public class PerfController {
 
     private final PerfRunService perf;
-
-    @Value("${voice.batch.concurrency:1}")
-    private int batchConcurrency;
+    private final VoiceCollectService collect;
 
     @Operation(summary = "입력 범위 · 지금 구성",
-            description = "건수·지연·동시성의 범위, STT 엔진(MOCK/NPU), 조회·브로커·복호화 모드, 이력 파일 위치.")
+            description = "건수·지연·워커(XVARM 확보 · STT 처리)의 범위와 기본값, STT 엔진(MOCK/NPU), 조회·브로커·복호화 모드, 원천 풀(Hikari) 설정, 이력 파일 위치.")
     @GetMapping("/info")
     public Map<String, Object> info() {
-        return perf.info(batchConcurrency);
+        return perf.info(collect.defaultWorkers());
     }
 
     @Operation(summary = "기본 부하 검증 시작 (비동기)",
@@ -51,16 +49,18 @@ public class PerfController {
 
                     1. **준비** — 로컬 산출물을 비우고 원천 DB 에 SIM 데이터(접견 N · 전화 N, 전화 중 기 STT 비율만큼 `TELP_STT_FLPTH_NM` 채움)를 **어제 하루**에 만듭니다.
                        개발계에서는 **공용 DB** 에 만들어지므로 다른 작업자와 시간이 겹치지 않게 하십시오
-                    2. **측정** — `[어제 00:00, 오늘 00:00)` 를 워커 N개로 처리합니다(`TEST_BATCH` · `MANUAL` · 실행 주체 `PERF`).
+                    2. **측정** — `[어제 00:00, 오늘 00:00)` 를 처리합니다(`TEST_BATCH` · `MANUAL` · 실행 주체 `PERF`).
+                       **XVARM 확보 워커**(`acquireWorkers`, 기본 1)가 파일을 차례로 받아 대기열에 넣고, **STT 처리 워커**
+                       (`sttWorkers`, 기본 31)가 곧바로 집어 복호화 · STT · 비식별 · 저장을 합니다(생산자-소비자).
                        STT 가 MOCK 이면 건당 STT 처리 시간·타임아웃을 겁니다
-                    - **고속 모드**(`realSleep` 비움·false, 기본) — STT 를 기다리지 않고 즉시 통과합니다. 건별 처리 시간을
-                      워커에 나눠 **가상 STT 시간**으로 더합니다: 총 소요 = 실제 소요 + 가상 STT, TPS = 처리 건수 ÷ 총 소요.
-                      처리 시간이 타임아웃을 넘은 건은 기다리지 않고 바로 타임아웃 실패(T4)로 남습니다
+                    - **고속 모드**(`realSleep` 비움·false, 기본) — STT 를 기다리지 않고 즉시 통과합니다. 실제로 돈 확보 시각에
+                      건당 처리 시간을 얹어 STT 워커에 다시 배정한 **파이프라인 모의**로 총 소요를 냅니다(확보와 STT 가 겹친다).
+                      TPS = 처리 건수 ÷ 총 소요. 처리 시간이 타임아웃을 넘은 건은 기다리지 않고 바로 타임아웃 실패(T4)로 남습니다
                     - **실제 대기 모드**(`realSleep=true`) — 처리 시간만큼 실제로 기다립니다
                     3. **검증** — 로그 컬렉터에서 T1·T2·T4 를 되읽어 맞춰 봅니다
                     4. **정리** — SIM 행과 원본 더미 파일을 지웁니다. 로그(TST)와 STT 출력은 남습니다
 
-                    - 400 — 범위 밖(접견+전화 2~300 · 기 STT 0~100% · 지연 0~600,000ms · 동시성 1/2/4/8/16 · 타임아웃 100~1,800,000ms)
+                    - 400 — 범위 밖(접견+전화 2~300 · 기 STT 0~100% · 지연 0~600,000ms · 워커 1~64 · 타임아웃 100~1,800,000ms)
                     - 409 — 이미 성능 테스트나 배치가 돌고 있음
                     """)
     @PostMapping("/runs")
@@ -82,7 +82,7 @@ public class PerfController {
         return perf.cancel();
     }
 
-    @Operation(summary = "실행 이력", description = "`{ROOT}/perf/history.jsonl` — 최근 회차가 앞. 동시성을 바꿔 가며 돌린 결과를 나란히 비교합니다.")
+    @Operation(summary = "실행 이력", description = "`{ROOT}/perf/history.jsonl` — 최근 회차가 앞. 워커 구성을 바꿔 가며 돌린 결과를 나란히 비교합니다.")
     @GetMapping("/runs")
     public Map<String, Object> history() {
         return perf.history();
@@ -97,6 +97,8 @@ public class PerfController {
     @Operation(summary = "임계 성능 시험 시작 — 워커 램프업 (비동기)",
             description = """
                     시작 워커부터 단계마다 워커를 늘려(+N 또는 ×N) **같은 건수**를 처리합니다. 단계마다 SIM 데이터를 다시 만듭니다.
+                    늘릴 워커는 `rampTarget` — `STT`(기본, STT 처리 워커를 늘리고 XVARM 확보 워커는 `acquireWorkers` 로 고정)
+                    또는 `ACQUIRE`(XVARM 확보 워커를 늘리고 STT 처리 워커는 `sttWorkers` 로 고정).
                     진행은 `GET /runs/current`(`kind=RAMP` · `steps` 가 단계마다 쌓임), 중지는 `POST /runs/cancel` 로 봅니다.
 
                     **조기 종료**

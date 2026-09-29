@@ -8,6 +8,7 @@ import egovframework.voice.collector.batch.VerificationService;
 import egovframework.voice.collector.batch.VoiceBatchResult;
 import egovframework.voice.collector.batch.VoiceBatchScheduler;
 import egovframework.voice.collector.batch.VoiceCollectService;
+import egovframework.voice.collector.batch.Workers;
 import egovframework.voice.collector.broker.XvarmBrokerClient;
 import egovframework.voice.collector.config.DeployEnvPreset;
 import egovframework.voice.collector.config.MockDatasetState;
@@ -58,8 +59,8 @@ import java.util.concurrent.Executors;
  *
  * <p>두 가지를 돈다. 둘은 같은 엔진(준비 → 측정 → 검증 → 정리)을 쓰고, 한 번에 하나만 돈다.</p>
  * <ul>
- *   <li><b>기본 부하 검증</b>(4번 탭) — 정한 워커 수로 한 회차</li>
- *   <li><b>임계 성능 시험</b>(5번 탭) — 워커를 단계마다 늘려 같은 건수를 처리하며 포화 지점을 찾는다.
+ *   <li><b>기본 부하 검증</b>(4번 탭) — 정한 워커(XVARM 확보 · STT 처리)로 한 회차</li>
+ *   <li><b>임계 성능 시험</b>(5번 탭) — 한쪽 워커를 단계마다 늘려 같은 건수를 처리하며 포화 지점을 찾는다.
  *       최저 응답 뒤 연속으로 개선이 없거나, XVARM 확보 대기가 한도를 넘거나, STT 에러가 나면 멈춘다</li>
  * </ul>
  *
@@ -177,8 +178,8 @@ public class PerfRunService {
     private record Measured(VoiceBatchResult result, long heapStart, long heapEnd, long heapPeak,
                             List<Map<String, Object>> stages, Map<String, Object> hikari,
                             double acquireMaxMs, long sttErrors, String earlyStop,
-                            boolean fastForward, int workers, List<Long> virtualSttMs, List<Long> virtualDeidentMs,
-                            boolean deidentEnabled) {}
+                            boolean fastForward, Workers workers, List<Long> virtualSttMs, List<Long> virtualDeidentMs,
+                            boolean deidentEnabled, PerfStageMeter.Pipeline pipeline) {}
 
     /** 한 회차의 진행 상태 — 러너 스레드가 쓰고 API 스레드가 읽는다. */
     private static final class Run {
@@ -222,7 +223,7 @@ public class PerfRunService {
      * @throws IllegalStateException    이미 성능 시험이나 배치가 돌고 있다(409)
      */
     public synchronized Map<String, Object> start(PerfRequest raw) {
-        PerfRequest req = (raw == null ? new PerfRequest(null, null, null, null, null, null, null, null, null, null, null, null, null) : raw)
+        PerfRequest req = (raw == null ? new PerfRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, null) : raw)
                 .withDefaults();
         req.validate(props.batch().maxFilesPerRun());
         ensureIdle();
@@ -235,7 +236,7 @@ public class PerfRunService {
     /** 임계 성능 시험(워커 램프업)을 시작한다 — 비동기. */
     public synchronized Map<String, Object> startRamp(RampRequest raw) {
         RampRequest req = (raw == null ? new RampRequest(null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null) : raw).withDefaults();
+                null, null, null, null, null, null, null, null, null, null, null, null, null) : raw).withDefaults();
         req.validate(props.batch().maxFilesPerRun());
         ensureIdle();
         Run run = new Run(LocalDateTime.now().format(RUN_ID), Kind.RAMP, req);
@@ -308,6 +309,7 @@ public class PerfRunService {
         }
         if (run.kind == Kind.RAMP) {
             m.put("plan", run.plan);
+            m.put("rampTarget", ((RampRequest) run.req).rampTarget());
             m.put("stepNo", run.stepNo);
             m.put("workers", run.workers);
             m.put("steps", List.copyOf(run.steps));
@@ -336,8 +338,8 @@ public class PerfRunService {
             if (run.cancelRequested) {
                 throw new CanceledBeforeRun();
             }
-            run.to(Phase.RUNNING, "워커 %d개로 %d건 처리 중".formatted(req.concurrency(), req.count()));
-            Measured d = measure(Load.of(req), req.concurrency(), null, run);
+            run.to(Phase.RUNNING, "워커 %s 로 %d건 처리 중".formatted(req.workers().describe(), req.count()));
+            Measured d = measure(Load.of(req), req.workers(), null, run);
             run.to(Phase.VERIFYING, "로그 컬렉터에서 T1·T2·T4 되읽기 — " + d.result().execId());
             Map<String, Object> checks = checks(d.result());
             result = summarizeBasic(run, req, d, prep, checks);
@@ -362,7 +364,9 @@ public class PerfRunService {
         m.put("phoneCount", req.phoneCount());
         m.put("sttPercent", req.sttPercent());
         m.put("sourceSttPhones", prep.seed().get("sourceSttPhones"));
-        m.put("concurrency", req.concurrency());
+        m.put("acquireWorkers", req.acquireWorkers());
+        m.put("sttWorkers", req.sttWorkers());
+        m.put("concurrency", req.sttWorkers());   // 옛 이력·CSV 와 같은 칸(= STT 워커)
         m.put("latency", Load.of(req).describe());
         m.put("sttTimeoutMs", req.sttTimeoutMs());
         common(m, prep);
@@ -395,9 +399,10 @@ public class PerfRunService {
                     break;
                 }
                 int w = plan.get(i);
+                Workers ws = req.workersAt(w);
                 run.stepNo = i + 1;
                 run.workers = w;
-                String tag = "단계 %d/%d · 워커 %d".formatted(i + 1, plan.size(), w);
+                String tag = "단계 %d/%d · %s %d (%s)".formatted(i + 1, plan.size(), req.target().label(), w, ws.describe());
                 Prepared prep = prepare(run, req.meetCount(), req.phoneCount(), req.sttPercent(), i == 0, tag + " — ");
                 if (first == null) {
                     first = prep;
@@ -407,11 +412,12 @@ public class PerfRunService {
                     break;
                 }
                 run.to(Phase.RUNNING, "%s 로 %d건 처리 중".formatted(tag, req.count()));
-                Measured d = measure(Load.of(req), w, req, run);
+                Measured d = measure(Load.of(req), ws, req, run);
                 run.to(Phase.VERIFYING, tag + " — 로그 컬렉터 되읽기");
                 Map<String, Object> checks = checks(d.result());
 
                 Map<String, Object> step = stepRow(i + 1, w, d, checks, prep);
+                step.put("rampTarget", req.rampTarget());
                 VoiceBatchResult r = d.result();
                 // 도중에 끊긴 단계는 건수가 달라 응답 시간을 비교하지 않는다
                 if (!r.canceled()) {
@@ -437,13 +443,13 @@ public class PerfRunService {
                 }
                 if (sinceBest >= req.patience()) {
                     Map<String, Object> best = run.steps.get(run.bestStep - 1);
-                    stop = "최저 응답(워커 %s · %s초) 이후 %d회 연속 개선 없음 — 포화로 판단"
-                            .formatted(best.get("workers"), best.get("totalSec"), sinceBest);
+                    stop = "최저 응답(%s %s · %s초) 이후 %d회 연속 개선 없음 — 포화로 판단"
+                            .formatted(req.target().label(), best.get("workers"), best.get("totalSec"), sinceBest);
                     break;
                 }
             }
             if (stop == null) {
-                stop = "최대 워커 %d 까지 모든 단계를 마쳤습니다".formatted(plan.get(plan.size() - 1));
+                stop = "최대 %s %d 까지 모든 단계를 마쳤습니다".formatted(req.target().label(), plan.get(plan.size() - 1));
             }
         } catch (Exception e) {
             error = rootMessage(e);
@@ -458,6 +464,7 @@ public class PerfRunService {
             result.put("at", LocalDateTime.now().withNano(0).toString());
             result.put("request", req);
             result.put("plan", plan);
+            result.put("rampTarget", req.rampTarget());
             result.put("latency", Load.of(req).describe());
             common(result, first);
             result.put("steps", List.copyOf(run.steps));
@@ -476,7 +483,7 @@ public class PerfRunService {
         finish(run, result, result == null ? (error == null ? stop : error) : null, RAMP_HISTORY_FILE);
     }
 
-    /** 임계 시험의 표 한 줄. */
+    /** 임계 시험의 표 한 줄. {@code workers} 는 이 단계에서 늘린 쪽의 워커 수(차트 가로축). */
     private Map<String, Object> stepRow(int no, int workers, Measured d, Map<String, Object> checks, Prepared prep) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("step", no);
@@ -574,11 +581,11 @@ public class PerfRunService {
     }
 
     /**
-     * 측정 — 워커 {@code workers} 개로 어제 하루 창을 처리하며 힙·원천 풀·단계 시간을 잰다.
+     * 측정 — 워커 구성 {@code workers} 로 어제 하루 창을 처리하며 힙·원천 풀·단계 시간을 잰다.
      *
      * @param guard 임계 시험이면 조기 종료 조건, 기본 부하면 null
      */
-    private Measured measure(Load load, int workers, RampRequest guard, Run run) {
+    private Measured measure(Load load, Workers workers, RampRequest guard, Run run) {
         latency.apply(load.mode(), load.meetMs(), load.phoneMs(), load.jitterPercent(),
                 load.timeoutMs() == null ? 0L : load.timeoutMs(), !load.realSleep());
         // 건당 비식별 처리 시간 — 비식별을 수행할 때만(단순 전달은 무거운 연산이 없어 0ms)
@@ -606,27 +613,35 @@ public class PerfRunService {
         if (guard != null && early == null) {
             early = breach(guard);   // 반 초 사이에 끝난 건이 넘었을 수 있다
         }
+        // 원천 풀 — 최고 연결 수와, 배치가 끝난 지금 빌려 간 연결이 모두 돌아왔는지(누수 확인)
+        Map<String, Object> hikari = new LinkedHashMap<>(poolPeak.snapshot());
+        hikari.put("after", poolPeak.state());
         long heapEnd = heapUsed();
         long heapPeak = heapPools.stream().mapToLong(p -> {
             MemoryUsage u = p.getPeakUsage();
             return u == null ? 0L : u.getUsed();
         }).sum();
-        return new Measured(r, heapStart, heapEnd, heapPeak, meter.snapshot(), poolPeak.snapshot(),
+        return new Measured(r, heapStart, heapEnd, heapPeak, meter.snapshot(), hikari,
                 meter.maxMs(PerfStage.ACQUIRE), meter.errors(PerfStage.STT), early,
-                !load.realSleep(), workers, meter.virtualSttMs(), meter.virtualMs(PerfStage.DEIDENT), load.deidentEnabled());
+                !load.realSleep(), workers, meter.virtualSttMs(), meter.virtualMs(PerfStage.DEIDENT), load.deidentEnabled(),
+                meter.pipeline());
     }
 
     /**
      * 배치 한 번의 처리량·결과·자원 — 기본 부하 결과와 임계 시험 표가 같이 쓴다.
      *
-     * <p><b>고속 모드</b>면 STT 를 기다리지 않았으므로 건별로 적어 둔 처리 시간을 되살린다.</p>
+     * <p><b>고속 모드</b>면 STT·비식별을 기다리지 않았으므로 건별로 적어 둔 처리 시간을 되살린다.</p>
      * <ul>
-     *   <li>가상 STT 시간 = 건별 처리 시간을 워커 {@code W} 개에 나눠 준 뒤 가장 늦게 끝나는 워커의 시각
-     *       ({@link #distribute}) — 건수가 워커보다 충분히 많으면 합 ÷ W 와 같고, 적으면(8건 · 워커 16)
-     *       가장 긴 한 건이 된다. 합 ÷ W 로만 나누면 이때 실제보다 짧게 나온다</li>
-     *   <li>총 소요 = 실제 소요(파이프라인·DB·로그 통신) + 가상 STT 시간</li>
+     *   <li><b>생산자-소비자</b>(확보·STT 워커를 나눠 돈 경우) — 확보는 실제로 돌았고 그 끝난 시각이 건마다 있다.
+     *       그 시각에 건이 대기열에 들어왔다고 보고 STT 워커 {@code S} 개가 (실제 처리 시간 + 가상 시간)만큼 일한다고
+     *       다시 짠다({@link #pipelineMs}). 확보와 STT 가 겹치므로 둘을 더하지 않는다 — 확보가 느리면 확보 구간이,
+     *       STT 가 느리면 STT 가 총 소요를 정한다</li>
+     *   <li><b>순차</b> — 건마다 확보 → STT 가 이어지므로 실제 소요 + 가상 시간의 합이다</li>
+     *   <li>가상 STT·비식별 시간({@code virtualSttSec} · {@code virtualDeidentSec})은 참고치 — 건별 처리 시간을
+     *       STT 워커에 나눠 준 뒤 가장 늦게 끝나는 워커의 시각({@link #distribute})</li>
      *   <li>TPS = 처리 건수(성공 + 실패) ÷ 총 소요</li>
-     *   <li>평균 처리 시간 · STT 단계 평균에도 가상 시간을 넣는다 — 안 넣으면 STT 가 0ms 로 보인다</li>
+     *   <li>평균 처리 시간 · STT 단계 평균에도 가상 시간을 넣는다 — 안 넣으면 STT 가 0ms 로 보인다.
+     *       건당 처리 시간에 대기열에서 기다린 시간은 넣지 않는다</li>
      * </ul>
      */
     private static Map<String, Object> batchMetrics(Measured d) {
@@ -637,10 +652,22 @@ public class PerfRunService {
         List<Long> virtualDeid = d.fastForward() ? d.virtualDeidentMs() : List.of();
         long virtualTotalMs = virtual.stream().mapToLong(Long::longValue).sum()
                 + virtualDeid.stream().mapToLong(Long::longValue).sum();
-        double virtualSec = distribute(virtual, d.workers()) / 1000d;
-        // 건당 비식별 처리 시간도 같은 식으로 — 워커에 나눈 가상 시간을 더한다(비식별 수행일 때만 적힌다)
-        double virtualDeidSec = distribute(virtualDeid, d.workers()) / 1000d;
-        double sec = realSec + virtualSec + virtualDeidSec;
+        int sttWorkers = d.workers().stt();
+        double virtualSttSec = distribute(virtual, sttWorkers) / 1000d;
+        // 건당 비식별 처리 시간도 같은 식으로 — STT 워커에 나눈 가상 시간(비식별 수행일 때만 적힌다)
+        double virtualDeidSec = distribute(virtualDeid, sttWorkers) / 1000d;
+        PerfStageMeter.Pipeline pl = d.pipeline();
+        double sec;
+        if (!d.fastForward()) {
+            sec = realSec;
+        } else if (pl != null) {
+            long loop = Math.max(0L, pl.loopMs());
+            long sim = pipelineMs(pl.items(), sttWorkers, pl.acquireSpanMs());
+            // 루프 밖(대상 조회 · T1/T2 개시 · T4/T1 마감)은 실제 그대로, 루프는 다시 짠 시간으로
+            sec = (r.elapsedMs() - loop + Math.max(sim, loop)) / 1000d;
+        } else {
+            sec = realSec + virtualSttSec + virtualDeidSec;
+        }
         long processed = (long) r.successCnt() + r.failCnt();
         double realAvg = done.stream().mapToLong(FileProcOutcome::elapsedMs).average().orElse(0d);
         Map<String, Object> m = new LinkedHashMap<>();
@@ -648,9 +675,15 @@ public class PerfRunService {
         m.put("execStsCd", r.execStsCd());
         m.put("canceled", r.canceled());
         m.put("fastForward", d.fastForward());
+        m.put("acquireWorkers", d.workers().acquire());
+        m.put("sttWorkers", sttWorkers);
+        m.put("pipeline", pl != null);
         m.put("realSec", round(realSec, 2));
-        m.put("virtualSttSec", round(virtualSec, 2));
+        m.put("virtualSec", round(sec - realSec, 2));
+        m.put("virtualSttSec", round(virtualSttSec, 2));
         m.put("virtualDeidentSec", round(virtualDeidSec, 2));
+        // 확보 워커가 마지막 건을 끝낸 시각(실제) — 이것이 총 소요에 가까우면 확보가 병목이다
+        m.put("acquireSpanSec", pl == null ? null : round(pl.acquireSpanMs() / 1000d, 2));
         m.put("deidentEnabled", d.deidentEnabled());
         m.put("totalSec", round(sec, 2));
         m.put("avgMs", done.isEmpty() ? 0d : round(realAvg + (double) virtualTotalMs / done.size(), 1));
@@ -670,6 +703,30 @@ public class PerfRunService {
         m.put("heap", h);
         m.put("hikari", d.hikari());
         return m;
+    }
+
+    /**
+     * 생산자-소비자를 가상 시간으로 다시 짠다 — 마지막 건이 끝나는 시각(루프 시작 기준 ms).
+     *
+     * <p>건은 확보가 끝난 시각({@code readyMs})에 대기열에 들어오고, 가장 먼저 비는 STT 워커가 받아
+     * (실제 처리 시간 + 가상 시간)만큼 일한다. 확보에서 끝난 건(실패·건너뜀)은 STT 워커를 쓰지 않지만,
+     * 확보 워커가 마지막 건을 끝낸 시각({@code acquireSpanMs})보다 일찍 끝날 수는 없다.</p>
+     */
+    static long pipelineMs(List<PerfStageMeter.PipelineItem> items, int sttWorkers, long acquireSpanMs) {
+        java.util.PriorityQueue<Long> free = new java.util.PriorityQueue<>();
+        for (int i = 0; i < Math.max(1, sttWorkers); i++) {
+            free.add(0L);
+        }
+        long end = acquireSpanMs;
+        List<PerfStageMeter.PipelineItem> byReady = items.stream()
+                .sorted(java.util.Comparator.comparingLong(PerfStageMeter.PipelineItem::readyMs)).toList();
+        for (PerfStageMeter.PipelineItem it : byReady) {
+            long start = Math.max(free.poll(), it.readyMs());
+            long finish = start + it.serviceMs() + it.virtualMs();
+            free.add(finish);
+            end = Math.max(end, finish);
+        }
+        return end;
     }
 
     /**
@@ -845,8 +902,8 @@ public class PerfRunService {
         return m;
     }
 
-    /** 화면 입력 패널이 쓰는 한 장 — 범위·기본값·지금 구성. */
-    public Map<String, Object> info(int defaultConcurrency) {
+    /** 화면 입력 패널이 쓰는 한 장 — 범위·기본값·지금 구성. {@code batchWorkers} 는 운영 배치의 워커 구성. */
+    public Map<String, Object> info(Workers batchWorkers) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("sttMode", sttClient.mode());
         m.put("sttTimeoutSec", props.stt().timeoutSec());
@@ -855,10 +912,19 @@ public class PerfRunService {
         m.put("maxTotal", PerfRequest.MAX_TOTAL);
         m.put("maxLatencyMs", PerfRequest.MAX_LATENCY_MS);
         m.put("maxTimeoutMs", PerfRequest.MAX_TIMEOUT_MS);
-        m.put("concurrencyOptions", PerfRequest.CONCURRENCY_OPTIONS);
+        m.put("defaultAcquireWorkers", PerfRequest.DEFAULT_ACQUIRE_WORKERS);
+        m.put("defaultSttWorkers", PerfRequest.DEFAULT_STT_WORKERS);
+        m.put("maxWorkers", PerfRequest.MAX_WORKERS);
         m.put("rampMaxWorkers", RampRequest.MAX_WORKERS);
         m.put("rampMaxSteps", RampRequest.MAX_STEPS);
-        m.put("batchConcurrency", defaultConcurrency);
+        m.put("batchConcurrency", batchWorkers.stt());
+        m.put("batchAcquireWorkers", batchWorkers.acquire());
+        // 원천 풀 설정 — 화면이 'Hikari 최대 40 · 누수 감지 30초' 로 보여 준다
+        Map<String, Object> pool = new LinkedHashMap<>();
+        pool.put("maxPoolSize", props.source().directDb().maxPoolSize());
+        pool.put("leakDetectionMs", props.source().directDb().leakDetectionThresholdMs());
+        pool.put("idleTimeoutMs", props.source().directDb().idleTimeoutMs());
+        m.put("pool", pool);
         m.put("maxFilesPerRun", props.batch().maxFilesPerRun());
         m.put("modes", modes());
         m.put("env", deployEnv.snapshot().get("kind"));

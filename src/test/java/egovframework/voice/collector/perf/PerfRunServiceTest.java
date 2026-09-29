@@ -60,7 +60,7 @@ class PerfRunServiceTest {
     void basicRunEndToEnd() throws Exception {
         perf.clearHistory();
 
-        Map<String, Object> started = perf.start(new PerfRequest("A", 5, 5, 20, 2, "FIXED", 60L, 40L, null, null, true, null, null));   // 실제 대기 모드
+        Map<String, Object> started = perf.start(new PerfRequest("A", 5, 5, 20, 1, 2, "FIXED", 60L, 40L, null, null, true, null, null));   // 실제 대기 모드
         assertThat(started.get("active")).isEqualTo(true);
         assertThat(started.get("kind")).isEqualTo("BASIC");
         // 도는 동안에는 두 번째(임계 시험도)를 받지 않는다
@@ -80,7 +80,13 @@ class PerfRunServiceTest {
                 .containsExactly("ACQUIRE", "DECRYPT", "FORMAT", "STT", "TEMP", "DEIDENT", "SAVE");
         assertThat(((Number) stages.get(3).get("count")).intValue()).as("기 STT 1건은 STT 를 부르지 않는다").isEqualTo(9);
         assertThat((Double) stages.get(3).get("avgMs")).isGreaterThanOrEqualTo(40d);
-        assertThat((Integer) ((Map<String, Object>) r.get("hikari")).get("peak")).isGreaterThanOrEqualTo(1);
+        Map<String, Object> hikari = (Map<String, Object>) r.get("hikari");
+        assertThat((Integer) hikari.get("peak")).isGreaterThanOrEqualTo(1);
+        // 배치가 끝난 직후 — 빌려 간 원천 연결이 모두 돌아왔다(사용 중 0 · 대기 0)
+        assertThat(((Map<String, Object>) hikari.get("after")).get("returned")).isEqualTo(true);
+        assertThat(r.get("acquireWorkers")).isEqualTo(1);
+        assertThat(r.get("sttWorkers")).isEqualTo(2);
+        assertThat(r.get("pipeline")).isEqualTo(true);
         assertThat(((Map<String, Object>) r.get("checks")).get("available")).isEqualTo(false);
 
         Map<String, Object> rows = (Map<String, Object>) sim.status().get("rows");
@@ -100,7 +106,7 @@ class PerfRunServiceTest {
         perf.clearRampHistory();
 
         Map<String, Object> started = perf.startRamp(new RampRequest(3, 3, 0, "FIXED", 150L, 150L, null, null,
-                1, "MULTIPLY", 2, 4, 3, 0, true, null, null, null));
+                1, "MULTIPLY", 2, 4, 3, 0, true, null, null, null, null, null, null));
         assertThat(started.get("kind")).isEqualTo("RAMP");
         assertThat((List<Integer>) started.get("plan")).containsExactly(1, 2, 4);
 
@@ -128,7 +134,7 @@ class PerfRunServiceTest {
     @SuppressWarnings("unchecked")
     void rampStopsOnSttError() throws Exception {
         perf.startRamp(new RampRequest(3, 3, 0, "FIXED", 400L, 400L, null, 100L,
-                1, "MULTIPLY", 2, 8, 3, 0, true, null, null, null));
+                1, "MULTIPLY", 2, 8, 3, 0, true, null, null, null, null, null, null));
 
         Map<String, Object> cur = waitDone();
         Map<String, Object> r = (Map<String, Object>) cur.get("result");
@@ -139,11 +145,11 @@ class PerfRunServiceTest {
     }
 
     @Test
-    @DisplayName("고속 모드 — 건당 100초 × 8건 · 워커 2 는 기다리지 않고 끝나고, 리포트에 가상 STT 400초가 더해진다")
+    @DisplayName("고속 모드 — 건당 100초 × 8건 · STT 워커 2 는 기다리지 않고 끝나고, 총 소요는 파이프라인 모의로 약 400초")
     @SuppressWarnings("unchecked")
     void fastForwardAddsVirtualSttTime() throws Exception {
         long t0 = System.currentTimeMillis();
-        perf.start(new PerfRequest("A", 4, 4, 0, 2, "FIXED", 100_000L, 100_000L, null, null, null, null, null));
+        perf.start(new PerfRequest("A", 4, 4, 0, 1, 2, "FIXED", 100_000L, 100_000L, null, null, null, null, null));
         Map<String, Object> cur = waitDone();
         assertThat(System.currentTimeMillis() - t0).as("실제로 800초를 기다리지 않는다").isLessThan(60_000L);
 
@@ -152,7 +158,9 @@ class PerfRunServiceTest {
         assertThat(r.get("success")).isEqualTo(8);
         assertThat((Double) r.get("virtualSttSec")).isEqualTo(400.0);
         double total = (Double) r.get("totalSec");
-        assertThat(total).isEqualTo((Double) r.get("realSec") + 400.0, org.assertj.core.data.Offset.offset(0.02));
+        // 확보(실제)와 STT(가상)가 겹친다 — 400초에 실제 소요가 통째로 더해지지 않고, 겹친 만큼 빠진다
+        assertThat(total).isBetween(400.0, (Double) r.get("realSec") + 400.0 + 0.5);
+        assertThat((Double) r.get("virtualSec")).isEqualTo(total - (Double) r.get("realSec"), org.assertj.core.data.Offset.offset(0.02));
         assertThat((Double) r.get("tps")).isEqualTo(8 / total, org.assertj.core.data.Offset.offset(0.001));
         Map<String, Object> stt = ((List<Map<String, Object>>) r.get("stages")).get(3);
         assertThat(stt.get("virtual")).isEqualTo(true);
@@ -163,7 +171,7 @@ class PerfRunServiceTest {
     @DisplayName("고속 모드 타임아웃 — 처리 시간 300초 > 타임아웃 200초면 기다리지 않고 전건 타임아웃 실패, 가상 시간은 타임아웃까지만")
     @SuppressWarnings("unchecked")
     void fastForwardTimeoutFailsImmediately() throws Exception {
-        perf.start(new PerfRequest("B", 2, 2, 0, 2, "FIXED", 300_000L, 300_000L, null, 200_000L, null, null, null));
+        perf.start(new PerfRequest("B", 2, 2, 0, 1, 2, "FIXED", 300_000L, 300_000L, null, 200_000L, null, null, null));
         Map<String, Object> r = (Map<String, Object>) waitDone().get("result");
         assertThat(r.get("fail")).isEqualTo(4);
         assertThat(r.get("timeout")).isEqualTo(4L);
@@ -182,7 +190,7 @@ class PerfRunServiceTest {
                         org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.eq(true));
 
-        perf.start(new PerfRequest("A", 2, 2, 0, 2, "FIXED", 0L, 0L, null, null, null, true, 5_000L));
+        perf.start(new PerfRequest("A", 2, 2, 0, 1, 2, "FIXED", 0L, 0L, null, null, null, true, 5_000L));
         Map<String, Object> r = (Map<String, Object>) waitDone().get("result");
 
         assertThat(r.get("success")).isEqualTo(4);
@@ -192,6 +200,27 @@ class PerfRunServiceTest {
         Map<String, Object> deid = ((List<Map<String, Object>>) r.get("stages")).get(5);
         assertThat(deid.get("key")).isEqualTo("DEIDENT");
         assertThat((Double) deid.get("avgMs")).isGreaterThanOrEqualTo(5_000.0);
+    }
+
+    @Test
+    @DisplayName("파이프라인 모의 — STT 가 병목이면 STT 합 ÷ 워커, 확보가 병목이면 확보 구간 + 마지막 한 건")
+    void pipelineSimulation() {
+        // 확보가 빠르다(0ms 에 4건 준비) · STT 100 × 4건 · STT 워커 2 → 200
+        List<PerfStageMeter.PipelineItem> fast = List.of(item(0, 100), item(0, 100), item(0, 100), item(0, 100));
+        assertThat(PerfRunService.pipelineMs(fast, 2, 0)).isEqualTo(200L);
+        // 확보가 느리다(100ms 마다 한 건) · STT 50 · STT 워커 4 → 마지막 건 준비(400) + 50 = 450
+        //   순차 합산(확보 400 + STT 200 ÷ 4 = 450)과 같지만, STT 가 길어지면 차이가 난다 ↓
+        List<PerfStageMeter.PipelineItem> slow = List.of(item(100, 50), item(200, 50), item(300, 50), item(400, 50));
+        assertThat(PerfRunService.pipelineMs(slow, 4, 400)).isEqualTo(450L);
+        // 확보 100ms 마다 · STT 1,000 · STT 워커 4 → 겹쳐서 1,400 (확보 400 을 따로 더하면 1,400 + 400 이 된다)
+        List<PerfStageMeter.PipelineItem> overlap = List.of(item(100, 1000), item(200, 1000), item(300, 1000), item(400, 1000));
+        assertThat(PerfRunService.pipelineMs(overlap, 4, 400)).isEqualTo(1400L);
+        // 확보에서 끝난 건만 있으면 확보 구간이 곧 끝
+        assertThat(PerfRunService.pipelineMs(List.of(), 4, 350)).isEqualTo(350L);
+    }
+
+    private static PerfStageMeter.PipelineItem item(long readyMs, long virtualMs) {
+        return new PerfStageMeter.PipelineItem(readyMs, 0L, virtualMs);
     }
 
     @Test
@@ -206,7 +235,7 @@ class PerfRunServiceTest {
     @Test
     @DisplayName("범위 밖이면 시작하지 않는다 — 합계 301건")
     void rejectsOutOfRange() {
-        assertThatThrownBy(() -> perf.start(new PerfRequest("A", 151, 150, 3, 4, "FIXED", 0L, 0L, null, null, null, null, null)))
+        assertThatThrownBy(() -> perf.start(new PerfRequest("A", 151, 150, 3, 1, 4, "FIXED", 0L, 0L, null, null, null, null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

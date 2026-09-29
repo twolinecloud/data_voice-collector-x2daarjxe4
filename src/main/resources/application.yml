@@ -90,13 +90,22 @@ voice:
       url: jdbc:h2:mem:borami;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
       username: sa
       password: ""
+      max-pool-size: ${BORAMI_H2_POOL_MAX:40}
+      leak-detection-threshold-ms: ${BORAMI_DB_LEAK_DETECTION_MS:30000}
     direct-db:
       url: ${BORAMI_DB_URL:${DB_URL:jdbc:postgresql://localhost:15433/borami}}
       driver-class-name: ${BORAMI_DB_DRIVER:${DB_DRIVER:}}
       username: ${BORAMI_DB_USER:${DB_USER:${POSTGRES_USERNAME:borami}}}
       password: ${BORAMI_DB_PASSWORD:${DB_PASSWORD:${POSTGRES_PASSWORD:}}}
       connect-timeout-ms: ${BORAMI_DB_CONNECT_TIMEOUT_MS:3000}
-      max-pool-size: ${BORAMI_DB_POOL_MAX:5}
+      # ── HikariCP (원천 풀 borami-direct · borami-h2) ─────────────────────────────
+      #   최대 40 — STT 워커 30개 이상에서도 여유. 최소 유휴 0 이라 쓰지 않는 연결은 열지 않는다.
+      #   배치 워커는 원천 DB 를 쓰지 않는다(대상 조회는 루프 전, 로그는 로그 컬렉터 API) → 정상이면 최고치 1~2.
+      #   누수 감지 30초 — 빌려 간 연결이 30초 넘게 안 돌아오면 Hikari 가 빌린 자리 스택과 함께 WARN 을 남긴다.
+      #   유휴 60초 — 시험이 끝나 늘었던 연결은 60초 쉬면 닫혀 0 으로 돌아간다(성능 탭 'Hikari 반납' 으로 확인).
+      max-pool-size: ${BORAMI_DB_POOL_MAX:40}
+      leak-detection-threshold-ms: ${BORAMI_DB_LEAK_DETECTION_MS:30000}
+      idle-timeout-ms: ${BORAMI_DB_IDLE_TIMEOUT_MS:60000}
 
     # ── XVARM 연동 (개발계 DB 모드 전용) ─────────────────────────────────────
     #   MOCK_DEV(기본): 개발계 borami-db 에 없는 공통파일기본·XVARM 테이블을 우리가 xvarm-mock 스키마에
@@ -186,7 +195,11 @@ voice:
     job-id: ${VOICE_JOB_ID:VOICE_ANALYSIS}   # 컬렉터 JobId enum — VOICE_ANALYSIS → 작업코드 VOC
     data-type-cd: UNSTRUCTURED               # 컬렉터 C01 4종 중 비정형(음성). VOICE 는 C01 에 없는 코드였다
     retain-source-file: ${VOICE_RETAIN_SOURCE:false}
-    concurrency: ${VOICE_BATCH_CONCURRENCY:1}   # 건 동시 처리 워커 수 — 운영은 1(순차) 고정. 성능 테스트 결과를 보고 정한다
+    # 워커 — 확보(I/O)와 STT(연산)를 나눈다. 둘 다 1 이면 순차(운영 기본), 아니면 생산자-소비자.
+    #   acquire-workers: XVARM 확보 워커 — 브로커 추출 → 수신 폴더 도착(전화는 파일 연계). 원천 부하를 위해 1 권장
+    #   concurrency    : STT 처리 워커 — 복호화 · STT · 비식별 · 최종 저장. 성능 테스트 결과를 보고 정한다
+    acquire-workers: ${VOICE_BATCH_ACQUIRE_WORKERS:1}
+    concurrency: ${VOICE_BATCH_CONCURRENCY:1}
 
   inmate-pid:
     salt: ${VOICE_PID_SALT:kcais-voice-collector}

@@ -1,5 +1,7 @@
 package egovframework.voice.collector.perf;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import egovframework.voice.collector.batch.Workers;
 import egovframework.voice.collector.source.SimulationDataService;
 import egovframework.voice.collector.stt.MockSttLatency;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -11,7 +13,11 @@ import java.util.Locale;
  * 기본 부하 검증(4번 탭) 한 회차의 조건.
  *
  * <p>비운 값은 {@link #withDefaults()} 가 화면 기본값으로 채운다 — 접견 150 · 전화 150(합 300, 일일 한도) ·
- * 기 STT 3% · 동시성 4 · 건당 STT 처리 시간 접견 180,000ms / 전화 120,000ms(고정) · 타임아웃 없음 · 고속 모드.</p>
+ * 기 STT 3% · XVARM 확보 워커 1 · STT 처리 워커 31 · 건당 STT 처리 시간 접견 180,000ms / 전화 120,000ms(고정) ·
+ * 타임아웃 없음 · 고속 모드.</p>
+ *
+ * <p><b>워커가 둘인 이유</b>: 확보(I/O)와 STT(연산)를 한 워커가 다 하면 워커를 늘릴 때 확보 요청도 같이 늘어
+ * 브로커가 밀리고 확보 대기가 폭증한다. 확보 워커가 받아 둔 파일을 STT 워커가 곧바로 집어 간다({@link Workers}).</p>
  */
 @Schema(description = "기본 부하 검증 조건")
 public record PerfRequest(
@@ -20,7 +26,10 @@ public record PerfRequest(
         @Schema(description = "전화 건수 — 0 이상, 접견과 합쳐 2~300", example = "150") Integer phoneCount,
         @Schema(description = "기 STT 존재 비율(%) — 전화 중 이 비율에 TELP_STT_FLPTH_NM 을 채워 STT 를 건너뛰게 한다", example = "3")
         Integer sttPercent,
-        @Schema(description = "동시에 처리할 워커 수 — 1 · 2 · 4 · 8 · 16", example = "4") Integer concurrency,
+        @Schema(description = "XVARM 확보 워커 수 — 1~64. 파일 확보(브로커 추출 → 수신 폴더 도착)를 차례로 한다", example = "1")
+        Integer acquireWorkers,
+        @Schema(description = "STT 처리 워커 수 — 1~64. 확보된 파일을 곧바로 받아 복호화 · STT · 비식별 · 저장을 한다", example = "31")
+        @JsonAlias("concurrency") Integer sttWorkers,
         @Schema(description = "건당 STT 처리 시간 방식 — FIXED(고정) · RANGE(기준값 ±변동 폭 균등 난수)", example = "FIXED") String latencyMode,
         @Schema(description = "접견 건당 STT 처리 시간(ms) — 0~600,000. 평균 접견 15분 → 건당 처리 시간 180초", example = "180000")
         Long meetLatencyMs,
@@ -48,7 +57,9 @@ public record PerfRequest(
     public static final long DEFAULT_PHONE_LATENCY_MS = 120_000L;
     public static final int DEFAULT_JITTER = 50;
     public static final long DEFAULT_DEIDENT_LATENCY_MS = 5_000L;
-    public static final List<Integer> CONCURRENCY_OPTIONS = List.of(1, 2, 4, 8, 16);
+    public static final int DEFAULT_ACQUIRE_WORKERS = 1;
+    public static final int DEFAULT_STT_WORKERS = 31;
+    public static final int MAX_WORKERS = 64;
 
     /** 비운 값을 기본값으로 채운다. */
     public PerfRequest withDefaults() {
@@ -58,7 +69,8 @@ public record PerfRequest(
                 meetCount == null ? DEFAULT_MEET : meetCount,
                 phoneCount == null ? DEFAULT_PHONE : phoneCount,
                 sttPercent == null ? DEFAULT_STT_PERCENT : sttPercent,
-                concurrency == null ? 4 : concurrency,
+                acquireWorkers == null ? DEFAULT_ACQUIRE_WORKERS : acquireWorkers,
+                sttWorkers == null ? DEFAULT_STT_WORKERS : sttWorkers,
                 mode,
                 meetLatencyMs == null ? DEFAULT_MEET_LATENCY_MS : meetLatencyMs,
                 phoneLatencyMs == null ? DEFAULT_PHONE_LATENCY_MS : phoneLatencyMs,
@@ -76,15 +88,19 @@ public record PerfRequest(
      */
     public void validate(int maxFilesPerRun) {
         validateData(meetCount, phoneCount, sttPercent, maxFilesPerRun);
-        if (!CONCURRENCY_OPTIONS.contains(concurrency)) {
-            throw new IllegalArgumentException("동시성은 " + CONCURRENCY_OPTIONS + " 중 하나여야 합니다: " + concurrency);
-        }
+        validateWorkers("XVARM 확보 워커", acquireWorkers);
+        validateWorkers("STT 처리 워커", sttWorkers);
         validateLoad(latencyMode, meetLatencyMs, phoneLatencyMs, jitterPercent, sttTimeoutMs);
         validateDeident(deidentLatencyMs);
     }
 
     public int count() {
         return meetCount + phoneCount;
+    }
+
+    /** 이 회차의 워커 구성. */
+    public Workers workers() {
+        return new Workers(acquireWorkers, sttWorkers);
     }
 
     public MockSttLatency.Mode mode() {
@@ -134,6 +150,13 @@ public record PerfRequest(
         if (timeoutMs != null && (timeoutMs < MIN_TIMEOUT_MS || timeoutMs > MAX_TIMEOUT_MS)) {
             throw new IllegalArgumentException("STT 타임아웃은 %d~%dms 이어야 합니다(비우면 적용 안 함): %d"
                     .formatted(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS, timeoutMs));
+        }
+    }
+
+    /** 워커 수 — 1~{@link #MAX_WORKERS}. */
+    static void validateWorkers(String what, Integer n) {
+        if (n == null || n < 1 || n > MAX_WORKERS) {
+            throw new IllegalArgumentException("%s 는 1~%d 이어야 합니다: %s".formatted(what, MAX_WORKERS, n));
         }
     }
 

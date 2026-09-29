@@ -1,5 +1,6 @@
 package egovframework.voice.collector.perf;
 
+import egovframework.voice.collector.batch.Workers;
 import egovframework.voice.collector.stt.MockSttLatency;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -13,6 +14,13 @@ import java.util.Locale;
  * <p>시작 워커부터 단계마다 워커를 늘려 <b>같은 건수</b>를 처리한다. 건수가 같으니 단계 총 소요(=응답 시간)가
  * 바로 비교된다 — 짧아지는 동안은 워커를 늘리는 것이 효과가 있고, 더 짧아지지 않으면 어딘가(브로커·NFS·DB)가
  * 포화된 것이다.</p>
+ *
+ * <p><b>늘릴 워커</b>({@code rampTarget}) — 워커가 둘이라({@link Workers}) 한쪽만 늘리고 다른 쪽은 고정한다.</p>
+ * <ul>
+ *   <li>{@code STT}(기본) — STT 처리 워커를 늘린다. XVARM 확보 워커는 {@code acquireWorkers}(기본 1)로 고정</li>
+ *   <li>{@code ACQUIRE} — XVARM 확보 워커를 늘린다. STT 처리 워커는 {@code sttWorkers}(기본 31)로 고정 —
+ *       브로커(추출 스레드 4개)·NFS 가 버티는 확보 동시성을 찾는다</li>
+ * </ul>
  *
  * <p><b>조기 종료</b></p>
  * <ul>
@@ -42,7 +50,10 @@ public record RampRequest(
         @Schema(description = "실제 대기 모드 — 비우거나 false 면 고속 모드(가상 시간 합산)", example = "false") Boolean realSleep,
         @Schema(description = "비식별 수행 여부 — true 수행 / false·비우면 단순 전달(SEND)", example = "false") Boolean deidentEnabled,
         @Schema(description = "건당 비식별 처리 시간(ms) — 비식별 수행일 때만. 0~600,000, 기본 5,000", example = "5000")
-        Long deidentLatencyMs
+        Long deidentLatencyMs,
+        @Schema(description = "늘릴 워커 — STT(STT 처리 워커, 기본) · ACQUIRE(XVARM 확보 워커)", example = "STT") String rampTarget,
+        @Schema(description = "XVARM 확보 워커 — STT 를 늘릴 때 고정값. 1~64, 기본 1", example = "1") Integer acquireWorkers,
+        @Schema(description = "STT 처리 워커 — 확보를 늘릴 때 고정값. 1~64, 기본 31", example = "31") Integer sttWorkers
 ) {
 
     public static final int MAX_WORKERS = 64;
@@ -50,6 +61,21 @@ public record RampRequest(
     public static final int MAX_STEPS = 64;
 
     public enum StepMode { ADD, MULTIPLY }
+
+    /** 늘릴 워커. */
+    public enum Target {
+        STT("STT 처리 워커"), ACQUIRE("XVARM 확보 워커");
+
+        private final String label;
+
+        Target(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+    }
 
     public RampRequest withDefaults() {
         String mode = PerfRequest.mode(latencyMode);
@@ -71,13 +97,23 @@ public record RampRequest(
                 stopOnSttError == null ? Boolean.TRUE : stopOnSttError,
                 Boolean.TRUE.equals(realSleep),
                 Boolean.TRUE.equals(deidentEnabled),
-                deidentLatencyMs == null ? PerfRequest.DEFAULT_DEIDENT_LATENCY_MS : deidentLatencyMs);
+                deidentLatencyMs == null ? PerfRequest.DEFAULT_DEIDENT_LATENCY_MS : deidentLatencyMs,
+                rampTarget == null || rampTarget.isBlank() ? Target.STT.name() : rampTarget.trim().toUpperCase(Locale.ROOT),
+                acquireWorkers == null ? PerfRequest.DEFAULT_ACQUIRE_WORKERS : acquireWorkers,
+                sttWorkers == null ? PerfRequest.DEFAULT_STT_WORKERS : sttWorkers);
     }
 
     public void validate(int maxFilesPerRun) {
         PerfRequest.validateData(meetCount, phoneCount, sttPercent, maxFilesPerRun);
         PerfRequest.validateLoad(latencyMode, meetLatencyMs, phoneLatencyMs, jitterPercent, sttTimeoutMs);
         PerfRequest.validateDeident(deidentLatencyMs);
+        try {
+            Target.valueOf(rampTarget);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new IllegalArgumentException("늘릴 워커는 STT(STT 처리 워커) 또는 ACQUIRE(XVARM 확보 워커)여야 합니다: " + rampTarget);
+        }
+        PerfRequest.validateWorkers("XVARM 확보 워커(고정)", acquireWorkers);
+        PerfRequest.validateWorkers("STT 처리 워커(고정)", sttWorkers);
         StepMode sm;
         try {
             sm = StepMode.valueOf(stepMode);
@@ -125,6 +161,15 @@ public record RampRequest(
 
     public int count() {
         return meetCount + phoneCount;
+    }
+
+    public Target target() {
+        return Target.valueOf(rampTarget);
+    }
+
+    /** 단계의 워커 구성 — 늘리는 쪽이 {@code w}, 다른 쪽은 고정값. */
+    public Workers workersAt(int w) {
+        return target() == Target.STT ? new Workers(acquireWorkers, w) : new Workers(w, sttWorkers);
     }
 
     public MockSttLatency.Mode mode() {
