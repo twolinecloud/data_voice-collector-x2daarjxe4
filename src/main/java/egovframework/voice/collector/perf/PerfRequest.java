@@ -30,7 +30,10 @@ public record PerfRequest(
         @Schema(description = "STT 타임아웃(ms) — 건당 처리 시간이 이 값을 넘으면 타임아웃 실패. 비우거나 0 이면 적용하지 않는다",
                 example = "200000") Long sttTimeoutMs,
         @Schema(description = "실제 대기 모드 — true 면 처리 시간만큼 실제로 기다린다. 비우거나 false 면 고속 모드"
-                + "(기다리지 않고 가상 시간을 리포트에 합산)", example = "false") Boolean realSleep
+                + "(기다리지 않고 가상 시간을 리포트에 합산)", example = "false") Boolean realSleep,
+        @Schema(description = "비식별 수행 여부 — true 수행 / false·비우면 단순 전달(SEND)", example = "false") Boolean deidentEnabled,
+        @Schema(description = "건당 비식별 처리 시간(ms) — 비식별 수행일 때만. 0~600,000, 기본 5,000", example = "5000")
+        Long deidentLatencyMs
 ) {
 
     public static final int MIN_TOTAL = 2;
@@ -44,6 +47,7 @@ public record PerfRequest(
     public static final long DEFAULT_MEET_LATENCY_MS = 180_000L;
     public static final long DEFAULT_PHONE_LATENCY_MS = 120_000L;
     public static final int DEFAULT_JITTER = 50;
+    public static final long DEFAULT_DEIDENT_LATENCY_MS = 5_000L;
     public static final List<Integer> CONCURRENCY_OPTIONS = List.of(1, 2, 4, 8, 16);
 
     /** 비운 값을 기본값으로 채운다. */
@@ -60,7 +64,9 @@ public record PerfRequest(
                 phoneLatencyMs == null ? DEFAULT_PHONE_LATENCY_MS : phoneLatencyMs,
                 "RANGE".equals(mode) ? (jitterPercent == null ? DEFAULT_JITTER : jitterPercent) : 0,
                 timeout(sttTimeoutMs),
-                Boolean.TRUE.equals(realSleep));
+                Boolean.TRUE.equals(realSleep),
+                Boolean.TRUE.equals(deidentEnabled),
+                deidentLatencyMs == null ? DEFAULT_DEIDENT_LATENCY_MS : deidentLatencyMs);
     }
 
     /**
@@ -74,6 +80,7 @@ public record PerfRequest(
             throw new IllegalArgumentException("동시성은 " + CONCURRENCY_OPTIONS + " 중 하나여야 합니다: " + concurrency);
         }
         validateLoad(latencyMode, meetLatencyMs, phoneLatencyMs, jitterPercent, sttTimeoutMs);
+        validateDeident(deidentLatencyMs);
     }
 
     public int count() {
@@ -127,6 +134,13 @@ public record PerfRequest(
         if (timeoutMs != null && (timeoutMs < MIN_TIMEOUT_MS || timeoutMs > MAX_TIMEOUT_MS)) {
             throw new IllegalArgumentException("STT 타임아웃은 %d~%dms 이어야 합니다(비우면 적용 안 함): %d"
                     .formatted(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS, timeoutMs));
+        }
+    }
+
+    /** 건당 비식별 처리 시간. */
+    static void validateDeident(Long ms) {
+        if (ms == null || ms < 0 || ms > MAX_LATENCY_MS) {
+            throw new IllegalArgumentException("건당 비식별 처리 시간은 0~%dms 이어야 합니다: %s".formatted(MAX_LATENCY_MS, ms));
         }
     }
 

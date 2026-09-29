@@ -338,6 +338,11 @@
   .pf-tps .b { position:absolute; top:0; bottom:0; left:0; background:#d0bfff; }
   .pf-tps span { position:relative; padding-left:.3rem; font-family:var(--mono); font-weight:600; }
   .pf-ph.warn { color:#664d03; background:#fff3cd; }
+  /* 상단 [비식별화 수행] 토글 — 켜면 눈에 띄게(시험 전체에 걸리는 스위치다) */
+  .deid-switch { border:1px solid #ced4da; border-radius:1rem; padding:.2rem .7rem .2rem 2.6rem; background:#fff; }
+  .deid-switch.on { border-color:#0d6efd; background:#e7f1ff; }
+  .deid-switch.on label { color:#0a58ca; }
+  .deid-off { opacity:.55; }
   .pf-help { font-size:.68rem; color:#6c757d; margin-top:.15rem; }
   /* 한 줄 설명 — 칸 안에 두면 두 줄로 깨지고 옆 칸 높이까지 흔들어 행 아래에 한 줄로 둔다 */
   .pf-help-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:-.2rem; }
@@ -371,6 +376,11 @@
       </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
+      <span class="form-check form-switch m-0 deid-switch" id="deid-box"
+            title="시뮬레이터에서 돌리는 배치·장애 시나리오·성능 시험에만 적용됩니다 — 요청의 deidentEnabled 로 넘어갑니다.&#10;끄면(기본) 비식별 커넥터가 비식별 연산을 건너뛰고 단순 전달(SEND)합니다. 어느 쪽이든 T2 DEIDENT 단계와 T5 가 남습니다.">
+        <input class="form-check-input" type="checkbox" role="switch" id="deid-on">
+        <label class="form-check-label small fw-semibold" for="deid-on">비식별화 수행 (De-identification)</label>
+      </span>
       <a class="btn btn-sm btn-outline-secondary" id="lnk-swagger" href="/swagger-ui/index.html" target="_blank">Swagger</a>
       <button class="btn btn-sm btn-warning" id="btn-reset"
               title="Complete Clean &amp; Seed — 멱등 표식·수신 파일 삭제 + DB 메타(접견 7·전화 7: 트랙별 일배치 5·주기 2) + XVARM 원본 더미 파일 생성">
@@ -654,6 +664,11 @@
         <div class="col-6 col-md-3"><label class="hint" for="pf-timeout">STT 타임아웃 (ms)</label>
           <input type="number" class="form-control form-control-sm" id="pf-timeout" placeholder="비우면 적용 안 함" min="100" max="1800000" step="10000"></div>
       </div>
+      <div class="row g-2 align-items-start mb-2 pf-deid">
+        <div class="col-6 col-md-3"><label class="hint" for="pf-deid-ms">건당 가상 비식별 처리시간 (ms)</label>
+          <input type="number" class="form-control form-control-sm" id="pf-deid-ms" value="5000" min="0" max="600000" step="500"></div>
+        <div class="col-12 col-md-9"><div class="pf-help mt-md-4 pt-md-1 pf-deid-note">상단 [비식별화 수행] 을 켰을 때만 씁니다 — 꺼져 있으면 단순 전달이라 0ms 입니다.</div></div>
+      </div>
       <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
         <button class="btn btn-dark fw-semibold px-3" id="pf-start">기본 부하 검증 시작</button>
         <button class="btn btn-outline-danger d-none" id="pf-cancel" title="준비 중이면 측정을 건너뛰고, 측정 중이면 처리 중인 건만 끝내고 멈춥니다. SIM 데이터는 지웁니다">중지</button>
@@ -798,6 +813,11 @@
           <input type="number" class="form-control form-control-sm" id="rp-jitter" value="50" min="0" max="100" step="5"></div>
         <div class="col-6 col-md-3"><label class="hint" for="rp-timeout">STT 타임아웃 (ms)</label>
           <input type="number" class="form-control form-control-sm" id="rp-timeout" placeholder="비우면 적용 안 함" min="100" max="1800000" step="10000"></div>
+      </div>
+      <div class="row g-2 align-items-start mb-2 pf-deid">
+        <div class="col-6 col-md-3"><label class="hint" for="rp-deid-ms">건당 가상 비식별 처리시간 (ms)</label>
+          <input type="number" class="form-control form-control-sm" id="rp-deid-ms" value="5000" min="0" max="600000" step="500"></div>
+        <div class="col-12 col-md-9"><div class="pf-help mt-md-4 pt-md-1 rp-deid-note">상단 [비식별화 수행] 을 켰을 때만 씁니다 — 꺼져 있으면 단순 전달이라 0ms 입니다.</div></div>
       </div>
       <div class="rp-sec hint fw-semibold mb-1">조기 종료 (Early Exit)</div>
       <div class="row g-2 align-items-end mb-2">
@@ -1072,8 +1092,8 @@ function logRowsHtml(lc) {
     return `<li>삭제된 로그 레코드: <span class="text-secondary">${esc(lc || '로그 컬렉터 응답 없음')}</span></li>`;
   }
   const n = (k) => Number(lc[k]) || 0;
-  return `<li>삭제된 로그 레코드: <span class="n">${n('batch') + n('step') + n('file')}</span>건
-      <div class="sub">T1(batch) ${n('batch')}건 / T2(step) ${n('step')}건 / T4(file) ${n('file')}건</div></li>`;
+  return `<li>삭제된 로그 레코드: <span class="n">${n('batch') + n('step') + n('file') + n('send')}</span>건
+      <div class="sub">T1(batch) ${n('batch')}건 / T2(step) ${n('step')}건 / T4(file) ${n('file')}건 / T5(비식별·전송) ${n('send')}건</div></li>`;
 }
 
 /** 초기화 결과 — DB 행과 파일을 나눠 센다. 파일은 XVARM 원본 더미 + 로컬 수신·작업 파일의 합이다. */
@@ -1847,7 +1867,9 @@ async function runBatchInner(path, label, kind, extraQuery) {
   }
 
   // 시뮬레이터에서 돌리는 배치는 전부 시험이다 → EXEC_ID 가 ...TST... 로 채번된다.
-  const url = `${path}?test=true` + (kind ? `&kinds=${kind}` : '') + (extraQuery ? '&' + extraQuery : '');
+  // 상단 [비식별화 수행] — 시뮬레이터에서 도는 배치에만 붙인다. 시나리오가 따로 정했으면(재처리의 단순 전달) 그쪽이 이긴다
+  const deid = extraQuery && extraQuery.includes('deidentEnabled=') ? '' : `&deidentEnabled=${deidOn()}`;
+  const url = `${path}?test=true` + (kind ? `&kinds=${kind}` : '') + (extraQuery ? '&' + extraQuery : '') + deid;
   progStart();
   healthPause();          // 시험 중에는 자동 헬스체크를 멈춘다 — DB 커넥션·포트 간섭 방지
   let info;
@@ -1927,10 +1949,18 @@ const SCEN = [
     kinds:'MEET', modes:true,
   },
   {
-    key:'SEND', no:'3', short:'전송 장애', title:'SEND — 최종 저장 장애',
+    key:'DEIDENT', no:'3', short:'비식별 장애', title:'DEIDENT — 비식별 커넥터 장애',
+    how:'비식별 커넥터 호출을 500/Timeout 으로 떨어뜨립니다(상단 [비식별화 수행] 을 따라 1차를 돌립니다)',
+    expect:'전사 결과 보존 · T4 DEIDENT=FAIL / PARTIAL · T2 DEIDENT FAIL',
+    resume:'FROM_DEIDENT', resumeText:'수집·STT 스킵 → 보존된 전사로 비식별 단계부터 — 비식별을 끄고(deidentEnabled=false) 단순 전달(SEND)로 최종 저장까지 마감',
+    resumeQuery:'deidentEnabled=false',
+    kinds:'', modes:true,
+  },
+  {
+    key:'SEND', no:'4', short:'전송 장애', title:'SEND — 최종 저장 장애',
     how:'최종 저장(PV)에서 Disk Full(IOException) 을 냅니다',
     expect:'전사 결과 보존 · T4 SEND=FAIL / PARTIAL',
-    resume:'FROM_SEND', resumeText:'수집·복호화·STT 스킵 → 보존된 전사 결과로 저장만',
+    resume:'FROM_SEND', resumeText:'수집·복호화·STT 스킵 → 보존된 전사 결과로 비식별(상단 토글) → 저장',
     kinds:'', modes:true,
   },
 ];
@@ -2017,6 +2047,19 @@ function vfCounts(m) {
   const e = Object.entries(m || {});
   return e.length ? e.map(([k, n]) => `${vfBadge(k)} ${n}`).join(' &nbsp;') : '<span class="text-secondary">0건</span>';
 }
+/** T5 — 비식별 수행(AIR → DEIDENT_SUCCESS) · 단순 전달(BYPASS → SEND) · 전송 상태. */
+function t5Html(t5) {
+  if (!t5) return '—';
+  const sol = t5.bySolution || {};
+  const parts = [];
+  if (sol.AIR) parts.push(`<span class="vf-b SUCCESS">DEIDENT_SUCCESS ${sol.AIR}</span>`);
+  if (sol.BYPASS) parts.push(`<span class="vf-b x">SEND(단순 전달) ${sol.BYPASS}</span>`);
+  Object.entries(sol).filter(([k]) => k !== 'AIR' && k !== 'BYPASS').forEach(([k, v]) => parts.push(`${esc(k)} ${v}`));
+  if (!t5.solutionSupported) parts.push('<span class="text-secondary">솔루션별 집계 없음 — 로그 컬렉터 구버전</span>');
+  const send = t5.byStatus || {};
+  const sendTxt = Object.keys(send).length ? ' · 전송 ' + vfCounts(send) : '';
+  return (parts.join(' ') || '<span class="text-secondary">행 없음</span>') + sendTxt;
+}
 function vfFile(label, f) {
   if (!f) return '';
   // 300건이면 600개 — 처음 2개 … 마지막 2개만 보인다(옛 서버는 sample 을 준다)
@@ -2045,6 +2088,8 @@ function verifyBody(v, id) {
           <span class="text-secondary">in ${x.inCnt ?? 0} / out ${x.outCnt ?? 0} / err ${x.errCnt ?? 0}</span>`).join('<br>') || '—'}</div>
       <div class="vf-row"><span>T4 파일 <code>tb_file_proc_log</code></span><span>${db.t4?.total ?? 0}행</span></div>
       <div class="vf-sub">${sup ? vfCounts(db.t4?.byStatus) : '<span class="text-secondary">상태별 집계 없음 — 로그 컬렉터가 구버전</span>'}</div>
+      <div class="vf-row"><span>T5 비식별·전송 <code>tb_deident_send_log</code></span><span>${db.t5?.total ?? 0}행</span></div>
+      <div class="vf-sub">${t5Html(db.t5)}</div>
       <div class="vf-row"><span>[바로 실행] 워터마크 <span class="text-secondary">(${esc(wm.jobId || '')})</span></span>
         <span>${wm.at ? `<code>${esc(String(wm.at).replace('T', ' '))}</code>` : '<span class="text-secondary">없음 → 최근 30일</span>'}</span></div>
       <div class="vf-sub">SUCCESS 배치의 <code>MAX(target_to_dtm)</code>${wm.execId ? ` · ${esc(wm.execId)}` : ''}
@@ -2180,7 +2225,7 @@ async function scenResume(s) {
   } else {
     await call('DELETE', '/api/v1/voice/faults', `[${s.no}] 장애 해제`);
   }
-  const q = `resume=${s.resume}` + (s.kinds ? `&kinds=${s.kinds}` : '');
+  const q = `resume=${s.resume}` + (s.kinds ? `&kinds=${s.kinds}` : '') + (s.resumeQuery ? '&' + s.resumeQuery : '');
   const info = await runBatchInner('/api/v1/voice/batches/resume',
       `[${s.no}] 재처리 — ${s.resumeText}`, s.kinds || null, q);
   return info && info.body;
@@ -2233,7 +2278,7 @@ $('scen-auto').onclick = async () => {
   SCEN_AUTO = true;
   scenLock(true);
   healthPause();
-  log('🚀 단계별 장애 시나리오 자동 실행 — 1(수집) → 2(분석) → 3(전송)', 'hd');
+  log('🚀 단계별 장애 시나리오 자동 실행 — 1(수집) → 2(분석) → 3(비식별) → 4(전송)', 'hd');
   try {
     for (const s of SCEN) {
       // 시나리오마다 처음부터 — 앞 시나리오의 멱등 표식·보존물이 남으면 다음이 '건너뜀' 으로 샌다.
@@ -2245,7 +2290,7 @@ $('scen-auto').onclick = async () => {
       await sleep(600);
     }
     await scenReset(true);
-    log('✔ 세 시나리오 완료 — 각 단계의 장애·보존·이어서 하기를 모두 확인했습니다', 'ok');
+    log('✔ 네 시나리오 완료 — 각 단계의 장애·보존·이어서 하기를 모두 확인했습니다', 'ok');
   } finally {
     SCEN_AUTO = false;
     scenLock(false);
@@ -2519,6 +2564,16 @@ function trackAvg(base, mode, jitter, to) {
 }
 /** 기 STT 비율로 STT 를 건너뛸 전화 건수 — 서버와 같은 반올림. */
 function bypassCount(phone, pct) { return Math.round(phone * (pct || 0) / 100); }
+/** 건당 비식별 처리시간 — 비식별을 켰을 때만. 건수 × 시간 ÷ 워커. */
+function deidEstimateSec(n, workers, on, ms) { return on ? n * (Number(ms) || 0) / Math.max(1, workers) / 1000 : 0; }
+/** 상단 [비식별화 수행] — 시뮬레이터 요청의 deidentEnabled. */
+function deidOn() { return $('deid-on').checked; }
+function deidSync() {
+  const on = deidOn();
+  $('deid-box').classList.toggle('on', on);
+  document.querySelectorAll('.pf-deid').forEach(el => el.classList.toggle('deid-off', !on));
+  document.querySelectorAll('.pf-deid input').forEach(el => { el.disabled = !on || document.body.classList.contains('pf-running'); });
+}
 /** 건당 STT 처리 시간만으로 걸리는 대략의 시간(초) — 건별 시간의 합 ÷ 워커. 확보·복호화·저장은 따로다. */
 function sttEstimateSec(meet, phone, pct, workers, mode, meetMs, phoneMs, jitter, to) {
   const work = meet * trackAvg(meetMs, mode, jitter, to) + (phone - bypassCount(phone, pct)) * trackAvg(phoneMs, mode, jitter, to);
@@ -2588,6 +2643,8 @@ function pfRequest() {
     jitterPercent: range ? pfNum('pf-jitter') : 0,
     sttTimeoutMs: pfNum('pf-timeout'),
     realSleep: $('pf-real').checked,
+    deidentEnabled: deidOn(),
+    deidentLatencyMs: pfNum('pf-deid-ms') ?? 0,
   };
 }
 
@@ -2618,9 +2675,11 @@ function pfEstimate() {
     q.meetLatencyMs || 0, q.phoneLatencyMs || 0, q.jitterPercent, q.sttTimeoutMs);
   const by = bypassCount(q.phoneCount || 0, q.sttPercent);
   const basis = `${n}건 ÷ 워커 ${q.concurrency}${by ? ` · 기 STT ${by}건은 건너뜀` : ''}`;
+  const dsec = deidEstimateSec(n, q.concurrency, q.deidentEnabled, q.deidentLatencyMs);
+  const deid = q.deidentEnabled ? ` · 비식별 약 ${fmtSec(dsec)}` : ' · 비식별 끔(단순 전달 0ms)';
   $('pf-est').textContent = q.realSleep
-    ? `실제 대기 모드 — STT 를 실제로 약 ${fmtSec(sec)} 기다립니다 (${basis}) · 확보·복호화·저장 시간은 별도`
-    : `고속 모드 — STT 를 기다리지 않고 즉시 통과합니다. 리포트에 가상 STT 시간(약 ${fmtSec(sec)})을 더합니다 (${basis})`;
+    ? `실제 대기 모드 — STT 를 실제로 약 ${fmtSec(sec)}${deid} 기다립니다 (${basis}) · 확보·복호화·저장 시간은 별도`
+    : `고속 모드 — STT 를 기다리지 않고 즉시 통과합니다. 리포트에 가상 STT 시간(약 ${fmtSec(sec)})${q.deidentEnabled ? `과 가상 비식별 시간(약 ${fmtSec(dsec)})` : ''}을 더합니다 (${basis})`;
 }
 
 function pfRenderInfo() {
@@ -2650,6 +2709,7 @@ async function pfStart() {
           ? ' — 건당 처리 시간은 쓰지 않고 <b>실제 NPU</b> 로 요청이 갑니다'
           : ` · ${esc(latText({ mode:req.latencyMode, meetMs:req.meetLatencyMs, phoneMs:req.phoneLatencyMs, jitterPercent:req.jitterPercent }))}`
             + ` · 타임아웃 ${req.sttTimeoutMs ? fmtMs(req.sttTimeoutMs) : '없음'} · <b>${req.realSleep ? '실제 대기 모드' : '고속 모드'}</b>`}</li>
+      <li><span class="lbl">비식별:</span> ${req.deidentEnabled ? `<b>수행</b> — 건당 ${fmtMs(req.deidentLatencyMs)} · T5 DEIDENT_SUCCESS` : '<b>단순 전달</b> — 비식별 연산 생략 · T5 SEND'}</li>
       <li><span class="lbl">준비:</span> 로컬 산출물·지난 시험 출력 삭제 → SIM ${req.meetCount + req.phoneCount}건 생성 (기 STT ${by}건) · ${esc(i.db || '')}</li>
       <li><span class="lbl">예상:</span> ${esc($('pf-est').textContent.replace('예상 — ', ''))}</li>
       <li><span class="lbl">끝나면:</span> SIM 행·원본 더미 파일 자동 삭제 · 로그(TST)와 STT 출력은 남습니다</li>
@@ -2680,6 +2740,7 @@ function pfLock(on, kind) {
   document.body.classList.toggle('pf-running', on);
   document.querySelectorAll('#pf-box input, #pf-box select, .pf-preset, #rp-box input, #rp-box select, .rp-preset, #pf-real, #rp-real')
     .forEach(el => el.disabled = on);
+  if (!on) deidSync();   // 풀 때 — 비식별이 꺼져 있으면 건당 비식별 칸은 계속 잠근다
   [['pf-start', 'BASIC', '기본 부하 검증 시작'], ['rp-start', 'RAMP', '임계 성능 테스트 시작']].forEach(([id, k, label]) => {
     const b = $(id);
     b.disabled = on;
@@ -2802,7 +2863,8 @@ function pfRenderReport(r) {
   const tile = (key, n, sub) => `<div class="pf-tile"><div class="k">${key}</div><div class="n">${n}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
   const tiles = [
     tile('총 소요 시간', esc(fmtSec(r.totalSec)), r.fastForward
-      ? `실제 ${esc(fmtSec(r.realSec))} + 가상 STT ${esc(fmtSec(r.virtualSttSec))}` : `실제 대기 · 준비 ${r.prepareSec}초 제외`),
+      ? `실제 ${esc(fmtSec(r.realSec))} + 가상 STT ${esc(fmtSec(r.virtualSttSec))}${r.virtualDeidentSec ? ` + 가상 비식별 ${esc(fmtSec(r.virtualDeidentSec))}` : ''}`
+      : `실제 대기 · 준비 ${r.prepareSec}초 제외`),
     tile('평균 처리 시간', esc(fmtMs(r.avgMs)), r.fastForward ? '건당 확보 ~ 저장 (STT 가상)' : '건당 확보 ~ 저장'),
     tile('TPS', fmtTps(r.tps), r.fastForward === undefined ? '성공 건수 ÷ 총 소요' : '처리 건수 ÷ 총 소요'),
     tile('전체 / 성공 / 실패 / 타임아웃',
@@ -2830,12 +2892,16 @@ function pfRenderReport(r) {
       b(!dup.length, `T2 단계 중복 ${dup.length ? esc(dup.join(',')) : '없음'}`),
       b(c.t4Rows === c.t4Expected, `T4 ${c.t4Rows}행 = 처리 ${c.t4Expected}건`),
       b(c.t1Success === c.t4Success, `T1 성공 ${c.t1Success} = T4 SUCCESS ${c.t4Success}`),
+      c.t5Expected === undefined ? '' : b(c.t5Rows === c.t5Expected, `T5 ${c.t5Rows}행 = 비식별 통과 ${c.t5Expected}건`
+        + (c.t5BySolution && Object.keys(c.t5BySolution).length ? ` (${Object.entries(c.t5BySolution).map(([k, v]) => `${k === 'AIR' ? 'DEIDENT_SUCCESS' : k === 'BYPASS' ? 'SEND' : k} ${v}`).join(' · ')})` : '')),
     ].join(' ');
   }
   const data = r.meetCount !== undefined
     ? `접견 ${r.meetCount} · 전화 ${r.phoneCount}건 (기 STT ${r.sttPercent}% → ${r.sourceSttPhones ?? 0}건)` : `${r.count}건`;
   const mode = r.fastForward === undefined ? '' : (r.fastForward ? '고속 모드' : '실제 대기 모드');
-  const cond = [esc(r.scenario), data, `워커 ${r.concurrency}`, `건당 STT ${esc(latText(r.latency))}`, mode,
+  const deidTxt = r.deidentEnabled === undefined ? '' : (r.deidentEnabled
+    ? `비식별 수행(건당 ${esc(fmtMs(r.latency?.deidentMs ?? 0))})` : '비식별 끔(단순 전달)');
+  const cond = [esc(r.scenario), data, `워커 ${r.concurrency}`, `건당 STT ${esc(latText(r.latency))}`, mode, deidTxt,
     `타임아웃 ${r.sttTimeoutMs ? fmtMs(r.sttTimeoutMs) : '없음'}`, `STT ${esc(r.sttMode)}`,
     `조회 ${esc(m.source)} · 브로커 ${esc(m.broker)} · 복호화 ${esc(m.decrypt)}`, esc(r.db || '')].join(' · ');
   const cl = r.cleanup || {};
@@ -2896,7 +2962,8 @@ function pfRenderHistory() {
       <td class="text-end">${x.heap?.peakMb ?? ''}</td>
       <td class="text-end">${x.hikari?.peak ?? ''}</td>
       <td><span class="vf-b ${esc(x.execStsCd || 'x')}">${esc(x.execStsCd || '—')}</span> ${pfCheckBadge(x.checks)}
-        <span class="vf-b x" title="${x.fastForward ? `실제 ${fmtSec(x.realSec)} + 가상 STT ${fmtSec(x.virtualSttSec)}` : '실제로 기다림'}">${x.fastForward ? '고속' : '실제'}</span></td>
+        <span class="vf-b x" title="${x.fastForward ? `실제 ${fmtSec(x.realSec)} + 가상 STT ${fmtSec(x.virtualSttSec)}` : '실제로 기다림'}">${x.fastForward ? '고속' : '실제'}</span>
+        ${x.deidentEnabled === undefined ? '' : `<span class="vf-b ${x.deidentEnabled ? 'SUCCESS' : 'x'}">${x.deidentEnabled ? '비식별' : '전달'}</span>`}</td>
       <td class="font-monospace">${esc(x.execId || '')}</td></tr>`).join('');
 }
 
@@ -2981,6 +3048,8 @@ function rpRequest() {
     startWorkers: pfNum('rp-w0'), stepMode: $('rp-smode').value, stepValue: pfNum('rp-svalue'), maxWorkers: pfNum('rp-max'),
     patience: pfNum('rp-patience'), acquireLimitSec: pfNum('rp-acq') ?? 0, stopOnSttError: $('rp-sttstop').checked,
     realSleep: $('rp-real').checked,
+    deidentEnabled: deidOn(),
+    deidentLatencyMs: pfNum('rp-deid-ms') ?? 0,
   };
 }
 
@@ -2991,8 +3060,9 @@ function rpPlanPreview() {
   if (PF_INFO?.sttMode !== 'NPU' && n) {
     const sec = plan.reduce((s, w) => s + sttEstimateSec(q.meetCount || 0, q.phoneCount || 0, q.sttPercent, w, q.latencyMode,
       q.meetLatencyMs || 0, q.phoneLatencyMs || 0, q.jitterPercent, q.sttTimeoutMs), 0);
+    const dsum = plan.reduce((s2, w) => s2 + deidEstimateSec(n, w, q.deidentEnabled, q.deidentLatencyMs), 0);
     est = q.realSleep
-      ? ` · 실제 대기 모드 — 전 단계를 다 돌면 STT 대기만 약 ${fmtSec(sec)} (조기 종료되면 더 짧다 · 확보·복호화·준비 시간 별도)`
+      ? ` · 실제 대기 모드 — 전 단계를 다 돌면 STT 대기만 약 ${fmtSec(sec)}${q.deidentEnabled ? ` · 비식별 약 ${fmtSec(dsum)}` : ''} (조기 종료되면 더 짧다 · 확보·복호화·준비 시간 별도)`
       : ` · 고속 모드 — STT 를 기다리지 않습니다(실제 소요는 파이프라인 시간뿐). 단계마다 가상 STT 시간을 리포트에 더합니다`;
   }
   $('rp-plan').innerHTML = `계획 — 워커 <b>${plan.join(' → ')}</b> (${plan.length}단계${plan.length > 20 ? ' · 20단계 초과 — 줄이십시오' : ''})`
@@ -3022,6 +3092,7 @@ async function rpStart() {
       <li><span class="lbl">STT:</span> <b>${esc(i.sttMode || '?')}</b>${i.sttMode === 'NPU' ? ' — 실제 NPU 로 요청이 갑니다'
           : ` · ${esc(latText({ mode:req.latencyMode, meetMs:req.meetLatencyMs, phoneMs:req.phoneLatencyMs, jitterPercent:req.jitterPercent }))}`
             + ` · 타임아웃 ${req.sttTimeoutMs ? fmtMs(req.sttTimeoutMs) : '없음'} · <b>${req.realSleep ? '실제 대기 모드' : '고속 모드'}</b>`}</li>
+      <li><span class="lbl">비식별:</span> ${req.deidentEnabled ? `<b>수행</b> — 건당 ${fmtMs(req.deidentLatencyMs)} · T5 DEIDENT_SUCCESS` : '<b>단순 전달</b> — 비식별 연산 생략 · T5 SEND'}</li>
       <li><span class="lbl">조기 종료:</span> 최저 응답 뒤 ${req.patience}회 연속 개선 없음 · XVARM 확보 대기
         ${req.acquireLimitSec ? req.acquireLimitSec + '초 초과' : '(보지 않음)'} · STT 에러·타임아웃 ${req.stopOnSttError ? '즉시 중단' : '무시'}</li>
       <li><span class="lbl">단계마다:</span> 로컬 산출물 정리 → SIM ${req.meetCount + req.phoneCount}건 생성 → 측정 → 검증. 끝나면 SIM 자동 삭제</li>
@@ -3311,6 +3382,12 @@ document.querySelectorAll('.rp-preset').forEach(b => { b.onclick = () => rpApply
   ['input', 'change'].forEach(ev => $(id).addEventListener(ev, () => { rpSyncInputs(); rpPlanPreview(); }));
 });
 $('pf-real').addEventListener('change', pfEstimate);
+$('deid-on').addEventListener('change', () => {
+  deidSync(); pfEstimate(); rpPlanPreview();
+  log(`비식별화 수행 — ${deidOn() ? '켬(시뮬레이터 요청 deidentEnabled=true · 커넥터가 개인정보를 마스킹 · T5 DEIDENT_SUCCESS)' : '끔(deidentEnabled=false · 단순 전달 · T5 SEND)'}`, 'hd');
+});
+['pf-deid-ms', 'rp-deid-ms'].forEach(id => ['input', 'change'].forEach(ev => $(id).addEventListener(ev, () => { pfEstimate(); rpPlanPreview(); })));
+deidSync();
 $('rp-real').addEventListener('change', rpPlanPreview);
 $('pf-start').onclick = pfStart;
 $('pf-cancel').onclick = pfCancel;

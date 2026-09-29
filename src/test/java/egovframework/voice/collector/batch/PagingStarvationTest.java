@@ -70,7 +70,7 @@ class PagingStarvationTest {
         int total = 0;
         int runs = 0;
         while (runs < 10) {
-            VoiceBatchResult r = batches.onDemand(null, true, null);
+            VoiceBatchResult r = batches.onDemand(null, true, null, null);
             runs++;
             assertThat(r.failCnt()).isZero();
             if (r.successCnt() == 0) {
@@ -88,7 +88,7 @@ class PagingStarvationTest {
     @Test
     @DisplayName("미처리 건수도 뒤쪽을 본다 — 앞쪽 3건이 끝났다고 '0건 · 생성할까요?' 를 묻지 않는다")
     void pendingCountLooksPastProcessedRows() {
-        batches.onDemand(null, true, null);   // 앞쪽 3건 처리
+        batches.onDemand(null, true, null, null);   // 앞쪽 3건 처리
 
         Map<String, Object> p = batches.pending("on-demand", null, null, true);
 

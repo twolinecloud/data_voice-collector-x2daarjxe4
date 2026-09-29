@@ -1,6 +1,7 @@
 package egovframework.voice.collector.controller;
 
 import egovframework.voice.collector.batch.IdempotencyGuard;
+import egovframework.voice.collector.batch.ResumeMode;
 import egovframework.voice.collector.batch.VoiceBatchResult;
 import egovframework.voice.collector.batch.VoiceBatchScheduler;
 import egovframework.voice.collector.batch.VoiceCollectService;
@@ -45,6 +46,10 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class VoiceBatchController {
 
+    /** 화면·API 로 돌리는 배치의 워커 수 — 스케줄 배치와 같은 설정({@code voice.batch.concurrency}, 운영 1). */
+    @org.springframework.beans.factory.annotation.Value("${voice.batch.concurrency:1}")
+    private int batchConcurrency;
+
     private final VoiceCollectService service;
     private final VoiceBatchScheduler scheduler;
     private final egovframework.voice.collector.batch.BatchProgress progress;
@@ -87,8 +92,11 @@ public class VoiceBatchController {
                     """)
     @PostMapping("/batches/daily")
     public VoiceBatchResult daily(@RequestParam(required = false) List<VoiceKind> kinds,
-                                  @RequestParam(defaultValue = "false") boolean test) {
-        return service.run(BatchWindow.daily(LocalDateTime.now()), kinds, "MANUAL", test);
+                                  @RequestParam(defaultValue = "false") boolean test,
+            @io.swagger.v3.oas.annotations.Parameter(description = "비식별 수행 여부 — true 수행 / false 단순 전달(SEND). 비우면 설정값(기본 false)")
+            @RequestParam(required = false) Boolean deidentEnabled) {
+        return service.run(BatchWindow.daily(LocalDateTime.now()), kinds, "MANUAL", test, ResumeMode.FULL, null,
+                batchConcurrency, deidentEnabled);
     }
 
     @Operation(summary = "주기배치 실행",
@@ -103,9 +111,11 @@ public class VoiceBatchController {
                     """)
     @PostMapping("/batches/periodic")
     public VoiceBatchResult periodic(@RequestParam(required = false) List<VoiceKind> kinds,
-                                     @RequestParam(defaultValue = "false") boolean test) {
+                                     @RequestParam(defaultValue = "false") boolean test,
+            @io.swagger.v3.oas.annotations.Parameter(description = "비식별 수행 여부 — true 수행 / false 단순 전달(SEND). 비우면 설정값(기본 false)")
+            @RequestParam(required = false) Boolean deidentEnabled) {
         return service.run(BatchWindow.periodic(LocalDateTime.now(), props.batch().periodicLagMin()),
-                kinds, "MANUAL", test);
+                kinds, "MANUAL", test, ResumeMode.FULL, null, batchConcurrency, deidentEnabled);
     }
 
     @Operation(summary = "단계별 장애 주입 설정",
@@ -149,7 +159,11 @@ public class VoiceBatchController {
                     |---|---|---|
                     | `FULL` | 수집부터 전부 | 없음 |
                     | `FROM_ANALYZE` | STT 부터 | `{ROOT}/xvram/decoding/decrypted_*` |
-                    | `FROM_SEND` | 최종 저장부터 | `{ROOT}/stt_temp/{execId}/*.json` |
+                    | `FROM_DEIDENT` | 비식별부터 → 최종 저장 | `{ROOT}/stt_temp/{execId}/*.json` |
+                    | `FROM_SEND` | 최종 저장부터(= `FROM_DEIDENT` — 비식별된 텍스트는 보존하지 않아 비식별을 다시 지남) | `{ROOT}/stt_temp/{execId}/*.json` |
+
+                    **비식별 단계에서 깨진 건**은 `FROM_DEIDENT` 로 잇습니다. 재시도의 `deidentEnabled` 를 따릅니다 —
+                    `false` 면 비식별을 다시 하지 않고 보존된 전사를 **단순 전달(SEND)** 로 최종 저장까지 마감합니다.
 
                     **보존물이 없으면 앞 단계로 내려갑니다.** 이어서 하기는 빠른 길이지 유일한 길이 아니라,
                     `voice.resume.keep-on-failure=false` 인 환경에서도 재처리가 그대로 동작합니다.
@@ -159,18 +173,20 @@ public class VoiceBatchController {
                     """)
     @PostMapping("/batches/resume")
     public VoiceBatchResult resume(
-            @RequestParam(defaultValue = "FROM_ANALYZE") egovframework.voice.collector.batch.ResumeMode resume,
+            @RequestParam(defaultValue = "FROM_ANALYZE") ResumeMode resume,
             @RequestParam(required = false) String fromExecId,
             @RequestParam(required = false) List<VoiceKind> kinds,
             @RequestParam(defaultValue = "false") boolean test,
-            @RequestParam(defaultValue = "2880") int lookbackMin) {
+            @RequestParam(defaultValue = "2880") int lookbackMin,
+            @io.swagger.v3.oas.annotations.Parameter(description = "비식별 수행 여부 — true 수행 / false 단순 전달(SEND). 비우면 설정값(기본 false)")
+            @RequestParam(required = false) Boolean deidentEnabled) {
         LocalDateTime now = LocalDateTime.now();
         // 재처리는 실패한 건을 다시 잡아야 하므로 창을 넉넉히 연다. 기본 이틀치 —
         //   주기 창(20분)으로 잡으면 조금 전에 깨진 건도 이미 창 밖이고, 하루치로 잡으면
         //   일배치 픽스처의 첫 건(어제 00:00:00)이 24시간을 넘겨 빠진다.
         BatchWindow window = BatchWindow.manual(now.minusMinutes(Math.max(1, lookbackMin)), now.plusMinutes(1));
         log.info("[Batch] 재처리 — resume={} fromExecId={} 창=[{} ~ {})", resume, fromExecId, window.from(), window.to());
-        return service.run(window, kinds, "RESUME", test, resume, fromExecId);
+        return service.run(window, kinds, "RESUME", test, resume, fromExecId, batchConcurrency, deidentEnabled);
     }
 
     @Operation(summary = "중간 산출물 현황",
@@ -216,13 +232,15 @@ public class VoiceBatchController {
     @PostMapping("/batches/on-demand")
     public VoiceBatchResult onDemand(@RequestParam(required = false) List<VoiceKind> kinds,
                                      @RequestParam(defaultValue = "false") boolean test,
-                                     @RequestParam(required = false) Integer lookbackDays) {
+                                     @RequestParam(required = false) Integer lookbackDays,
+            @io.swagger.v3.oas.annotations.Parameter(description = "비식별 수행 여부 — true 수행 / false 단순 전달(SEND). 비우면 설정값(기본 false)")
+            @RequestParam(required = false) Boolean deidentEnabled) {
         LogCollectorClient.Watermark wm = watermark(test);
         BatchWindow w = BatchWindow.onDemand(LocalDateTime.now(), wm == null ? null : wm.at(), lookbackOr(lookbackDays));
         log.info("[Batch] 바로 실행 — 구간 {} (시작점: {})", w, wm != null
                 ? "DB 워터마크 " + wm.at() + " · " + wm.execId()
                 : "워터마크 없음 → 최근 " + lookbackOr(lookbackDays) + "일");
-        return service.run(w, kinds, "ON_DEMAND", test);
+        return service.run(w, kinds, "ON_DEMAND", test, ResumeMode.FULL, null, batchConcurrency, deidentEnabled);
     }
 
     /**
@@ -369,8 +387,11 @@ public class VoiceBatchController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
             @RequestParam(required = false) List<VoiceKind> kinds,
-            @RequestParam(defaultValue = "false") boolean test) {
-        return service.run(BatchWindow.manual(from, to), kinds, "MANUAL", test);
+            @RequestParam(defaultValue = "false") boolean test,
+            @io.swagger.v3.oas.annotations.Parameter(description = "비식별 수행 여부 — true 수행 / false 단순 전달(SEND). 비우면 설정값(기본 false)")
+            @RequestParam(required = false) Boolean deidentEnabled) {
+        return service.run(BatchWindow.manual(from, to), kinds, "MANUAL", test, ResumeMode.FULL, null,
+                batchConcurrency, deidentEnabled);
     }
 
     @Operation(summary = "현재 구성 조회",

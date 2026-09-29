@@ -89,6 +89,8 @@ public class VoiceCollectService {
     private final StageFaultState stageFault;
     private final egovframework.voice.collector.stt.SttTempStore sttTemp;
     private final PerfStageMeter meter;
+    /** 성능 시험의 건당 비식별 처리 시간 — 평소에는 0 이라 아무것도 하지 않는다. */
+    private final egovframework.voice.collector.transfer.DeidentLoad deidentLoad;
 
     /**
      * 건을 동시에 처리할 워커 수 — <b>운영 기본은 1(순차)</b>.
@@ -151,8 +153,21 @@ public class VoiceCollectService {
      */
     public VoiceBatchResult run(BatchWindow window, List<VoiceKind> kinds, String triggerBy, boolean testRun,
                                 ResumeMode resume, String fromExecId, int concurrency) {
+        return run(window, kinds, triggerBy, testRun, resume, fromExecId, concurrency, null);
+    }
+
+    /**
+     * 배치를 1회 실행한다 — 비식별 여부까지 정해서.
+     *
+     * @param deidentEnabled 비식별 커넥터에 넘길 값. {@code true} 면 비식별 수행, {@code false} 면 단순 전달(SEND).
+     *                       비우면 설정 {@code agent-connector.deidentification-enabled}(기본 false).
+     *                       어느 쪽이든 DEIDENT 단계를 거친다 — T2 에 DEIDENT 행이, T5 가 파일마다 남는다
+     */
+    public VoiceBatchResult run(BatchWindow window, List<VoiceKind> kinds, String triggerBy, boolean testRun,
+                                ResumeMode resume, String fromExecId, int concurrency, Boolean deidentEnabled) {
         long startedAt = System.currentTimeMillis();
         int workers = Math.max(1, concurrency);
+        boolean deident = deidentEnabled != null ? deidentEnabled : agentConnector.defaultDeidentEnabled();
         List<VoiceKind> targets = (kinds == null || kinds.isEmpty())
                 ? List.of(VoiceKind.MEET, VoiceKind.PHONE) : kinds;
 
@@ -176,6 +191,8 @@ public class VoiceCollectService {
         // ── T2 ① COLLECT — 파일 확보·복호화. 배치 시작에 연다 ────────────────────
         RunContext ctx = new RunContext(execId);
         ctx.fromExecId = fromExecId;
+        ctx.deidentEnabled = deident;
+        log.info("[Batch]   비식별 — {}", deident ? "수행(deidentEnabled=true · T5 AIR)" : "단순 전달(deidentEnabled=false · T5 BYPASS→SEND)");
         ctx.collectStepId = logCollector.createStep(execId, (short) 1, FileProcOutcome.STEP_COLLECT);
 
         List<VoiceTarget> found = findTargets(window, targets);
@@ -227,7 +244,7 @@ public class VoiceCollectService {
         int fail = outcomes.size() - success - skipped;
 
         // ── T2 마감 — COLLECT 는 확보 건수로, ANALYZE 는 STT 건수로 ───────────────
-        List<VoiceBatchResult.StepLog> steps = new ArrayList<>(3);
+        List<VoiceBatchResult.StepLog> steps = new ArrayList<>(4);
         long collectIn = outcomes.size() - skipped;
         long collectErr = outcomes.stream().filter(o -> o.failedAt(FileProcOutcome.STEP_COLLECT)).count();
         long collectOut = collectIn - collectErr;
@@ -241,17 +258,25 @@ public class VoiceCollectService {
             steps.add(finishStep(ctx.analyzeStepId, FileProcOutcome.STEP_ANALYZE,
                     collectOut, collectOut - analyzeErr, analyzeErr, ctx.analyzeMs));
         }
-        // SEND — STT 를 통과한 건이 한 번이라도 저장을 시도했을 때만 행이 있다.
+        // DEIDENT — STT 를 통과한 건이 한 번이라도 비식별 커넥터에 닿았으면 행이 있다.
+        //   비식별을 끈(단순 전달) 배치도 이 단계를 거친다 — 무엇을 했는지는 T5 의 solution_cd(AIR/BYPASS)가 가른다.
+        long deidentIn = collectOut - analyzeErr;
+        long deidentErr = outcomes.stream().filter(o -> o.failedAt(FileProcOutcome.STEP_DEIDENT)).count();
+        if (ctx.deidentStarted) {
+            steps.add(finishStep(ctx.deidentStepId, FileProcOutcome.STEP_DEIDENT,
+                    deidentIn, deidentIn - deidentErr, deidentErr, ctx.deidentMs));
+        }
+        // SEND — 비식별을 통과한 건이 한 번이라도 저장을 시도했을 때만 행이 있다.
         if (ctx.sendStarted) {
             long sendErr = outcomes.stream().filter(o -> o.failedAt(FileProcOutcome.STEP_SEND)).count();
             steps.add(finishStep(ctx.sendStepId, FileProcOutcome.STEP_SEND,
-                    collectOut - analyzeErr, success, sendErr, ctx.sendMs));
+                    deidentIn - deidentErr, success, sendErr, ctx.sendMs));
         }
 
         // ── 이관 — 1차 저장({ROOT}/xenon/…)이 끝난 뒤 에이전트 커넥터로 넘긴다 ──────────
         //   실패해도 배치를 실패로 돌리지 않는다. 우리 구간의 산출물은 이미 디스크에 있고,
         //   못 넘긴 것은 폴더를 보고 다시 넘기면 된다 — 이관 때문에 STT 를 다시 도는 것은 낭비다.
-        var transfer = agentConnector.send(execId, ctx.toTransfer);
+        var transfer = agentConnector.send(execId, ctx.toTransfer, ctx.deidentEnabled);
         if (transfer.enabled() && !transfer.success()) {
             log.warn("[Batch] 커넥터 이관 미완료 — execId={} {} (1차 저장은 정상)", execId, transfer.message());
         }
@@ -350,11 +375,16 @@ public class VoiceCollectService {
         String fromExecId;
         String collectStepId;
         String analyzeStepId;
+        String deidentStepId;
         String sendStepId;
         boolean analyzeStarted;
+        boolean deidentStarted;
         boolean sendStarted;
+        /** 이번 배치의 비식별 여부 — 커넥터에 그대로 넘긴다. */
+        boolean deidentEnabled;
         long collectMs;
         long analyzeMs;
+        long deidentMs;
         long sendMs;
         /** 이관에 넘길 산출물 — 1차 저장이 끝난 건만 담는다. 동시 처리에서는 여러 워커가 넣는다. */
         final List<egovframework.voice.collector.transfer.AgentConnectorClient.Output> toTransfer =
@@ -373,6 +403,10 @@ public class VoiceCollectService {
             analyzeMs += ms;
         }
 
+        synchronized void addDeident(long ms) {
+            deidentMs += ms;
+        }
+
         synchronized void addSend(long ms) {
             sendMs += ms;
         }
@@ -381,6 +415,7 @@ public class VoiceCollectService {
         synchronized void capElapsed(long wallMs) {
             collectMs = Math.min(collectMs, wallMs);
             analyzeMs = Math.min(analyzeMs, wallMs);
+            deidentMs = Math.min(deidentMs, wallMs);
             sendMs = Math.min(sendMs, wallMs);
         }
     }
@@ -420,6 +455,19 @@ public class VoiceCollectService {
             ctx.analyzeStepId = logCollector.createStep(ctx.execId, (short) 2, FileProcOutcome.STEP_ANALYZE);
         }
         log.info("[Batch] T2 ANALYZE 시작 — stepLogId={}", ctx.analyzeStepId == null ? "(미연동)" : ctx.analyzeStepId);
+    }
+
+    /** DEIDENT 단계를 연다 — 첫 비식별 호출 직전에 한 번. 비정형 체인의 3번 칸이다. */
+    private void beginDeident(RunContext ctx) {
+        synchronized (ctx) {
+            if (ctx.deidentStarted) {
+                return;
+            }
+            ctx.deidentStarted = true;
+            ctx.deidentStepId = logCollector.createStep(ctx.execId, (short) 3, FileProcOutcome.STEP_DEIDENT);
+        }
+        log.info("[Batch] T2 DEIDENT 시작 — stepLogId={} ({})", ctx.deidentStepId == null ? "(미연동)" : ctx.deidentStepId,
+                ctx.deidentEnabled ? "비식별 수행" : "단순 전달");
     }
 
     /** SEND 단계를 연다 — 첫 출력 저장 직전에 한 번. ANALYZE 와 같은 방식이다. */
@@ -611,15 +659,17 @@ public class VoiceCollectService {
             long fileSize = 0L;
             VoiceFile plain = null;
 
-            // ── SEND 부터 이어서 — 보존된 전사 결과를 찾는다 ──────────────────────
-            if (resume == ResumeMode.FROM_SEND) {
+            // ── 비식별(·저장)부터 이어서 — 보존된 전사 결과를 찾는다 ──────────────────
+            //   비식별된 텍스트는 보존하지 않으므로(PII 잔재) 전사에서 다시 DEIDENT 를 지난다 — 그때의
+            //   deidentEnabled 를 따른다. 앞 회차가 비식별에서 깨졌어도 지금 false 면 단순 전달로 마감한다.
+            if (resume.fromTranscript()) {
                 stt = sttTemp.find(target, ctx.fromExecId).orElse(null);
                 if (stt == null) {
                     log.info("[Resume] 보존된 전사 결과가 없다 — {} · STT 부터 다시 한다", target.shortId());
                     resume = ResumeMode.FROM_ANALYZE;
                 } else {
-                    log.info("[Resume] 전사 결과 재사용 — {} ({}자) · 수집·복호화·STT 생략",
-                            target.shortId(), stt.charCount());
+                    log.info("[Resume] 전사 결과 재사용 — {} ({}자) · 수집·복호화·STT 생략 → 비식별({})",
+                            target.shortId(), stt.charCount(), ctx.deidentEnabled ? "수행" : "단순 전달");
                 }
             }
 
@@ -698,6 +748,33 @@ public class VoiceCollectService {
             long tAnalyzed = System.currentTimeMillis();
             ctx.addAnalyze(tAnalyzed - tCollected);
 
+            // ── DEIDENT — 비식별 커넥터(비식별 수행 / 단순 전달) ─────────────────────
+            step = FileProcOutcome.STEP_DEIDENT;
+            beginDeident(ctx);
+            if (stageFault.shouldFail(StageFaultState.Stage.DEIDENT)) {
+                throw StageFaultState.fault(StageFaultState.Stage.DEIDENT, "비식별 커넥터 실패(500/Timeout) 주입");
+            }
+            long mDeid = meter.start();
+            egovframework.voice.collector.transfer.AgentConnectorClient.DeidentResult deid;
+            try {
+                if (ctx.deidentEnabled) {
+                    deidentLoad.simulate(meter, progress);   // 성능 시험의 건당 비식별 처리 시간(평소 0)
+                }
+                deid = agentConnector.deident(ctx.execId, target.kind(), target.idempotencyKey(),
+                        pidGenerator.of(target.corrNo()), target.srcFileName(), stt.text(), ctx.deidentEnabled);
+            } catch (RuntimeException e) {
+                if (!progress.isCancelRequested()) {
+                    meter.error(PerfStage.DEIDENT);
+                }
+                throw e;
+            } finally {
+                meter.add(PerfStage.DEIDENT, mDeid);
+            }
+            // 비식별된 텍스트로 — 구간 텍스트까지 바꾼다(단순 전달이면 그대로)
+            SttResult outText = stt.withText(deid.text());
+            long tDeidented = System.currentTimeMillis();
+            ctx.addDeident(tDeidented - tAnalyzed);
+
             // ── SEND — 최종 저장(PV) ──────────────────────────────────────────
             step = FileProcOutcome.STEP_SEND;
             beginSend(ctx);
@@ -706,18 +783,19 @@ public class VoiceCollectService {
                         "최종 저장 실패(Disk Full / IOException) 주입");
             }
             long mSave = meter.start();
-            SttOutputStore.Saved saved = outputStore.save(ctx.execId, target, stt, fileSize);
+            SttOutputStore.Saved saved = outputStore.save(ctx.execId, target, outText, fileSize);
             meter.add(PerfStage.SAVE, mSave);
-            ctx.addSend(System.currentTimeMillis() - tAnalyzed);
+            ctx.addSend(System.currentTimeMillis() - tDeidented);
             // 이관은 배치 끝에 한 번에 넘긴다 — 건마다 부르면 커넥터가 죽어 있을 때 건당 대기가 쌓인다.
+            //   sendId 는 비식별 단계가 남긴 T5 — 커넥터가 적재하면서 그 행의 전송 상태를 닫는다.
             ctx.toTransfer.add(new egovframework.voice.collector.transfer.AgentConnectorClient.Output(
-                    target.kind(), saved.textFile().getFileName().toString(), stt.text()));
+                    target.kind(), saved.textFile().getFileName().toString(), outText.text(), deid.sendId()));
 
             // 끝까지 갔다 — 중간 산출물은 더 필요 없다.
             sttTemp.discardAnywhere(target);
             idempotency.markProcessed(target);
             ok = true;
-            return FileProcOutcome.success(target, fileSize, stt.charCount(),
+            return FileProcOutcome.success(target, fileSize, outText.charCount(),
                     saved.textFile().toString().replace('\\', '/'), System.currentTimeMillis() - t0);
 
         } catch (Exception e) {
@@ -729,6 +807,8 @@ public class VoiceCollectService {
                 ctx.addCollect(ms);
             } else if (FileProcOutcome.STEP_SEND.equals(step)) {
                 ctx.addSend(ms);
+            } else if (FileProcOutcome.STEP_DEIDENT.equals(step)) {
+                ctx.addDeident(ms);
             } else {
                 ctx.addAnalyze(ms);
             }
