@@ -38,6 +38,11 @@ public record FileProcOutcome(
      * 묶여 있어 "STT 는 됐는데 저장에서 깨진" 건과 "STT 자체가 깨진" 건을 T2 에서 구분할 수 없었다.</p>
      */
     public static final String STEP_SEND = "SEND";
+    /**
+     * 비식별 — STT 와 최종 저장 사이. 비식별 커넥터가 {@code deidentEnabled} 에 따라 비식별을 수행하거나
+     * 단순 전달(SEND)한다. 어느 쪽이든 이 단계를 거친다 — T2 에 DEIDENT 행이 늘 남고 T5 가 파일마다 남는다.
+     */
+    public static final String STEP_DEIDENT = "DEIDENT";
 
     public static FileProcOutcome success(VoiceTarget t, long size, int chars, String sttPath, long ms) {
         return new FileProcOutcome(t, ProcStatus.SUCCESS, null, null, size, chars, sttPath, ms);

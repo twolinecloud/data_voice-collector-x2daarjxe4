@@ -1,29 +1,26 @@
 package egovframework.voice.collector.batch;
 
 /**
- * 재처리를 <b>어느 단계부터</b> 이어서 할지.
+ * 재처리(Resume) 시작점 — 보존물이 없으면 앞 단계로 내려간다.
  *
- * <p>단계 구분은 T4 {@code STEP_TYPE_CD}(C05)와 같다 — COLLECT · ANALYZE · SEND.
- * 복호화는 별도 단계가 아니라 수집에 딸린 작업이라 {@code COLLECT} 안에 있다.</p>
- *
- * <p><b>보존물이 없으면 앞 단계부터 한다.</b> 이어서 하기는 <i>빠른 길</i>이지 <i>유일한 길</i>이
- * 아니다. {@code voice.resume.keep-on-failure=false} 로 중간 산출물을 남기지 않는 환경에서도
- * 재처리는 그대로 돌아야 하므로, 찾지 못하면 조용히 앞 단계로 내려간다(사유는 로그에 남는다).</p>
+ * <ul>
+ *   <li>{@link #FULL} — 수집부터 전부</li>
+ *   <li>{@link #FROM_ANALYZE} — STT 부터(보존된 복호화 오디오 {@code decrypted_*})</li>
+ *   <li>{@link #FROM_DEIDENT} — 비식별부터(보존된 전사 {@code stt_temp}). 비식별 단계에서 깨진 건을 잇는다.
+ *       <b>재시도 시점의 {@code deidentEnabled} 를 따른다</b> — 앞 회차가 비식별에서 깨졌어도 지금 {@code false} 면
+ *       비식별을 다시 하지 않고 단순 전달(SEND)로 최종 저장까지 마감한다</li>
+ *   <li>{@link #FROM_SEND} — 최종 저장부터(보존된 전사). 비식별 단계가 생긴 뒤로는 {@link #FROM_DEIDENT} 와 같다 —
+ *       비식별된 텍스트는 보존하지 않으므로(PII 잔재) 전사에서 비식별 단계를 다시 지난다</li>
+ * </ul>
  */
 public enum ResumeMode {
-
-    /** 처음부터 — 수집·복호화·STT·저장 전부. */
     FULL,
-
-    /**
-     * STT 부터 — 수집·복호화를 건너뛰고 보존된 복호화 오디오({@code {ROOT}/xvram/decoding})를 쓴다.
-     * 없으면 {@link #FULL} 로 내려간다.
-     */
     FROM_ANALYZE,
+    FROM_DEIDENT,
+    FROM_SEND;
 
-    /**
-     * 최종 저장부터 — 보존된 전사 결과({@code {ROOT}/stt_temp/{execId}})를 쓴다.
-     * 없으면 {@link #FROM_ANALYZE} 로, 그것도 없으면 {@link #FULL} 로 내려간다.
-     */
-    FROM_SEND
+    /** 보존된 전사(stt_temp)에서 시작하는가. */
+    public boolean fromTranscript() {
+        return this == FROM_DEIDENT || this == FROM_SEND;
+    }
 }

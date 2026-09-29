@@ -29,8 +29,8 @@ import java.util.stream.Stream;
  *
  * <p>여기서 세 가지를 같이 돌려준다.</p>
  * <ol>
- *   <li><b>DB</b> — 로그 컬렉터 {@code GET /api/v1/logs/batches/{execId}} 를 통해 T1·T2·T4.
- *       T5(비식별 전송)는 수집기가 쓰지 않아 보지 않는다.
+ *   <li><b>DB</b> — 로그 컬렉터 {@code GET /api/v1/logs/batches/{execId}} 를 통해 T1·T2·T4·T5.
+ *       T5 는 비식별 커넥터가 파일마다 남긴다 — 비식별 수행(AIR)·단순 전달(BYPASS) 어느 쪽이든.
  *       이 서비스는 로그 DB 에 직접 붙지 않는다(적재도 조회도 컬렉터 API 로만).</li>
  *   <li><b>PV 파일</b> — 복호화 보존물·전사 보존물·STT 결과 폴더의 존재와 파일 수.</li>
  *   <li><b>손으로 확인할 명령</b> — 위를 조회한 것과 같은 SQL 과 {@code ls}/{@code cat} 명령.
@@ -64,7 +64,7 @@ public class VerificationService {
 
     // ── DB ────────────────────────────────────────────────────────────────
 
-    /** DB(T1·T2·T4) 대조만 — 성능 시험이 끝난 뒤 정합성 점검에서도 쓴다. T5 는 수집기가 쓰지 않는다. */
+    /** DB(T1·T2·T4·T5) 대조만 — 성능 시험이 끝난 뒤 정합성 점검에서도 쓴다. */
     public Map<String, Object> db(String execId) {
         Map<String, Object> m = new LinkedHashMap<>();
         if (!logCollector.isEnabled()) {
@@ -116,6 +116,15 @@ public class VerificationService {
         t4.put("total", num(rc, "file_cnt"));
         t4.put("byStatus", counts(ss.path("fileByStatus")));
         m.put("t4", t4);
+        // T5 — 비식별 커넥터가 파일마다 남긴다. deident_sts_cd 는 C04(SUCCESS/FAIL), 무엇을 했는지는 solution_cd:
+        //   AIR = 비식별 수행(화면 DEIDENT_SUCCESS) · BYPASS = 단순 전달(화면 SEND). 전송 상태는 이관 적재가 닫는다.
+        Map<String, Object> t5 = new LinkedHashMap<>();
+        t5.put("total", num(rc, "send_cnt"));
+        t5.put("byStatus", counts(ss.path("sendByStatus")));
+        t5.put("deidentByStatus", counts(ss.path("deidentByStatus")));
+        t5.put("bySolution", counts(ss.path("deidentBySolution")));
+        t5.put("solutionSupported", !ss.path("deidentBySolution").isMissingNode());
+        m.put("t5", t5);
         // 컬렉터가 옛 버전이면 상태별 집계가 없다 — 건수만 보이고, 화면이 그 사실을 말한다
         m.put("statusSummarySupported", !ss.isMissingNode());
 
@@ -235,6 +244,16 @@ public class VerificationService {
                         + " WHERE exec_sts_cd = 'SUCCESS'\n"
                         + "   AND data_type_cd = 'UNSTRUCTURED'\n"
                         + "   AND job_id = (SELECT job_id FROM kcais.tb_batch_exec_log WHERE exec_id = '" + id + "');"));
+        l.add(cmd("T5 비식별·전송 — 파일별 (kcais.tb_deident_send_log · AIR=비식별 수행 / BYPASS=단순 전달)",
+                "SELECT rec_file_id, inmate_pid, solution_cd, deident_sts_cd, send_sts_cd, send_dtm\n"
+                        + "  FROM kcais.tb_deident_send_log\n"
+                        + " WHERE exec_id = '" + id + "'\n"
+                        + " ORDER BY rec_file_id;"));
+        l.add(cmd("T5 — 솔루션·전송 상태별 건수",
+                "SELECT solution_cd, send_sts_cd, COUNT(*)\n"
+                        + "  FROM kcais.tb_deident_send_log\n"
+                        + " WHERE exec_id = '" + id + "'\n"
+                        + " GROUP BY solution_cd, send_sts_cd;"));
         return l;
     }
 

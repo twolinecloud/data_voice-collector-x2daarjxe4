@@ -33,8 +33,8 @@ public class PerfStageMeter {
     private final Map<PerfStage, LongAdder> counts = new EnumMap<>(PerfStage.class);
     private final Map<PerfStage, AtomicLong> maxNanos = new EnumMap<>(PerfStage.class);
     private final Map<PerfStage, LongAdder> errors = new EnumMap<>(PerfStage.class);
-    /** 고속 모드에서 기다리지 않은 건별 STT 처리 시간(ms) — 리포트가 워커에 나눠 총 소요에 더한다. */
-    private final java.util.Queue<Long> virtualMs = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    /** 고속 모드에서 기다리지 않은 건별 처리 시간(ms) — 단계(STT·비식별)별. 리포트가 워커에 나눠 총 소요에 더한다. */
+    private final Map<PerfStage, java.util.Queue<Long>> virtualMs = new EnumMap<>(PerfStage.class);
     /** 지금 그 단계에 머물러 있는 스레드와 들어간 시각 — 한 스레드는 한 번에 한 건만 처리한다. */
     private final Map<PerfStage, Map<Thread, Long>> inFlight = new EnumMap<>(PerfStage.class);
 
@@ -45,6 +45,7 @@ public class PerfStageMeter {
             maxNanos.put(s, new AtomicLong());
             errors.put(s, new LongAdder());
             inFlight.put(s, new ConcurrentHashMap<>());
+            virtualMs.put(s, new java.util.concurrent.ConcurrentLinkedQueue<>());
         }
     }
 
@@ -57,7 +58,7 @@ public class PerfStageMeter {
             errors.get(s).reset();
             inFlight.get(s).clear();
         }
-        virtualMs.clear();
+        virtualMs.values().forEach(java.util.Queue::clear);
         active = true;
     }
 
@@ -105,14 +106,24 @@ public class PerfStageMeter {
 
     /** 고속 모드 — 이 건이 실제였다면 STT 에 썼을 시간(ms). */
     public void addVirtual(long ms) {
+        addVirtual(PerfStage.STT, ms);
+    }
+
+    /** 고속 모드 — 이 건이 실제였다면 그 단계에 썼을 시간(ms). */
+    public void addVirtual(PerfStage stage, long ms) {
         if (active) {
-            virtualMs.add(Math.max(0L, ms));
+            virtualMs.get(stage).add(Math.max(0L, ms));
         }
     }
 
     /** 고속 모드로 건너뛴 건별 STT 처리 시간(ms) — 적힌 순서대로. */
     public List<Long> virtualSttMs() {
-        return List.copyOf(virtualMs);
+        return virtualMs(PerfStage.STT);
+    }
+
+    /** 고속 모드로 건너뛴 그 단계의 건별 처리 시간(ms). */
+    public List<Long> virtualMs(PerfStage stage) {
+        return List.copyOf(virtualMs.get(stage));
     }
 
     public long errors(PerfStage stage) {

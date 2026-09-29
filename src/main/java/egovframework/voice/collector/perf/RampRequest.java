@@ -39,7 +39,10 @@ public record RampRequest(
         @Schema(description = "XVARM 확보 대기 한도(초) — 넘으면 즉시 멈춤. 0 이면 보지 않는다", example = "60")
         Integer acquireLimitSec,
         @Schema(description = "STT 에러·타임아웃이 나면 즉시 멈출지", example = "true") Boolean stopOnSttError,
-        @Schema(description = "실제 대기 모드 — 비우거나 false 면 고속 모드(가상 시간 합산)", example = "false") Boolean realSleep
+        @Schema(description = "실제 대기 모드 — 비우거나 false 면 고속 모드(가상 시간 합산)", example = "false") Boolean realSleep,
+        @Schema(description = "비식별 수행 여부 — true 수행 / false·비우면 단순 전달(SEND)", example = "false") Boolean deidentEnabled,
+        @Schema(description = "건당 비식별 처리 시간(ms) — 비식별 수행일 때만. 0~600,000, 기본 5,000", example = "5000")
+        Long deidentLatencyMs
 ) {
 
     public static final int MAX_WORKERS = 64;
@@ -66,12 +69,15 @@ public record RampRequest(
                 patience == null ? 3 : patience,
                 acquireLimitSec == null ? 60 : acquireLimitSec,
                 stopOnSttError == null ? Boolean.TRUE : stopOnSttError,
-                Boolean.TRUE.equals(realSleep));
+                Boolean.TRUE.equals(realSleep),
+                Boolean.TRUE.equals(deidentEnabled),
+                deidentLatencyMs == null ? PerfRequest.DEFAULT_DEIDENT_LATENCY_MS : deidentLatencyMs);
     }
 
     public void validate(int maxFilesPerRun) {
         PerfRequest.validateData(meetCount, phoneCount, sttPercent, maxFilesPerRun);
         PerfRequest.validateLoad(latencyMode, meetLatencyMs, phoneLatencyMs, jitterPercent, sttTimeoutMs);
+        PerfRequest.validateDeident(deidentLatencyMs);
         StepMode sm;
         try {
             sm = StepMode.valueOf(stepMode);

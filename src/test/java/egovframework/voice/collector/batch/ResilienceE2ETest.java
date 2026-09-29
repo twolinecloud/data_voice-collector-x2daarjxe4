@@ -261,17 +261,18 @@ class ResilienceE2ETest {
     }
 
     @Test
-    @DisplayName("T2 단계 요약 — STT 가 전부 실패하면 COLLECT 는 SUCCESS, ANALYZE 는 PARTIAL, SEND 는 통과분만")
+    @DisplayName("T2 단계 요약 — STT 가 전부 실패하면 COLLECT 는 SUCCESS, ANALYZE 는 PARTIAL, DEIDENT·SEND 는 통과분만")
     void stepSummaryReflectsWhereItFailed() {
         faultInjector.configure(true, 100, 0, 0L);
 
         VoiceBatchResult r = service.run(wide(), null, "TEST");
 
         assertThat(r.steps()).extracting(VoiceBatchResult.StepLog::stepTypeCd)
-                .containsExactly("COLLECT", "ANALYZE", "SEND");
+                .containsExactly("COLLECT", "ANALYZE", "DEIDENT", "SEND");
         VoiceBatchResult.StepLog collect = r.steps().get(0);
         VoiceBatchResult.StepLog analyze = r.steps().get(1);
-        VoiceBatchResult.StepLog send = r.steps().get(2);
+        VoiceBatchResult.StepLog deident = r.steps().get(2);
+        VoiceBatchResult.StepLog send = r.steps().get(3);
         assertThat(collect.stepStsCd()).isEqualTo("SUCCESS");
         assertThat(collect.inCnt()).isEqualTo(TOTAL);
         assertThat(collect.outCnt()).isEqualTo(TOTAL);
@@ -279,7 +280,11 @@ class ResilienceE2ETest {
         assertThat(analyze.outCnt()).isEqualTo(SOURCE_STT);
         assertThat(analyze.errCnt()).isEqualTo(STT_DEPENDENT);
         assertThat(analyze.stepStsCd()).isEqualTo("PARTIAL");
-        // STT 를 통과한 것만 저장 구간으로 넘어간다 — 저장 자체는 깨지지 않았으므로 SUCCESS
+        // STT 를 통과한 것만 비식별 구간으로 — 단순 전달이라 깨지지 않는다
+        assertThat(deident.inCnt()).isEqualTo(SOURCE_STT);
+        assertThat(deident.outCnt()).isEqualTo(SOURCE_STT);
+        assertThat(deident.stepStsCd()).isEqualTo("SUCCESS");
+        // 비식별을 통과한 것만 저장 구간으로 넘어간다 — 저장 자체는 깨지지 않았으므로 SUCCESS
         assertThat(send.inCnt()).isEqualTo(SOURCE_STT);
         assertThat(send.outCnt()).isEqualTo(SOURCE_STT);
         assertThat(send.errCnt()).isZero();

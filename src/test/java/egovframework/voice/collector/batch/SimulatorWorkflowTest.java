@@ -114,7 +114,7 @@ class SimulatorWorkflowTest {
         Map<String, Object> p = batches.pending("on-demand", null, null, true);
         assertThat(num(p, "pending")).as("어제 5+5 · 오늘 2+2").isEqualTo(14);
 
-        VoiceBatchResult r = batches.onDemand(null, true, null);
+        VoiceBatchResult r = batches.onDemand(null, true, null, null);
 
         assertThat(r.targetCnt()).isEqualTo(14);
         assertThat(r.successCnt()).isEqualTo(14);
@@ -127,7 +127,7 @@ class SimulatorWorkflowTest {
     void onDemandAfterDailyPicksUpTheRest() {
         service.run(BatchWindow.daily(LocalDateTime.now()), null, "TEST", true);
 
-        VoiceBatchResult r = batches.onDemand(null, true, null);
+        VoiceBatchResult r = batches.onDemand(null, true, null, null);
 
         assertThat(r.successCnt()).isEqualTo(4);
         assertThat(r.skippedCnt()).as("일배치가 끝낸 10건은 멱등으로 건너뜀").isEqualTo(10);

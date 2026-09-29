@@ -204,5 +204,8 @@ agent-connector:
   enabled: ${AGENT_CONNECTOR_ENABLED:true}
   # 비우면 환경 프리셋 — 로컬 http://localhost:8080 · K8s http://agent-connector-dp8qbi7xqh:8080
   base-url: ${AGENT_CONNECTOR_BASE_URL:}
-  # 비식별을 적용하지 않기로 한 결정 — 커넥터가 ADID/AIR 를 호출하지 않고 원본 그대로 적재한다.
+  # 비식별 기본값 — 배치가 건마다 비식별 커넥터(/api/v1/pipeline/deident/voice)에 넘기는 deidentEnabled.
+  #   false(기본) = 단순 전달(SEND): 비식별 연산을 건너뛰고 T5 에 solution_cd=BYPASS 로 남긴다
+  #   true        = 비식별 수행: 커넥터가 개인정보를 마스킹하고 T5 에 solution_cd=AIR 로 남긴다
+  #   어느 쪽이든 T2 에 DEIDENT 단계가, T5 에 파일마다 한 행이 남는다. 시뮬레이터·API 는 요청마다 덮어쓸 수 있다.
   deidentification-enabled: ${AGENT_DEID_ENABLED:false}

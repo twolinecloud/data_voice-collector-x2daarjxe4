@@ -73,4 +73,31 @@ public record SttResult(String text, String engine, double duration, boolean fro
     public boolean hasSegments() {
         return segments != null && !segments.isEmpty();
     }
+
+    /**
+     * 비식별된 텍스트로 바꾼 결과 — <b>구간 텍스트도 같이 바꾼다.</b>
+     *
+     * <p>전문만 바꾸고 구간을 두면 산출물 {@code transcript.segments[].text} 에 원문(성명·주민번호)이 그대로 남는다.
+     * 마스킹은 글자를 제자리에서 바꾸므로 줄 구성이 유지된다 — 줄 수가 구간 수와 같으면 줄마다 구간에 되돌려 넣고,
+     * 다르면(엔진이 줄을 합쳤다) 구간 텍스트를 비운다. 시각 정보는 남긴다.</p>
+     *
+     * <p>텍스트가 같으면(단순 전달) 자기 자신을 돌려준다.</p>
+     */
+    public SttResult withText(String replaced) {
+        if (replaced == null || replaced.equals(text)) {
+            return this;
+        }
+        List<Segment> segs = segments;
+        if (hasSegments()) {
+            String[] lines = replaced.split("\\R", -1);
+            java.util.List<Segment> out = new java.util.ArrayList<>(segments.size());
+            boolean aligned = lines.length == segments.size();
+            for (int i = 0; i < segments.size(); i++) {
+                Segment s = segments.get(i);
+                out.add(new Segment(s.id(), s.start(), s.end(), aligned ? lines[i] : ""));
+            }
+            segs = out;
+        }
+        return new SttResult(replaced, engine, duration, fromSource, language, segs);
+    }
 }

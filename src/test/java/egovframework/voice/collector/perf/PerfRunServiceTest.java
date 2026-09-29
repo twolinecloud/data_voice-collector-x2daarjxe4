@@ -50,6 +50,9 @@ class PerfRunServiceTest {
     private PerfRunService perf;
     @Autowired
     private SimulationDataService sim;
+    /** 테스트에는 비식별 커넥터가 없다 — 비식별 수행 호출만 흉내 낸다. */
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private egovframework.voice.collector.transfer.AgentConnectorClient agentConnector;
 
     @Test
     @DisplayName("기본 부하 — 접견 5 · 전화 5 · 기 STT 20% · 워커 2 — 전건 성공, 1건은 STT Bypass, SIM 은 지워지고 이력이 한 줄 남는다")
@@ -57,7 +60,7 @@ class PerfRunServiceTest {
     void basicRunEndToEnd() throws Exception {
         perf.clearHistory();
 
-        Map<String, Object> started = perf.start(new PerfRequest("A", 5, 5, 20, 2, "FIXED", 60L, 40L, null, null, true));   // 실제 대기 모드
+        Map<String, Object> started = perf.start(new PerfRequest("A", 5, 5, 20, 2, "FIXED", 60L, 40L, null, null, true, null, null));   // 실제 대기 모드
         assertThat(started.get("active")).isEqualTo(true);
         assertThat(started.get("kind")).isEqualTo("BASIC");
         // 도는 동안에는 두 번째(임계 시험도)를 받지 않는다
@@ -74,7 +77,7 @@ class PerfRunServiceTest {
 
         List<Map<String, Object>> stages = (List<Map<String, Object>>) r.get("stages");
         assertThat(stages).extracting(s -> s.get("key"))
-                .containsExactly("ACQUIRE", "DECRYPT", "FORMAT", "STT", "TEMP", "SAVE");
+                .containsExactly("ACQUIRE", "DECRYPT", "FORMAT", "STT", "TEMP", "DEIDENT", "SAVE");
         assertThat(((Number) stages.get(3).get("count")).intValue()).as("기 STT 1건은 STT 를 부르지 않는다").isEqualTo(9);
         assertThat((Double) stages.get(3).get("avgMs")).isGreaterThanOrEqualTo(40d);
         assertThat((Integer) ((Map<String, Object>) r.get("hikari")).get("peak")).isGreaterThanOrEqualTo(1);
@@ -97,7 +100,7 @@ class PerfRunServiceTest {
         perf.clearRampHistory();
 
         Map<String, Object> started = perf.startRamp(new RampRequest(3, 3, 0, "FIXED", 150L, 150L, null, null,
-                1, "MULTIPLY", 2, 4, 3, 0, true, null));
+                1, "MULTIPLY", 2, 4, 3, 0, true, null, null, null));
         assertThat(started.get("kind")).isEqualTo("RAMP");
         assertThat((List<Integer>) started.get("plan")).containsExactly(1, 2, 4);
 
@@ -125,7 +128,7 @@ class PerfRunServiceTest {
     @SuppressWarnings("unchecked")
     void rampStopsOnSttError() throws Exception {
         perf.startRamp(new RampRequest(3, 3, 0, "FIXED", 400L, 400L, null, 100L,
-                1, "MULTIPLY", 2, 8, 3, 0, true, null));
+                1, "MULTIPLY", 2, 8, 3, 0, true, null, null, null));
 
         Map<String, Object> cur = waitDone();
         Map<String, Object> r = (Map<String, Object>) cur.get("result");
@@ -140,7 +143,7 @@ class PerfRunServiceTest {
     @SuppressWarnings("unchecked")
     void fastForwardAddsVirtualSttTime() throws Exception {
         long t0 = System.currentTimeMillis();
-        perf.start(new PerfRequest("A", 4, 4, 0, 2, "FIXED", 100_000L, 100_000L, null, null, null));
+        perf.start(new PerfRequest("A", 4, 4, 0, 2, "FIXED", 100_000L, 100_000L, null, null, null, null, null));
         Map<String, Object> cur = waitDone();
         assertThat(System.currentTimeMillis() - t0).as("실제로 800초를 기다리지 않는다").isLessThan(60_000L);
 
@@ -160,12 +163,35 @@ class PerfRunServiceTest {
     @DisplayName("고속 모드 타임아웃 — 처리 시간 300초 > 타임아웃 200초면 기다리지 않고 전건 타임아웃 실패, 가상 시간은 타임아웃까지만")
     @SuppressWarnings("unchecked")
     void fastForwardTimeoutFailsImmediately() throws Exception {
-        perf.start(new PerfRequest("B", 2, 2, 0, 2, "FIXED", 300_000L, 300_000L, null, 200_000L, null));
+        perf.start(new PerfRequest("B", 2, 2, 0, 2, "FIXED", 300_000L, 300_000L, null, 200_000L, null, null, null));
         Map<String, Object> r = (Map<String, Object>) waitDone().get("result");
         assertThat(r.get("fail")).isEqualTo(4);
         assertThat(r.get("timeout")).isEqualTo(4L);
         assertThat(r.get("execStsCd")).isEqualTo("FAIL");
         assertThat((Double) r.get("virtualSttSec")).isEqualTo(400.0);   // 4건 × 200초 ÷ 워커 2
+    }
+
+    @Test
+    @DisplayName("비식별 수행 + 고속 모드 — 건당 가상 비식별 5초 × 4건 · 워커 2 = 가상 10초가 총 소요에 더해진다")
+    @SuppressWarnings("unchecked")
+    void fastForwardAddsVirtualDeidentTime() throws Exception {
+        org.mockito.Mockito.doAnswer(inv -> new egovframework.voice.collector.transfer.AgentConnectorClient.DeidentResult(
+                        inv.getArgument(5), "DEIDENT", "DEIDENT_SUCCESS", "AIR", null, false, 0, "stub"))
+                .when(agentConnector).deident(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.eq(true));
+
+        perf.start(new PerfRequest("A", 2, 2, 0, 2, "FIXED", 0L, 0L, null, null, null, true, 5_000L));
+        Map<String, Object> r = (Map<String, Object>) waitDone().get("result");
+
+        assertThat(r.get("success")).isEqualTo(4);
+        assertThat(r.get("deidentEnabled")).isEqualTo(true);
+        assertThat((Double) r.get("virtualDeidentSec")).isEqualTo(10.0);
+        assertThat((Double) r.get("totalSec")).isGreaterThanOrEqualTo(10.0);
+        Map<String, Object> deid = ((List<Map<String, Object>>) r.get("stages")).get(5);
+        assertThat(deid.get("key")).isEqualTo("DEIDENT");
+        assertThat((Double) deid.get("avgMs")).isGreaterThanOrEqualTo(5_000.0);
     }
 
     @Test
@@ -180,7 +206,7 @@ class PerfRunServiceTest {
     @Test
     @DisplayName("범위 밖이면 시작하지 않는다 — 합계 301건")
     void rejectsOutOfRange() {
-        assertThatThrownBy(() -> perf.start(new PerfRequest("A", 151, 150, 3, 4, "FIXED", 0L, 0L, null, null, null)))
+        assertThatThrownBy(() -> perf.start(new PerfRequest("A", 151, 150, 3, 4, "FIXED", 0L, 0L, null, null, null, null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

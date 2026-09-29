@@ -119,6 +119,7 @@ public class PerfRunService {
     private final SttOutputStore outputStore;
     private final VerificationService verification;
     private final MockSttLatency latency;
+    private final egovframework.voice.collector.transfer.DeidentLoad deidentLoad;
     private final PerfStageMeter meter;
     private final SourcePoolPeak poolPeak;
     private final VoiceDirState dirs;
@@ -144,16 +145,16 @@ public class PerfRunService {
 
     /** 건당 STT 처리 시간 — 두 요청이 같은 모양으로 넘긴다. {@code realSleep} 이 아니면 고속 모드다. */
     private record Load(MockSttLatency.Mode mode, long meetMs, long phoneMs, int jitterPercent, Long timeoutMs,
-                        boolean realSleep) {
+                        boolean realSleep, boolean deidentEnabled, long deidentMs) {
 
         static Load of(PerfRequest r) {
             return new Load(r.mode(), r.meetLatencyMs(), r.phoneLatencyMs(), r.jitterPercent(), r.sttTimeoutMs(),
-                    Boolean.TRUE.equals(r.realSleep()));
+                    Boolean.TRUE.equals(r.realSleep()), Boolean.TRUE.equals(r.deidentEnabled()), r.deidentLatencyMs());
         }
 
         static Load of(RampRequest r) {
             return new Load(r.mode(), r.meetLatencyMs(), r.phoneLatencyMs(), r.jitterPercent(), r.sttTimeoutMs(),
-                    Boolean.TRUE.equals(r.realSleep()));
+                    Boolean.TRUE.equals(r.realSleep()), Boolean.TRUE.equals(r.deidentEnabled()), r.deidentLatencyMs());
         }
 
         Map<String, Object> describe() {
@@ -163,6 +164,8 @@ public class PerfRunService {
             m.put("phoneMs", phoneMs);
             m.put("jitterPercent", jitterPercent);
             m.put("realSleep", realSleep);
+            m.put("deidentEnabled", deidentEnabled);
+            m.put("deidentMs", deidentEnabled ? deidentMs : 0L);
             return m;
         }
     }
@@ -174,7 +177,8 @@ public class PerfRunService {
     private record Measured(VoiceBatchResult result, long heapStart, long heapEnd, long heapPeak,
                             List<Map<String, Object>> stages, Map<String, Object> hikari,
                             double acquireMaxMs, long sttErrors, String earlyStop,
-                            boolean fastForward, int workers, List<Long> virtualSttMs) {}
+                            boolean fastForward, int workers, List<Long> virtualSttMs, List<Long> virtualDeidentMs,
+                            boolean deidentEnabled) {}
 
     /** 한 회차의 진행 상태 — 러너 스레드가 쓰고 API 스레드가 읽는다. */
     private static final class Run {
@@ -218,7 +222,7 @@ public class PerfRunService {
      * @throws IllegalStateException    이미 성능 시험이나 배치가 돌고 있다(409)
      */
     public synchronized Map<String, Object> start(PerfRequest raw) {
-        PerfRequest req = (raw == null ? new PerfRequest(null, null, null, null, null, null, null, null, null, null, null) : raw)
+        PerfRequest req = (raw == null ? new PerfRequest(null, null, null, null, null, null, null, null, null, null, null, null, null) : raw)
                 .withDefaults();
         req.validate(props.batch().maxFilesPerRun());
         ensureIdle();
@@ -231,7 +235,7 @@ public class PerfRunService {
     /** 임계 성능 시험(워커 램프업)을 시작한다 — 비동기. */
     public synchronized Map<String, Object> startRamp(RampRequest raw) {
         RampRequest req = (raw == null ? new RampRequest(null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null) : raw).withDefaults();
+                null, null, null, null, null, null, null, null, null, null) : raw).withDefaults();
         req.validate(props.batch().maxFilesPerRun());
         ensureIdle();
         Run run = new Run(LocalDateTime.now().format(RUN_ID), Kind.RAMP, req);
@@ -577,6 +581,8 @@ public class PerfRunService {
     private Measured measure(Load load, int workers, RampRequest guard, Run run) {
         latency.apply(load.mode(), load.meetMs(), load.phoneMs(), load.jitterPercent(),
                 load.timeoutMs() == null ? 0L : load.timeoutMs(), !load.realSleep());
+        // 건당 비식별 처리 시간 — 비식별을 수행할 때만(단순 전달은 무거운 연산이 없어 0ms)
+        deidentLoad.apply(load.deidentEnabled() ? load.deidentMs() : 0L, !load.realSleep());
         LocalDate today = LocalDate.now();
         BatchWindow window = BatchWindow.manual(today.minusDays(1).atStartOfDay(), today.atStartOfDay());
         List<MemoryPoolMXBean> heapPools = ManagementFactory.getMemoryPoolMXBeans().stream()
@@ -588,13 +594,14 @@ public class PerfRunService {
         VoiceBatchResult r;
         String early = null;
         try (Monitor mon = guard == null ? null : new Monitor(guard, run)) {
-            r = collect.run(window, null, "PERF", true, ResumeMode.FULL, null, workers);
+            r = collect.run(window, null, "PERF", true, ResumeMode.FULL, null, workers, load.deidentEnabled());
             if (mon != null) {
                 early = mon.reason();
             }
         } finally {
             meter.end();
             latency.clear();
+            deidentLoad.clear();
         }
         if (guard != null && early == null) {
             early = breach(guard);   // 반 초 사이에 끝난 건이 넘었을 수 있다
@@ -606,7 +613,7 @@ public class PerfRunService {
         }).sum();
         return new Measured(r, heapStart, heapEnd, heapPeak, meter.snapshot(), poolPeak.snapshot(),
                 meter.maxMs(PerfStage.ACQUIRE), meter.errors(PerfStage.STT), early,
-                !load.realSleep(), workers, meter.virtualSttMs());
+                !load.realSleep(), workers, meter.virtualSttMs(), meter.virtualMs(PerfStage.DEIDENT), load.deidentEnabled());
     }
 
     /**
@@ -627,9 +634,13 @@ public class PerfRunService {
         List<FileProcOutcome> done = r.outcomes().stream().filter(o -> o.status() != ProcStatus.SKIPPED).toList();
         double realSec = r.elapsedMs() / 1000d;
         List<Long> virtual = d.fastForward() ? d.virtualSttMs() : List.of();
-        long virtualTotalMs = virtual.stream().mapToLong(Long::longValue).sum();
+        List<Long> virtualDeid = d.fastForward() ? d.virtualDeidentMs() : List.of();
+        long virtualTotalMs = virtual.stream().mapToLong(Long::longValue).sum()
+                + virtualDeid.stream().mapToLong(Long::longValue).sum();
         double virtualSec = distribute(virtual, d.workers()) / 1000d;
-        double sec = realSec + virtualSec;
+        // 건당 비식별 처리 시간도 같은 식으로 — 워커에 나눈 가상 시간을 더한다(비식별 수행일 때만 적힌다)
+        double virtualDeidSec = distribute(virtualDeid, d.workers()) / 1000d;
+        double sec = realSec + virtualSec + virtualDeidSec;
         long processed = (long) r.successCnt() + r.failCnt();
         double realAvg = done.stream().mapToLong(FileProcOutcome::elapsedMs).average().orElse(0d);
         Map<String, Object> m = new LinkedHashMap<>();
@@ -639,6 +650,8 @@ public class PerfRunService {
         m.put("fastForward", d.fastForward());
         m.put("realSec", round(realSec, 2));
         m.put("virtualSttSec", round(virtualSec, 2));
+        m.put("virtualDeidentSec", round(virtualDeidSec, 2));
+        m.put("deidentEnabled", d.deidentEnabled());
         m.put("totalSec", round(sec, 2));
         m.put("avgMs", done.isEmpty() ? 0d : round(realAvg + (double) virtualTotalMs / done.size(), 1));
         m.put("tps", sec <= 0 ? 0d : round(processed / sec, 3));
@@ -647,7 +660,8 @@ public class PerfRunService {
         m.put("fail", r.failCnt());
         m.put("timeout", done.stream().filter(PerfRunService::isTimeout).count());
         m.put("skipped", r.skippedCnt());
-        m.put("stages", d.fastForward() ? withVirtualStt(d.stages(), virtual) : d.stages());
+        m.put("stages", d.fastForward()
+                ? withVirtual(withVirtual(d.stages(), PerfStage.STT, virtual), PerfStage.DEIDENT, virtualDeid) : d.stages());
         Map<String, Object> h = new LinkedHashMap<>();
         h.put("startMb", mb(d.heapStart()));
         h.put("endMb", mb(d.heapEnd()));
@@ -676,17 +690,24 @@ public class PerfRunService {
         return free.stream().mapToLong(Long::longValue).max().orElse(0L);
     }
 
-    /** 고속 모드 — STT 단계의 평균·최대를 기다리지 않은 처리 시간으로 바꿔 싣는다. */
-    private static List<Map<String, Object>> withVirtualStt(List<Map<String, Object>> stages, List<Long> virtual) {
+    /**
+     * 고속 모드 — 그 단계의 평균·최대에 기다리지 않은 처리 시간을 더해 싣는다.
+     * STT 는 실제로 0ms 라 가상 시간이 곧 처리 시간이고, 비식별은 커넥터 호출(실제) + 건당 비식별 처리 시간(가상)이다.
+     */
+    private static List<Map<String, Object>> withVirtual(List<Map<String, Object>> stages, PerfStage stage, List<Long> virtual) {
+        if (virtual.isEmpty()) {
+            return stages;
+        }
         List<Map<String, Object>> out = new ArrayList<>(stages.size());
         for (Map<String, Object> s : stages) {
-            if (!PerfStage.STT.name().equals(s.get("key"))) {
+            if (!stage.name().equals(s.get("key"))) {
                 out.add(s);
                 continue;
             }
             Map<String, Object> v = new LinkedHashMap<>(s);
+            double realAvg = stage == PerfStage.STT ? 0d : ((Number) s.getOrDefault("avgMs", 0d)).doubleValue();
             v.put("count", virtual.size());
-            v.put("avgMs", virtual.isEmpty() ? 0d : round(virtual.stream().mapToLong(Long::longValue).average().orElse(0d), 1));
+            v.put("avgMs", round(realAvg + virtual.stream().mapToLong(Long::longValue).average().orElse(0d), 1));
             v.put("maxMs", (double) virtual.stream().mapToLong(Long::longValue).max().orElse(0L));
             v.put("virtual", true);
             out.add(v);
@@ -794,6 +815,10 @@ public class PerfRunService {
         Map<?, ?> byStatus = t4.get("byStatus") instanceof Map<?, ?> b ? b : Map.of();
         long t4Success = num(byStatus.get("SUCCESS"));
         long t1Success = num(t1 == null ? null : t1.get("successCnt"));
+        // T5 — 비식별 단계를 통과한 파일마다 한 행(비식별 수행이든 단순 전달이든). = 성공 + 저장 단계 실패
+        Map<?, ?> t5 = (Map<?, ?>) db.getOrDefault("t5", Map.of());
+        long t5Rows = num(t5.get("total"));
+        long t5Expected = r.successCnt() + r.outcomes().stream().filter(o -> o.failedAt(FileProcOutcome.STEP_SEND)).count();
 
         c.put("t1Status", t1 == null ? null : t1.get("execStsCd"));
         c.put("t2Steps", t2.size());
@@ -803,7 +828,10 @@ public class PerfRunService {
         c.put("t4Expected", expected);
         c.put("t1Success", t1Success);
         c.put("t4Success", t4Success);
-        c.put("ok", running == 0 && dup.isEmpty() && t4Rows == expected && t1Success == t4Success);
+        c.put("t5Rows", t5Rows);
+        c.put("t5Expected", t5Expected);
+        c.put("t5BySolution", t5.get("bySolution"));
+        c.put("ok", running == 0 && dup.isEmpty() && t4Rows == expected && t1Success == t4Success && t5Rows == t5Expected);
         return c;
     }
 

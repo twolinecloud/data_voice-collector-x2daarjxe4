@@ -16,17 +16,17 @@ class PerfRequestTest {
 
     private static PerfRequest req(Integer meet, Integer phone, Integer conc, String mode, Long meetMs, Long phoneMs,
                                    Integer jitter, Long timeout) {
-        return new PerfRequest("T", meet, phone, 3, conc, mode, meetMs, phoneMs, jitter, timeout, null).withDefaults();
+        return new PerfRequest("T", meet, phone, 3, conc, mode, meetMs, phoneMs, jitter, timeout, null, null, null).withDefaults();
     }
 
     private static RampRequest ramp(int start, String mode, int value, int max) {
-        return new RampRequest(4, 4, 0, null, 0L, 0L, null, null, start, mode, value, max, 3, 60, true, null).withDefaults();
+        return new RampRequest(4, 4, 0, null, 0L, 0L, null, null, start, mode, value, max, 3, 60, true, null, null, null).withDefaults();
     }
 
     @Test
     @DisplayName("비우면 화면 기본값 — 접견 150 · 전화 150 · 기 STT 3% · 동시성 4 · 접견 180초 / 전화 120초 고정")
     void defaults() {
-        PerfRequest r = new PerfRequest(null, null, null, null, null, null, null, null, null, null, null).withDefaults();
+        PerfRequest r = new PerfRequest(null, null, null, null, null, null, null, null, null, null, null, null, null).withDefaults();
 
         assertThat(r.meetCount()).isEqualTo(150);
         assertThat(r.phoneCount()).isEqualTo(150);
@@ -56,9 +56,9 @@ class PerfRequestTest {
     @Test
     @DisplayName("기 STT 비율 0~100%")
     void sttPercentRange() {
-        assertThatThrownBy(() -> new PerfRequest("T", 5, 5, 101, 4, null, null, null, null, null, null).withDefaults().validate(500))
+        assertThatThrownBy(() -> new PerfRequest("T", 5, 5, 101, 4, null, null, null, null, null, null, null, null).withDefaults().validate(500))
                 .isInstanceOf(IllegalArgumentException.class);
-        new PerfRequest("T", 5, 5, 100, 4, null, null, null, null, null, null).withDefaults().validate(500);
+        new PerfRequest("T", 5, 5, 100, 4, null, null, null, null, null, null, null, null).withDefaults().validate(500);
     }
 
     @Test
@@ -115,7 +115,7 @@ class PerfRequestTest {
     @DisplayName("램프업 기본값 — 더하기 +1 · 접견 150 · 전화 150 · 워커 1 → 32 · 고속 모드")
     void rampDefaults() {
         RampRequest r = new RampRequest(null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null).withDefaults();
+                null, null, null, null, null, null, null, null, null, null).withDefaults();
         assertThat(r.stepMode()).isEqualTo("ADD");
         assertThat(r.stepValue()).isEqualTo(1);
         assertThat(r.meetCount()).isEqualTo(150);
